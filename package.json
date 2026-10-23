@@ -1,0 +1,19 @@
+{
+  "name": "ai-roleplay",
+  "version": "1.0.0",
+  "description": "AI Roleplaying Studio — character.ai alternative with multi-agent memory system, OpenAI-compatible API, iOS-style UI",
+  "type": "module",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node --watch server/index.js",
+    "test": "node tests/run-all.js",
+    "simulate": "node tests/simulate-memory.js"
+  },
+  "engines": {
+    "node": ">=22.5.0"
+  },
+  "dependencies": {
+    "express": "^5.1.0"
+  }
+}

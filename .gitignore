@@ -1,0 +1,19 @@
+# Dependencies
+node_modules/
+
+# Runtime data
+data/*.db
+data/*.db-wal
+data/*.db-shm
+
+# Env
+.env
+
+# Logs & temp
+*.log
+tests/*.txt
+.playwright-mcp/
+
+# OS
+.DS_Store
+Thumbs.db
