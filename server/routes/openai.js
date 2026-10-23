@@ -123,7 +123,7 @@ function sanitizeBody(body) {
     model, messages, temperature, max_tokens, top_p, stop, frequency_penalty,
     reasoning_effort, reasoning_format, response_format, stream, stream_options,
     // strip our custom fields
-    session_id, settings, generate_branches, branch_choice, roleplay,
+    session_id, settings, generate_branches, branch_choice, roleplay, world_id, is_opening,
     ...rest
   } = body;
   const out = { model: model || config.upstream.model, messages: messages || [], ...rest };
@@ -144,13 +144,15 @@ function sanitizeBody(body) {
 async function handleRoleplay(req, res, body, sessionIdRaw) {
   let sessionId = sessionIdRaw;
   const settings = body.settings || body.roleplay?.settings;
+  const worldId = body.world_id || body.roleplay?.world_id || settings?.world_id || null;
 
-  // session_id === 'new' (or missing + settings given) → create session
-  if ((sessionIdRaw === 'new' || sessionIdRaw === 'auto') && settings) {
-    const session = createSessionWithSettings({ title: settings.title, settings });
-    sessionId = session.id;
-  } else if (settings && !getSession(sessionId)) {
-    const session = createSessionWithSettings({ title: settings.title, settings });
+  // session_id === 'new'（或不存在 + 提供了 settings）→ 创建会话
+  if ((sessionIdRaw === 'new' || sessionIdRaw === 'auto') || (settings && !getSession(sessionIdRaw))) {
+    const session = createSessionWithSettings({
+      title: settings?.title || '未命名剧情',
+      worldId,
+      settings: settings || {},
+    });
     sessionId = session.id;
   }
   if (!getSession(sessionId)) {
@@ -193,11 +195,16 @@ async function handleRoleplay(req, res, body, sessionIdRaw) {
         prompt_tokens: result.usage?.prompt_tokens ?? 0,
         completion_tokens: result.usage?.completion_tokens ?? 0,
         total_tokens: result.usage?.total_tokens ?? 0,
+        prompt_tokens_details: {
+          cached_tokens: result.usage?.cached_tokens ?? 0,
+        },
       },
       roleplay: {
         session_id: sessionId,
         turn_no: result.turn_no,
         branches: result.branches?.branches || [],
+        usage: result.usage || null,
+        session_usage: result.sessionUsage || null,
       },
     });
   }

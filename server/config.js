@@ -1,6 +1,6 @@
 /**
  * Central configuration for AI Roleplay Studio.
- * Environment variables (or a .env file loaded via --env-file) override defaults.
+ * Environment variables (or a .env file) override defaults.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -18,36 +18,69 @@ export const config = {
     baseUrl: env.STEPFUN_BASE_URL || 'https://api.stepfun.com/step_plan/v1',
     apiKey: env.STEPFUN_API_KEY || '',
     model: env.STEPFUN_MODEL || 'step-5-preview',
-    timeoutMs: int(env.LLM_TIMEOUT_MS, 180000),
+    timeoutMs: int(env.LLM_TIMEOUT_MS, 300000),
     maxRetries: int(env.LLM_MAX_RETRIES, 2),
   },
 
   // ---- Context / memory budget ----
-  // Hard ceiling for assembled prompt tokens. Requirement: always < 200K.
+  //
+  // 关键设计：每一层都有「与剧情长度无关的固定上限」。
+  // 剧情推进 1000 轮，装配出来的提示词体积也不会增长 —— 溢出的是
+  // 摘要密度，不是层数。硬上限 200K 只是安全网，实际软目标 ~35K。
   context: {
     maxTokens: int(env.CONTEXT_MAX_TOKENS, 200000),
-    // soft target — assembler stops adding optional tiers at this point
-    softTokens: int(env.CONTEXT_SOFT_TOKENS, 170000),
-    // raw verbatim turns kept in context
+    softTokens: int(env.CONTEXT_SOFT_TOKENS, 52000),
+
+    // 每层 token 配额（软上限）。装配器按此逐层裁剪，不会互相挤占。
+    layerBudget: {
+      system: int(env.BUDGET_SYSTEM, 1500),      // 演绎契约（固定文本）
+      world: int(env.BUDGET_WORLD, 3000),        // 世界宪章 + 主角 + 卡司骨架
+      lore: int(env.BUDGET_LORE, 3000),          // 触发式世界词条
+      scene: int(env.BUDGET_SCENE, 900),         // 在场状态（时间/地点/人物/物品）
+      director: int(env.BUDGET_DIRECTOR, 700),   // 导演卡（当前节拍）
+      memory: int(env.BUDGET_MEMORY, 14000),     // 分层记忆总配额
+      recent: int(env.BUDGET_RECENT, 9000),      // 最近原文
+      retrieval: int(env.BUDGET_RETRIEVAL, 1500),// 检索召回
+      current: int(env.BUDGET_CURRENT, 2000),    // 本轮输入
+    },
+
+    // memory 层的内部再分配
+    memorySplit: {
+      reflections: 1400,   // 反思洞察（高阶结论）
+      summaries: 5600,     // 分层摘要
+      relations: 1600,     // 关系账本
+      threads: 900,        // 线索/伏笔账本
+      entities: 2600,      // 实体档案 + 事实
+      notes: 1900,         // 作者笔记（确定性记忆）
+    },
+
+    // 保留的原始回合数（还会按 recent 配额二次裁剪）
     recentRawTurns: int(env.RECENT_RAW_TURNS, 4),
-    // number of level-2 (arc) summaries kept in context
-    recentArcs: int(env.RECENT_ARCS, 8),
-    // retrieval: how many archive snippets to pull in
-    retrievalTopK: int(env.RETRIEVAL_TOP_K, 6),
-    retrievalMaxTokens: int(env.RETRIEVAL_MAX_TOKENS, 16000),
-    // summarization cadence
-    arcEvery: int(env.ARC_EVERY, 5),        // rounds per level-2 arc summary
-    sagaEvery: int(env.SAGA_EVERY, 5),      // arcs per level-3 saga summary
-    chronicleEvery: int(env.CHRONICLE_EVERY, 5), // sagas per level-4 chronicle
+    // 摘要层保留多少条最新 L2
+    recentArcs: int(env.RECENT_ARCS, 6),
+    // L1 摘要保留条数
+    recentRounds: int(env.RECENT_ROUNDS, 6),
+
+    // 检索
+    retrievalTopK: int(env.RETRIEVAL_TOP_K, 5),
+
+    // 词条触发扫描
+    loreScanDepth: int(env.LORE_SCAN_DEPTH, 8),        // 扫描最近几轮对话
+    loreRecursion: int(env.LORE_RECURSION, 1),         // 触发词条能否再触发词条
+
+    // 压缩节奏
+    arcEvery: int(env.ARC_EVERY, 6),
+    sagaEvery: int(env.SAGA_EVERY, 4),
+    chronicleEvery: int(env.CHRONICLE_EVERY, 4),
+    reflectEvery: int(env.REFLECT_EVERY, 5),           // 每 N 轮生成一次反思
   },
 
   // ---- Agent defaults (reasoning_effort: low | medium | high) ----
-  // 注意：step-5-preview 的推理过程计入 max_tokens（实测 low  effort 下
-  // 摘要类任务推理约 2500-3200 tok），因此每项预算都预留了推理空间。
+  // 注意：step-5-preview 的推理过程计入 max_tokens。
   agents: {
     narrator: {
       reasoningEffort: env.NARRATOR_EFFORT || 'high',
-      temperature: float(env.NARRATOR_TEMPERATURE, 0.85),
+      temperature: float(env.NARRATOR_TEMPERATURE, 0.88),
       maxTokens: int(env.NARRATOR_MAX_TOKENS, 12000),
       minTokens: int(env.NARRATOR_MIN_TOKENS, 1800),
     },
@@ -63,13 +96,20 @@ export const config = {
     },
   },
 
+  // ---- 可选：嵌入模型（用于语义检索）。留空则只用 BM25 + 实体图 ----
+  embed: {
+    enabled: Boolean(env.EMBED_API_KEY && env.EMBED_BASE_URL && env.EMBED_MODEL),
+    baseUrl: env.EMBED_BASE_URL || '',
+    apiKey: env.EMBED_API_KEY || '',
+    model: env.EMBED_MODEL || '',
+  },
+
   storage: {
     dbPath: env.DB_PATH || path.resolve(__dirname, '..', 'data', 'roleplay.db'),
   },
 
   web: {
-    // served from ../web
-    dir: path.resolve(__dirname, '..', '..', 'web'),
+    dir: path.resolve(__dirname, '..', 'web'),
   },
 };
 

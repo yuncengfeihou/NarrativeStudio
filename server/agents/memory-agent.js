@@ -1,72 +1,66 @@
 /**
- * 记忆 Agent：每轮回合结束后更新分层记忆。
+ * server/agents/memory-agent.js — 记忆 Agent
  *
- * 流程：
- *   1) chat() 调用 roundSummaryUserPrompt（response_format=json_object）得到 memoryUpdate JSON；
- *      解析容错链：整体 parse → 正则提取 {...} → 打捞（salvage）各字段 → 纯文本摘要降级，绝不抛错。
- *   2) store.addSummary 写 L1 摘要（无 round_summary 时用 narrative 前 500 字截断）。
- *   3) entities 逐个 store.upsertEntity（importance 缺省 0.6，character 类型 0.8）；
- *      facts 逐个 store.addFact（turn_no=turnNo）。
- *   4) 读旧 state，把 state_delta 深度合并（mergeState，代码内完成，不调 LLM）后 setState。
- *   5) 动态 import compressor 并 checkCompression；compressor 由其他开发者并行实现，
- *      文件缺失或执行失败只静默跳过，不影响返回。
+ * 每轮结束后：
+ *   1) 调 LLM 产出「本轮记忆包」（summary / entities / facts / state_delta / relations / threads）
+ *   2) L1 摘要落库；实体与事实 upsert
+ *   3) state_delta 用确定性代码合并（不调 LLM，零成本、可测试）
+ *   4) relations / threads 用相似度去重后 upsert
+ *   5) 触发层级压缩（compressor）
+ *   6) 每 N 轮触发反思（reflection）
  *
- * 注意：只有「JSON 解析失败」会降级；LLM 调用失败（LlmError）向上抛给 orchestrator。
+ * 容错：JSON 解析失败会走「打捞 → 降级」链，绝不抛错中断回合。
+ * 只有上游 LLM 调用失败（网络/5xx）才向上抛，由 orchestrator 决定是否重试。
  */
 import { config } from '../config.js';
 import { chat } from '../llm.js';
 import * as store from '../memory/store.js';
-import { memorySystemPrompt, roundSummaryUserPrompt } from '../prompts/memory.js';
+import {
+  memorySystemPrompt, roundMemoryUserPrompt, reflectionSystemPrompt, reflectionUserPrompt,
+} from '../prompts/memory.js';
 
-/** 降级摘要的最大长度（与契约「narrative 前 500 字截断」一致）。 */
 const MAX_SUMMARY_FALLBACK = 500;
 
-/** delta 中需要专门处理的键（其余键按标量/深合并处理）。 */
-const RESERVED_DELTA_KEYS = new Set(['inventory_add', 'inventory_remove', 'quests_update', 'threads_add', 'threads_resolve']);
+const RESERVED_DELTA_KEYS = new Set(['inventory_add', 'inventory_remove', 'quests_update']);
 
-/** state_delta 中可通过字符串正则打捞的标量键。 */
 const SALVAGE_STRING_KEYS = ['time', 'location', 'weather', 'last_hook'];
+const SALVAGE_ARRAY_KEYS = ['inventory_add', 'inventory_remove'];
 
-/** state_delta 中可通过字符串数组正则打捞的键。 */
-const SALVAGE_ARRAY_KEYS = ['inventory_add', 'inventory_remove', 'threads_add', 'threads_resolve'];
-
-/** characters 对象内不允许作为角色名的键（防误判）。 */
 const CHARACTER_NAME_DENY = new Set([
   'type', 'name', 'summary', 'attributes', 'entities', 'facts', 'branches', 'scene_summary',
   'state_delta', 'characters', 'quests', 'threads', 'inventory', 'round_summary', 'goal',
   'progress', 'status', 'subject', 'predicate', 'object', 'confidence', 'importance', 'id',
-  'title', 'description', 'tone', 'tension_delta', 'turn_no', 'level', 'turnFrom', 'turnTo',
-  'content', 'first_turn', 'last_turn', 'weather', 'time', 'location', 'last_hook',
+  'title', 'description', 'tone', 'tension_delta', 'turn_no', 'level', 'content',
+  'weather', 'time', 'location', 'last_hook', 'relations', 'from', 'to', 'kind', 'note',
+  'sentiment', 'action', 'weight', 'inventory_add', 'inventory_remove', 'quests_update',
 ]);
 
-/** 线索与任务的上限（防止状态机无界膨胀，挤占上下文预算）。 */
-const MAX_THREADS = 14;
+const MAX_THREADS = 16;
 const MAX_QUESTS = 8;
+const MAX_INVENTORY = 40;
+const MAX_RELATIONS = 60;
 
-/**
- * 线索去重阈值：两条线索的字符 bigram Jaccard 相似度超过该值即视为同一线索。
- * 0.62 是经验值——能合并「七年前东街往事与伍卿真实身份」与
- * 「七年前东街往事与伍卿身世（无纹玉佩…）」，但不会误合并「凌玥的旧伤」与「凌璇的旧识」。
- */
-const THREAD_SIMILARITY = 0.62;
+/** 相似度阈值：超过即视为同一条线索/目标。 */
+const SIMILARITY_THRESHOLD = 0.62;
 
-/** 把字符串切成字符 bigram 集合（中文短句相似度用）。 */
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 文本相似度（中文短句）                                                  */
+/* ══════════════════════════════════════════════════════════════════════ */
+
 function bigrams(s) {
-  const t = String(s || '').replace(/[\s，。、；：""''（）()《》【】]/g, '');
+  const t = String(s || '').replace(/[\s，。、；：""''（）()《》【】「」『』·…—\-]/g, '');
   const set = new Set();
   for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2));
   if (!set.size && t.length) set.add(t);
   return set;
 }
 
-/** 归一化：去标点、空白、括号内容，用于比对 */
 function normalize(s) {
   return String(s || '')
-    .replace(/[（(][^）)]*[）)]/g, '')          // 去掉括号补充说明
-    .replace(/[\s，。、；：""''「」『』（）()《》【】…—\-]/g, '');
+    .replace(/[（(][^）)]*[）)]/g, '')
+    .replace(/[\s，。、；：""''「」『』（）()《》【】…—\-·]/g, '');
 }
 
-/** 最长公共子串长度（O(n·m)，中文短句可接受） */
 function lcsLength(a, b) {
   if (!a || !b) return 0;
   const n = a.length;
@@ -90,14 +84,8 @@ function lcsLength(a, b) {
 }
 
 /**
- * 线索/目标相似度（0-1）：取「bigram Jaccard」与「最长公共子串占比」的较大值。
- *
- * 为什么两个指标都要：LLM 每次重写同一条线索时会**追加**限定语
- * （「七年前东街往事」→「七年前东街往事与伍卿真实身份」），
- * 这时 Jaccard 被长度差异拉低，但公共子串占比仍然很高。
- * 反过来，两条不同线索常常共享一两个常用词，Jaccard 更稳定。
- *
- * @returns {number} 0-1
+ * 相似度：取 bigram Jaccard 与最长公共子串占比的较大值。
+ * 前者稳定，后者能吸收「同一条线索被追加限定语」的情况。
  */
 export function similarity(a, b) {
   if (!a || !b) return 0;
@@ -105,23 +93,15 @@ export function similarity(a, b) {
   const nb = normalize(b);
   if (!na || !nb) return 0;
   if (na === nb) return 1;
-
   const A = bigrams(na);
   const B = bigrams(nb);
   let inter = 0;
   for (const x of A) if (B.has(x)) inter++;
   const jaccard = (A.size + B.size - inter) > 0 ? inter / (A.size + B.size - inter) : 0;
-
   const lcs = lcsLength(na, nb) / Math.min(na.length, nb.length);
   return Math.max(jaccard, lcs);
 }
 
-/**
- * 合并字符串列表并去重：新项与既有项高度相似时，保留**更长**的那条（信息更全）。
- * @param {string[]} base
- * @param {string[]} incoming
- * @param {number} max
- */
 function mergeDedup(base, incoming, max) {
   const out = base.slice();
   for (const raw of incoming) {
@@ -129,8 +109,7 @@ function mergeDedup(base, incoming, max) {
     if (!item) continue;
     let merged = false;
     for (let i = 0; i < out.length; i++) {
-      if (similarity(out[i], item) >= THREAD_SIMILARITY) {
-        // 保留信息量更大的一条；等长时保留旧的（稳定）
+      if (similarity(out[i], item) >= SIMILARITY_THRESHOLD) {
         if (item.length > out[i].length + 2) out[i] = item;
         merged = true;
         break;
@@ -138,24 +117,23 @@ function mergeDedup(base, incoming, max) {
     }
     if (!merged) out.push(item);
   }
-  // 超额时丢最旧（数组前部），保留最新状态
   return out.length > max ? out.slice(out.length - max) : out;
 }
 
-function isPlainObject(v) {
-  return typeof v === 'object' && v !== null && !Array.isArray(v);
-}
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 小工具                                                                */
+/* ══════════════════════════════════════════════════════════════════════ */
 
-function str(v) {
-  return typeof v === 'string' ? v : (v == null ? '' : String(v));
-}
+const isPlainObject = (v) => typeof v === 'object' && v !== null && !Array.isArray(v);
+const str = (v) => (typeof v === 'string' ? v : (v == null ? '' : String(v)));
+const asArray = (v) => (Array.isArray(v) ? v : (v == null ? [] : [v]));
+const asStringArray = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string') : []);
 
 function deepClone(v) {
   if (!isPlainObject(v) && !Array.isArray(v)) return v;
   return structuredClone(v);
 }
 
-/** 递归深合并：b 覆盖 a；两侧均为普通对象时逐键递归，null/undefined 视为未变化。 */
 function deepMerge(a, b) {
   const out = { ...a };
   for (const [k, v] of Object.entries(b)) {
@@ -165,59 +143,41 @@ function deepMerge(a, b) {
   return out;
 }
 
-/** 归一化为字符串数组（过滤非字符串）。 */
-function asStringArray(v) {
-  return Array.isArray(v) ? v.filter(x => typeof x === 'string') : [];
-}
-
-function asArray(v) {
-  if (Array.isArray(v)) return v;
-  return v == null ? [] : [v];
-}
+/* ══════════════════════════════════════════════════════════════════════ */
+/* state 合并（纯函数，可单测）                                            */
+/* ══════════════════════════════════════════════════════════════════════ */
 
 /**
- * 把 state_delta 深度合并进旧 state，产出完整新 state（纯函数，便于单测）。
- * 规则（对应 CONTRACTS.md 的 memory update / state schema）：
- *   - 标量字段（time/location/weather/tension/last_hook 及未知键）：delta 出现即覆盖；
- *   - characters：逐键深合并（同角色只更新变化字段，未提及角色保留）；
- *   - inventory_add 追加（去重）→ inventory_remove 移除（remove 优先）；
- *   - quests_update：按 goal 匹配更新 progress/status，未命中则 push；
- *   - threads_add 追加（去重）→ threads_resolve 移除；
- *   - 首轮 oldState 为 null 时以 delta 为基底。
- * @param {object|null} oldState
- * @param {object|null} delta
- * @returns {object} 完整新 state
+ * 把 state_delta 合并进旧 state。
+ * 规则：
+ *   - 标量（time/location/weather/tension/last_hook）出现即覆盖
+ *   - characters 逐键深合并，未提及的角色原样保留
+ *   - inventory_add 追加去重 → inventory_remove 移除（remove 优先）
+ *   - quests_update 按 goal 模糊匹配更新，未命中则新增
  */
 export function mergeState(oldState, delta) {
   const base = isPlainObject(oldState) ? oldState : {};
   const d = isPlainObject(delta) ? delta : {};
   const next = deepClone(base);
 
-  // 1) 标量与深合并字段（characters 等普通对象逐键合并；数组类 delta 键在下方处理）
   for (const [k, v] of Object.entries(d)) {
     if (v === undefined || v === null) continue;
     if (RESERVED_DELTA_KEYS.has(k)) continue;
-    if (isPlainObject(v) && isPlainObject(next[k])) {
-      next[k] = deepMerge(next[k], v);
-    } else {
-      next[k] = deepClone(v);
-    }
+    if (isPlainObject(v) && isPlainObject(next[k])) next[k] = deepMerge(next[k], v);
+    else next[k] = deepClone(v);
   }
 
-  // 2) inventory：先加后删（remove 优先），并对近义物品去重
   const inventory = Array.isArray(next.inventory) ? next.inventory.slice() : [];
-  const grew = mergeDedup(inventory, asStringArray(d.inventory_add), 60);
+  const grew = mergeDedup(inventory, asStringArray(d.inventory_add), MAX_INVENTORY);
   const removeSet = new Set(asStringArray(d.inventory_remove));
-  next.inventory = grew.filter(item => !removeSet.has(item));
+  next.inventory = grew.filter((item) => !removeSet.has(item));
 
-  // 3) quests：按 goal 匹配更新，未命中则追加；相同目标做模糊归一
-  const quests = Array.isArray(next.quests) ? next.quests.map(q => deepClone(q)) : [];
+  const quests = Array.isArray(next.quests) ? next.quests.map((q) => deepClone(q)) : [];
   for (const upd of asArray(d.quests_update)) {
     const goal = typeof upd === 'string' ? upd : upd?.goal;
     if (!goal || typeof goal !== 'string') continue;
-    // 精确匹配优先，其次模糊匹配（避免「查明七年前身份」与「查明七年前身份与往事」重复立项）
-    const hit = quests.find(q => q && q.goal === goal)
-      || quests.find(q => q && q.goal && similarity(q.goal, goal) >= THREAD_SIMILARITY);
+    const hit = quests.find((q) => q && q.goal === goal)
+      || quests.find((q) => q && q.goal && similarity(q.goal, goal) >= SIMILARITY_THRESHOLD);
     if (hit) {
       if (isPlainObject(upd)) {
         for (const [k, v] of Object.entries(upd)) {
@@ -230,84 +190,32 @@ export function mergeState(oldState, delta) {
     }
   }
   next.quests = quests.length > MAX_QUESTS
-    // 保留未完成的（active）在前，超额时优先丢弃已完成/失败的旧任务
-    ? [...quests.filter(q => q && q.status === 'active'), ...quests.filter(q => !q || q.status !== 'active')]
+    ? [...quests.filter((q) => q && q.status === 'active'), ...quests.filter((q) => !q || q.status !== 'active')]
       .slice(0, MAX_QUESTS)
     : quests;
 
-  // 4) threads：先加后回收，并做相似度去重（防止近义线索无限堆积）
-  const threads = Array.isArray(next.threads) ? next.threads.slice() : [];
-  const resolvedSet = new Set(asStringArray(d.threads_resolve));
-  const alive = threads.filter(t => !resolvedSet.has(t));
-  next.threads = mergeDedup(alive, asStringArray(d.threads_add), MAX_THREADS);
-
-  // 5) 规范化容器字段，保证 assembler 拿到完整结构
   next.characters = isPlainObject(next.characters) ? next.characters : {};
   if (!Array.isArray(next.inventory)) next.inventory = [];
   if (!Array.isArray(next.quests)) next.quests = [];
-  if (!Array.isArray(next.threads)) next.threads = [];
-
   return next;
 }
 
-/* --------------------------- JSON 解析与打捞 --------------------------- */
+/* ══════════════════════════════════════════════════════════════════════ */
+/* JSON 解析与打捞                                                         */
+/* ══════════════════════════════════════════════════════════════════════ */
 
-/** 尽力解析 JSON：整体 parse → 正则提取第一个 {...} 块。 */
 function tryParseJson(content) {
   if (typeof content !== 'string') return null;
   const text = content.trim();
   if (!text) return null;
-  try { return JSON.parse(text); } catch { /* 继续尝试提取 */ }
+  try { return JSON.parse(text); } catch { /* 继续 */ }
   const m = text.match(/\{[\s\S]*\}/);
   if (m) {
-    try { return JSON.parse(m[0]); } catch { /* 落入打捞路径 */ }
+    try { return JSON.parse(m[0]); } catch { /* 落到打捞 */ }
   }
   return null;
 }
 
-/** 括号配对扫描：取出文本中 key 对应数组里的「完整顶层对象」（容忍嵌套与截断）。 */
-function salvageArrayOfObjects(text, key) {
-  const ki = text.indexOf(`"${key}"`);
-  if (ki < 0) return [];
-  const bi = text.indexOf('[', ki);
-  if (bi < 0) return [];
-  const out = [];
-  let arrDepth = 0;
-  let objDepth = 0;
-  let start = -1;
-  for (let i = bi; i < text.length; i++) {
-    const ch = text[i];
-    if (ch === '[') {
-      arrDepth++;
-    } else if (ch === ']') {
-      arrDepth--;
-      if (arrDepth === 0) break;
-    } else if (ch === '{') {
-      objDepth++;
-      if (objDepth === 1 && arrDepth === 1 && start < 0) start = i;
-    } else if (ch === '}') {
-      objDepth--;
-      if (objDepth === 0 && start >= 0) {
-        try { out.push(JSON.parse(text.slice(start, i + 1))); } catch { /* 残缺对象，跳过 */ }
-        start = -1;
-      }
-    }
-  }
-  return out;
-}
-
-/** 打捞字符串标量："key": "value"（正确反转义）。 */
-function salvageStringValue(text, key) {
-  const re = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
-  const m = text.match(re);
-  if (!m) return null;
-  try { return JSON.parse(`"${m[1]}"`); } catch { return m[1]; }
-}
-
-/**
- * 修复模型输出中的非法 JSON：把字符串值内的原始控制字符（裸换行/制表符等）转义。
- * 幂等：已转义的文本再次经过不会双重转义。
- */
 function escapeRawControlCharsInStrings(text) {
   let out = '';
   let inStr = false;
@@ -320,7 +228,8 @@ function escapeRawControlCharsInStrings(text) {
       if (ch === '"') { out += ch; inStr = false; continue; }
       const code = ch.charCodeAt(0);
       if (code < 0x20) {
-        out += code === 0x0a ? '\\n' : code === 0x0d ? '\\r' : code === 0x09 ? '\\t' : `\\u${code.toString(16).padStart(4, '0')}`;
+        out += code === 0x0a ? '\\n' : code === 0x0d ? '\\r' : code === 0x09 ? '\\t'
+          : `\\u${code.toString(16).padStart(4, '0')}`;
         continue;
       }
       out += ch;
@@ -332,19 +241,53 @@ function escapeRawControlCharsInStrings(text) {
   return out;
 }
 
-/** 打捞被截断的字符串值（JSON 在字符串中途被切断，没有收尾引号）。片段过短则视为噪声。 */
+function salvageArrayOfObjects(text, key) {
+  const ki = text.indexOf(`"${key}"`);
+  if (ki < 0) return [];
+  const bi = text.indexOf('[', ki);
+  if (bi < 0) return [];
+  const out = [];
+  let arrDepth = 0;
+  let objDepth = 0;
+  let start = -1;
+  for (let i = bi; i < text.length; i++) {
+    const ch = text[i];
+    if (ch === '[') arrDepth++;
+    else if (ch === ']') {
+      arrDepth--;
+      if (arrDepth === 0) break;
+    } else if (ch === '{') {
+      objDepth++;
+      if (objDepth === 1 && arrDepth === 1 && start < 0) start = i;
+    } else if (ch === '}') {
+      objDepth--;
+      if (objDepth === 0 && start >= 0) {
+        try { out.push(JSON.parse(text.slice(start, i + 1))); } catch { /* 残缺对象跳过 */ }
+        start = -1;
+      }
+    }
+  }
+  return out;
+}
+
+function salvageStringValue(text, key) {
+  const re = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)"`);
+  const m = text.match(re);
+  if (!m) return null;
+  try { return JSON.parse(`"${m[1]}"`); } catch { return m[1]; }
+}
+
 function salvageTruncatedString(text, key) {
   const re = new RegExp(`"${key}"\\s*:\\s*"([\\s\\S]+)$`);
   const m = text.match(re);
   if (!m) return null;
   let v = m[1];
-  if (v.endsWith('\\')) v = v.slice(0, -1);   // 去掉未完成的转义
-  v = v.replace(/["'\]},:\s]+$/, '');          // 去掉尾部 JSON 结构字符
-  if (v.length < 20) return null;              // 片段太短没有摘要价值，交还给降级链
+  if (v.endsWith('\\')) v = v.slice(0, -1);
+  v = v.replace(/["'\]},:\s]+$/, '');
+  if (v.length < 20) return null;
   try { return JSON.parse(`"${v}"`); } catch { return v; }
 }
 
-/** 打捞字符串数组："key": ["a","b"]（跳过字符串内的 ]）。 */
 function salvageStringArray(text, key) {
   const ki = text.indexOf(`"${key}"`);
   if (ki < 0) return [];
@@ -375,7 +318,6 @@ function salvageStringArray(text, key) {
   return out;
 }
 
-/** 打捞 characters 对象："名字": {mood/status/location...}（仅在 "characters" 之后的窗口内）。 */
 function salvageCharacters(text) {
   const ki = text.indexOf('"characters"');
   if (ki < 0) return {};
@@ -386,30 +328,28 @@ function salvageCharacters(text) {
   while ((m = re.exec(window))) {
     const name = m[1];
     if (CHARACTER_NAME_DENY.has(name)) continue;
-    if (!/"(?:mood|status|activity|posture)"\s*:/.test(m[2])) continue;
+    if (!/"(?:mood|status|activity)"\s*:/.test(m[2]) && !/"location"\s*:/.test(m[2])) continue;
     try { out[name] = JSON.parse(`{${m[2]}}`); } catch { /* 跳过 */ }
   }
   return out;
 }
 
-/**
- * 打捞 memoryUpdate 各字段（整体 JSON 损坏/带尾部杂质时的中间降级层）。
- * @param {string} text LLM 原始输出
- * @returns {{round_summary: string, entities: Array, facts: Array, state_delta: object}|null}
- */
 function salvageMemoryUpdate(text) {
   if (!text || !text.includes('"round_summary"')) return null;
 
-  // 先把 round_summary 的字符串正文屏蔽成等长空格，避免摘要里的 "time" 等字样被误判为字段
   const masked = text.replace(/"round_summary"\s*:\s*"(?:[^"\\]|\\.)*"/, (m) => ' '.repeat(m.length));
 
   const round_summary = salvageStringValue(text, 'round_summary')
-    || salvageTruncatedString(text, 'round_summary')
-    || '';
+    || salvageTruncatedString(text, 'round_summary') || '';
+
   const entities = salvageArrayOfObjects(masked, 'entities')
-    .filter(o => isPlainObject(o) && typeof o.type === 'string' && typeof o.name === 'string');
+    .filter((o) => isPlainObject(o) && typeof o.type === 'string' && typeof o.name === 'string');
   const facts = salvageArrayOfObjects(masked, 'facts')
-    .filter(o => isPlainObject(o) && typeof o.subject === 'string' && typeof o.predicate === 'string');
+    .filter((o) => isPlainObject(o) && typeof o.subject === 'string' && typeof o.predicate === 'string');
+  const relations = salvageArrayOfObjects(masked, 'relations')
+    .filter((o) => isPlainObject(o) && typeof o.from === 'string' && typeof o.to === 'string');
+  const threads = salvageArrayOfObjects(masked, 'threads')
+    .filter((o) => isPlainObject(o) && typeof o.title === 'string' && o.title);
 
   const state_delta = {};
   for (const k of SALVAGE_STRING_KEYS) {
@@ -425,19 +365,14 @@ function salvageMemoryUpdate(text) {
   const characters = salvageCharacters(masked);
   if (Object.keys(characters).length) state_delta.characters = characters;
   const quests = salvageArrayOfObjects(masked, 'quests_update')
-    .filter(o => isPlainObject(o) && typeof o.goal === 'string' && o.goal);
+    .filter((o) => isPlainObject(o) && typeof o.goal === 'string' && o.goal);
   if (quests.length) state_delta.quests_update = quests;
 
-  if (!round_summary && !entities.length && !facts.length && !Object.keys(state_delta).length) return null;
-  return { round_summary, entities, facts, state_delta };
+  if (!round_summary && !entities.length && !facts.length && !Object.keys(state_delta).length
+    && !relations.length && !threads.length) return null;
+  return { round_summary, entities, facts, state_delta, relations, threads };
 }
 
-/**
- * 解析 memoryUpdate JSON；解析容错链：整体 parse → 正则提取 → 打捞 → 纯文本摘要，绝不抛错。
- * @param {string} content   LLM 原始输出
- * @param {string} narrative 本轮剧情正文（最终降级时截断取用）
- * @returns {{round_summary: string, entities: Array, facts: Array, state_delta: object}}
- */
 export function parseMemoryUpdate(content, narrative) {
   const text = typeof content === 'string' ? escapeRawControlCharsInStrings(content) : '';
   const parsed = tryParseJson(text);
@@ -447,44 +382,62 @@ export function parseMemoryUpdate(content, narrative) {
       entities: Array.isArray(parsed.entities) ? parsed.entities : [],
       facts: Array.isArray(parsed.facts) ? parsed.facts : [],
       state_delta: isPlainObject(parsed.state_delta) ? parsed.state_delta : {},
+      relations: Array.isArray(parsed.relations) ? parsed.relations : [],
+      threads: Array.isArray(parsed.threads) ? parsed.threads : [],
     };
   }
 
-  // 中间降级：打捞已生成的字段（LLM 输出 JSON 被截断/带尾部杂质时最大程度保住记忆）
   const salvaged = salvageMemoryUpdate(text);
   if (salvaged) return salvaged;
 
-  // 最终降级：LLM 未输出合法 JSON 且无可打捞内容。若产出的是可读文本摘要则沿用，否则用 narrative 前 500 字截断。
   const trimmed = text.trim();
   const round_summary = (trimmed && !trimmed.startsWith('{') && !trimmed.startsWith('[') && trimmed.length >= 30)
     ? trimmed.slice(0, MAX_SUMMARY_FALLBACK)
     : String(narrative || '').slice(0, MAX_SUMMARY_FALLBACK);
-  return { round_summary, entities: [], facts: [], state_delta: {} };
+  return { round_summary, entities: [], facts: [], state_delta: {}, relations: [], threads: [] };
 }
 
+/** 解析反思输出（同样容错）。 */
+export function parseReflections(content) {
+  const text = escapeRawControlCharsInStrings(String(content || ''));
+  const parsed = tryParseJson(text);
+  const raw = Array.isArray(parsed?.reflections)
+    ? parsed.reflections
+    : salvageArrayOfObjects(text, 'reflections');
+  return raw
+    .filter((r) => r && typeof r.content === 'string' && r.content.trim())
+    .map((r) => ({
+      kind: ['insight', 'relationship', 'theme', 'rule'].includes(r.kind) ? r.kind : 'insight',
+      content: r.content.trim().slice(0, 160),
+    }))
+    .slice(0, 3);
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 主流程                                                                */
+/* ══════════════════════════════════════════════════════════════════════ */
+
 /**
- * 更新一轮记忆（summary / entities / facts / state / 触发压缩）。
- * @param {object} opts
- * @param {object} opts.session       会话对象（取 session.id）
- * @param {number} opts.turnNo        回合号
- * @param {string} [opts.playerText]  玩家行动原文
- * @param {string} opts.narrative     本轮剧情正文
- * @param {object} [opts.branchChoice] 玩家选择的分支（如有）
- * @param {object} [opts.options]     覆盖 {temperature, maxTokens, reasoningEffort, model}
- * @param {AbortSignal} [opts.signal]
- * @returns {Promise<{round_summary: string, entities: number, facts: number, compressed: object|null}>}
+ * 更新一轮记忆。
+ * @returns {Promise<{round_summary, entities, facts, relations, threads, reflection, compressed, usage}>}
  */
-export async function updateMemory({ session, turnNo, playerText, narrative, branchChoice, options = {}, signal } = {}) {
+export async function updateMemory({
+  session, turnNo, playerText, narrative, branchChoice, options = {}, signal,
+}) {
   const cfg = config.agents.memory;
   const sessionId = session?.id;
   if (!sessionId) throw new Error('updateMemory: session.id 不能为空');
   const no = Number.isFinite(Number(turnNo)) ? Number(turnNo) : store.getMaxTurnNo(sessionId) + 1;
 
-  // 1) LLM 生成结构化 memoryUpdate（LlmError 向上抛；解析失败按容错链降级）
+  const priorThreads = store.getThreads(sessionId, { status: 'open', limit: 12 }).map((t) => t.title);
+
   const res = await chat({
     messages: [
       { role: 'system', content: memorySystemPrompt() },
-      { role: 'user', content: roundSummaryUserPrompt({ turnNo: no, playerText, branchChoice, narrative }) },
+      {
+        role: 'user',
+        content: roundMemoryUserPrompt({ turnNo: no, playerText, branchChoice, narrative, priorThreads }),
+      },
     ],
     temperature: options.temperature ?? cfg.temperature,
     maxTokens: options.maxTokens ?? cfg.maxTokens,
@@ -493,27 +446,28 @@ export async function updateMemory({ session, turnNo, playerText, narrative, bra
     responseFormat: { type: 'json_object' },
     signal,
   });
-  const memoryUpdate = parseMemoryUpdate(res.content, narrative);
 
-  // 2) L1 摘要（无 round_summary 时用 narrative 前 500 字截断）
-  const roundSummary = memoryUpdate.round_summary || String(narrative || '').slice(0, MAX_SUMMARY_FALLBACK);
+  const update = parseMemoryUpdate(res.content, narrative);
+
+  /* ---- L1 摘要 ---- */
+  const roundSummary = update.round_summary || String(narrative || '').slice(0, MAX_SUMMARY_FALLBACK);
   store.addSummary(sessionId, { level: 1, turnFrom: no, turnTo: no, content: roundSummary });
 
-  // 3) entities / facts（单条失败只告警，不阻断整轮）
+  /* ---- 实体 ---- */
   let entityCount = 0;
-  for (const e of memoryUpdate.entities) {
+  for (const e of update.entities) {
     const type = str(e?.type).trim();
     const name = str(e?.name).trim();
     if (!type || !name) continue;
     try {
       store.upsertEntity(sessionId, {
-        type,
-        name,
+        type, name,
         summary: str(e.summary).trim(),
         attributes: isPlainObject(e.attributes) ? e.attributes : {},
         first_turn: Number.isFinite(Number(e.first_turn)) ? Number(e.first_turn) : no,
         last_turn: Number.isFinite(Number(e.last_turn)) ? Number(e.last_turn) : no,
-        importance: Number.isFinite(Number(e.importance)) ? Number(e.importance) : (type === 'character' ? 0.8 : 0.6),
+        importance: Number.isFinite(Number(e.importance)) ? Number(e.importance)
+          : (type === 'character' ? 0.8 : 0.6),
       });
       entityCount++;
     } catch (err) {
@@ -521,41 +475,175 @@ export async function updateMemory({ session, turnNo, playerText, narrative, bra
     }
   }
 
+  /* ---- 事实 ---- */
   let factCount = 0;
-  for (const f of memoryUpdate.facts) {
+  for (const f of update.facts) {
     const subject = str(f?.subject).trim();
     const predicate = str(f?.predicate).trim();
     const object = str(f?.object).trim();
     if (!subject || !predicate || !object) continue;
     try {
       store.addFact(sessionId, {
-        subject,
-        predicate,
-        object,
-        turn_no: no,
+        subject, predicate, object, turn_no: no,
         confidence: Number.isFinite(Number(f.confidence)) ? Number(f.confidence) : 0.9,
       });
       factCount++;
     } catch (err) {
-      console.warn(`[memory-agent] addFact 失败（${subject}/${predicate}）：${err?.message || err}`);
+      console.warn(`[memory-agent] addFact 失败：${err?.message || err}`);
     }
   }
 
-  // 4) state 深度合并（代码内完成，不调 LLM）；首轮旧 state 为 null 时以 delta 为基底
+  /* ---- 关系账本 ---- */
+  let relationCount = 0;
+  for (const r of update.relations) {
+    const from = str(r?.from).trim();
+    const to = str(r?.to).trim();
+    if (!from || !to || from === to) continue;
+    try {
+      store.upsertRelation(sessionId, {
+        from, to,
+        kind: str(r.kind).trim(),
+        sentiment: Math.max(-1, Math.min(1, Number(r.sentiment) || 0)),
+        note: str(r.note).trim(),
+        turn_no: no,
+      });
+      relationCount++;
+    } catch (err) {
+      console.warn(`[memory-agent] upsertRelation 失败：${err?.message || err}`);
+    }
+  }
+
+  /* ---- 线索账本 ---- */
+  let threadCount = 0;
+  for (const t of update.threads) {
+    const title = str(t?.title).trim();
+    if (!title) continue;
+    const action = str(t.action).trim();
+    try {
+      if (action === 'resolve') {
+        // 先尝试精确标题，再用相似度匹配「同一句话的小幅改写」
+        const open = store.getThreads(sessionId, { status: 'open', limit: 50 });
+        const hit = open.find((x) => x.title === title)
+          || open.find((x) => similarity(x.title, title) >= SIMILARITY_THRESHOLD);
+        if (hit) {
+          store.upsertThread(sessionId, { title: hit.title, status: 'resolved', resolved_turn: no });
+          threadCount++;
+        }
+      } else {
+        const open = store.getThreads(sessionId, { status: 'open', limit: 50 });
+        const hit = open.find((x) => x.title === title)
+          || open.find((x) => similarity(x.title, title) >= SIMILARITY_THRESHOLD);
+        store.upsertThread(sessionId, {
+          title: hit ? hit.title : title,
+          status: 'open',
+          weight: Number.isFinite(Number(t.weight)) ? Number(t.weight) : 0.5,
+          note: str(t.note).trim(),
+          planted_turn: hit ? hit.planted_turn : no,
+        });
+        threadCount++;
+      }
+    } catch (err) {
+      console.warn(`[memory-agent] upsertThread 失败：${err?.message || err}`);
+    }
+  }
+
+  // 线索上限：超出时优先丢权重最低、最老的
+  const allThreads = store.getThreads(sessionId, { limit: 999 });
+  const openThreads = allThreads.filter((x) => x.status === 'open');
+  if (openThreads.length > MAX_THREADS) {
+    const keep = openThreads
+      .slice()
+      .sort((a, b) => (b.weight - a.weight) || (b.updated_at - a.updated_at))
+      .slice(0, MAX_THREADS);
+    const keepIds = new Set(keep.map((x) => x.id));
+    for (const x of openThreads) {
+      if (!keepIds.has(x.id)) store.upsertThread(sessionId, { title: x.title, status: 'abandoned' });
+    }
+  }
+
+  // 关系上限
+  const rels = store.getRelations(sessionId, { limit: 999 });
+  if (rels.length > MAX_RELATIONS) {
+    const sortBy = rels.slice().sort((a, b) => (Math.abs(b.sentiment) - Math.abs(a.sentiment)) || (b.turn_no - a.turn_no));
+    for (const r of sortBy.slice(MAX_RELATIONS)) store.deleteRelation(sessionId, r.id);
+  }
+
+  /* ---- state 合并（代码内，确定性） ---- */
   const oldSnap = store.getState(sessionId);
-  const newState = mergeState(oldSnap?.state ?? null, memoryUpdate.state_delta);
+  const newState = mergeState(oldSnap?.state ?? null, update.state_delta);
   store.setState(sessionId, no, newState);
 
-  // 5) 层级压缩：compressor 并行开发中，动态 import + try/catch，失败不影响返回
+  /* ---- 层级压缩 ---- */
   let compressed = null;
   try {
     const mod = await import('../memory/compressor.js');
     if (typeof mod?.checkCompression === 'function') {
       compressed = await mod.checkCompression(sessionId, no);
     }
-  } catch {
-    // compressor 尚未就绪或执行失败：静默跳过
+  } catch { /* 压缩失败不阻断 */ }
+
+  /* ---- 反思（每 N 轮） ---- */
+  let reflection = null;
+  const every = config.context.reflectEvery;
+  if (every > 0 && no % every === 0) {
+    try {
+      reflection = await runReflection({ session, turnNo: no, signal });
+    } catch (err) {
+      console.warn(`[memory-agent] 反思失败（turn ${no}）：${err?.message || err}`);
+    }
   }
 
-  return { round_summary: roundSummary, entities: entityCount, facts: factCount, compressed };
+  return {
+    round_summary: roundSummary,
+    entities: entityCount,
+    facts: factCount,
+    relations: relationCount,
+    threads: threadCount,
+    reflection,
+    compressed,
+    usage: res.usage || null,
+  };
+}
+
+/**
+ * 生成反思：回看最近若干条 L1/L2 摘要，提炼跨轮判断。
+ * 失败返回 null（不抛错）。
+ */
+export async function runReflection({ session, turnNo, signal }) {
+  const sessionId = session.id;
+  const window = Math.max(6, (config.context.reflectEvery || 5) * 2);
+  const from = Math.max(1, turnNo - window + 1);
+  const summaries = store.getSummaries(sessionId, { level: 1, archived: 0 })
+    .filter((s) => s.turn_to >= from && s.turn_to <= turnNo);
+  if (summaries.length < 3) return null;
+
+  const prior = store.getReflections(sessionId, { limit: 8 }).map((r) => r.content);
+
+  const res = await chat({
+    messages: [
+      { role: 'system', content: reflectionSystemPrompt() },
+      {
+        role: 'user',
+        content: reflectionUserPrompt({
+          turnFrom: from, turnTo: turnNo, summaries, priorReflections: prior,
+        }),
+      },
+    ],
+    temperature: 0.4,
+    maxTokens: 2500,
+    reasoningEffort: 'low',
+    responseFormat: { type: 'json_object' },
+    signal,
+  });
+
+  const items = parseReflections(res.content);
+  if (!items.length) return null;
+  for (const it of items) {
+    store.addReflection(sessionId, { turn_from: from, turn_to: turnNo, kind: it.kind, content: it.content });
+  }
+  // 反思上限 24 条，超出丢最老的
+  const all = store.getReflections(sessionId, { limit: 999 });
+  for (const r of all.slice(0, Math.max(0, all.length - 24))) store.deleteReflection(sessionId, r.id);
+
+  return items;
 }

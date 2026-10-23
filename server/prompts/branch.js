@@ -1,13 +1,10 @@
 /**
- * 剧情分支 Agent（branch）提示词构建。
- * 纯字符串拼装，可安全单测。输出约定为纯 JSON（调用方使用 response_format=json_object）。
+ * server/prompts/branch.js — 剧情分支 Agent 提示词
  *
- * 导出：
- *   branchSystemPrompt(session)                        —— system prompt
- *   branchUserPrompt({sceneSummary, lastNarrative, state}) —— user prompt
+ * 分支的作用不是「给四个选项」，而是**把剧情往不同方向推**。
+ * 所以每个分支必须写清：这一步具体做什么、会撞上谁的意志、赌注是什么。
  */
 
-/** tone 枚举（与 CONTRACTS.md 的 branch option 一致）。 */
 export const BRANCH_TONES = ['激进', '谨慎', '探索', '情感', '智取', '诡道'];
 
 /** 截断过长的最近剧情，只保留结尾（钩子在结尾），控制 token。 */
@@ -18,67 +15,69 @@ function tailOf(text, maxChars) {
 }
 
 /**
- * system prompt：规定身份、输出 schema、选项质量标准。
- * @param {object} session
- * @returns {string}
+ * @param {object|null} world 世界卡（取 card.cast 做人物口吻提示）
  */
-export function branchSystemPrompt(session) {
-  const s = session?.settings || {};
-  const title = s.title || '未命名剧情';
-  const worldview = (s.worldview || '（未提供）').slice(0, 600);
-  const playerRole = s.player_role || '（未设定）';
-  const characters = Array.isArray(s.characters) && s.characters.length
-    ? s.characters.map(c => `${c.name}（${c.role || '身份不明'}，口吻：${c.voice || '—'}）`).join('；')
-    : '（未提供）';
-  const rules = (s.rules || '').slice(0, 400);
+export function branchSystemPrompt(world) {
+  const card = world?.card || {};
+  const title = card.title || '未命名剧情';
+  const genre = Array.isArray(card.genre) && card.genre.length ? card.genre.join('、') : '';
+  const cast = Array.isArray(card.cast) && card.cast.length
+    ? card.cast.slice(0, 10).map((c) => `${c.name}（${c.role || '身份不明'}）`).join('；')
+    : '';
 
   return `# 身份
-你是互动剧情项目的「分支设计 Agent」：依据当前局势、状态快照与最近剧情，为玩家生成下一轮的可选走向。你设计的是「路」，不是「剧情本身」。
+你是互动剧情的「走向设计者」。你不写正文，你只设计**玩家此刻可以走的路**。
 
-# 作品基调（仅用于把握风格，不要复述给玩家）
-- 标题：${title}
-- 世界观：${worldview}
-- 玩家角色：${playerRole}
-- 登场角色：${characters}
-${rules ? `- 作者规则（节选）：${rules}` : ''}
+# 作品
+《${title}》${genre ? `｜${genre}` : ''}
+${cast ? `主要人物：${cast}` : ''}
 
-# 输出要求（硬性，违反即失败）
-1. 只输出一个纯 JSON 对象：禁止 Markdown 代码块、禁止解释文字、禁止前后缀（接口使用 response_format=json_object）。
-2. JSON schema 严格如下：
+# 好分支的四条标准
+1. **可执行**：是主角此刻真的有条件做的事。不能是「远赴千里查真相」这种要先挪动半张地图的选项。
+2. **有赌注**：每条都要有明确的风险或代价。没有代价的选项不是选择，是背景板。
+3. **有分歧**：四条指向四种不同的后果——不同的敌人、不同的盟友、不同的代价。不要四条都通向同一个结果。
+4. **贴人物**：符合主角的能力边界与性格。他不会武功就不能「一招制敌」；他嘴硬心软，「低头求人」才是一条有张力的选项。
+
+# 输出格式（硬性）
+只输出一个纯 JSON 对象，禁止 Markdown：
 {
   "branches": [
     {
-      "id": "b1",
-      "title": "不超过12个字的短标题",
-      "description": "50-120字的剧情走向描述：写清玩家大致会在什么时间/地点采取什么动作，以及可能引发的后果",
+      "title": "不超过 10 个字，动宾结构，如「先认下这门亲」",
+      "description": "40-90 字。写清这一步具体怎么做、会碰到谁的意志、赌注是什么。**不写结果**。",
       "tone": "激进|谨慎|探索|情感|智取|诡道",
-      "tension_delta": 0.1
+      "tension_delta": 0.15
     }
   ],
-  "scene_summary": "当前局势的一句话概括"
-}
-3. branches 固定 3-4 个选项；tone 必须多样，至少覆盖三种不同玩法风格（从「激进/谨慎/探索/情感/智取/诡道」中选取），可以包含一个「高风险高回报」选项（tension_delta 显著为正）。
-4. 选项必须具体：包含时间、地点、动作、对象中的至少三项；拒绝「继续前进」「随机应变」「静观其变」这类空泛表述。
-5. 选项必须基于给定的状态快照与最近剧情生成，与世界内事实、人物状态一致；不得引入与状态矛盾的地点或物品。
-6. tension_delta 取值约 -0.2 ~ 0.3，表示选择该选项后局势紧张度的变化；保守选项可为负。
-7. 不要替玩家做决定：选项是并列的可走之路，不写「玩家一定会成功/失败」的结论，也不在选项里替玩家说出台词。
-8. id 依次为 b1、b2、b3……并按推荐程度排序（b1 为最自然、最契合当前局势的走向）。`;
+  "scene_summary": "20-40 字，一句话点出此刻的局势与压力来源"
 }
 
-/**
- * user prompt：喂入当前局势、最近剧情结尾、状态快照。
- * @param {object} opts
- * @param {string} [opts.sceneSummary]  当前局势一句话
- * @param {string} [opts.lastNarrative] 最近一轮剧情正文（自动截断保留结尾）
- * @param {object|null} [opts.state]    状态快照（CONTRACTS.md 的 state schema）
- * @returns {string}
- */
-export function branchUserPrompt({ sceneSummary, lastNarrative, state } = {}) {
-  const parts = ['请基于以下信息，生成下一轮的分支选项（3-4 个，tone 多样）。'];
-  if (sceneSummary) parts.push(`【当前局势】${sceneSummary}`);
-  const tail = tailOf(lastNarrative, 1500);
-  if (tail) parts.push(`【最近剧情·结尾处】\n${tail}`);
-  if (state && typeof state === 'object') parts.push(`【状态快照】\n${JSON.stringify(state)}`);
-  parts.push('只输出符合 schema 的纯 JSON，不要任何其他文字。');
-  return parts.join('\n\n');
+3-4 条分支，tone 尽量不重复。tension_delta 取 -0.5 到 0.5：缓和为负，激化为正。
+
+# 语气禁令
+不要「A 选项 / B 选项」的模板腔；不要「你可以……或者……」；不要出现任何元叙述；
+不要在描述里剧透后续会如何，只写「他打算做什么」。`;
+}
+
+export function branchUserPrompt({ sceneSummary, lastNarrative, state, present, director }) {
+  const parts = [];
+  if (director) {
+    parts.push(`【本幕】${director.title}${director.goal ? `｜要达成：${director.goal}` : ''}`);
+  }
+  if (sceneSummary) parts.push(`【此刻局势】${sceneSummary}`);
+  if (present?.length) {
+    parts.push(`【在场人物】${present.map((c) => `${c.name}${c.role ? `（${c.role}）` : ''}`).join('、')}`);
+  }
+  if (state && typeof state === 'object') {
+    const bits = [];
+    if (state.time) bits.push(`时间 ${state.time}`);
+    if (state.location) bits.push(`地点 ${state.location}`);
+    if (typeof state.tension === 'number') bits.push(`张力 ${state.tension.toFixed(2)}`);
+    if (Array.isArray(state.inventory) && state.inventory.length) bits.push(`随身 ${state.inventory.slice(0, 8).join('、')}`);
+    if (bits.length) parts.push(`【状态】${bits.join('｜')}`);
+  }
+  const tail = tailOf(lastNarrative, 1400);
+  if (tail) parts.push(`【刚刚发生的这一幕·结尾】\n${tail}`);
+  parts.push('据此给出主角此刻可以采取的 3-4 条走向，按 schema 输出纯 JSON。');
+  return parts.filter(Boolean).join('\n\n');
 }

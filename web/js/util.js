@@ -193,6 +193,17 @@ export function fmtTokens(n) {
   return (v / 1_000_000).toFixed(1).replace(/\.0$/, '') + 'M';
 }
 
+/** 毫秒 → 人类可读时长：820ms / 3.4s / 1m12s */
+export function fmtDuration(ms) {
+  const v = Number(ms);
+  if (!Number.isFinite(v) || v < 0) return '—';
+  if (v < 1000) return `${Math.round(v)}ms`;
+  if (v < 60_000) return `${(v / 1000).toFixed(1)}s`;
+  const m = Math.floor(v / 60_000);
+  const s = Math.round((v % 60_000) / 1000);
+  return `${m}m${String(s).padStart(2, '0')}s`;
+}
+
 export function fmtPercent(ratio, digits = 0) {
   const r = Math.max(0, Math.min(1, Number(ratio) || 0));
   return `${(r * 100).toFixed(digits)}%`;

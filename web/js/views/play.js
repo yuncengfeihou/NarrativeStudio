@@ -1,101 +1,86 @@
 /**
- * views/chat.js — 对话视图（核心）
+ * views/play.js — 演绎视图
  *
- * 阅读优先的排版：旁白是全宽正文，玩家是右侧气泡。
- * 功能：
- *  - SSE 流式演绎（reasoning / narrative 增量），思考过程可折叠
- *  - 分支选项卡片，选中后可发送或自由输入
- *  - 回合导航、跳转最新、消息级操作（复制/重写/回滚/编辑）
- *  - 记忆面板入口（导航栏环形进度条）
- *  - 图片输入、停止生成、错误重试
+ * 阅读优先：旁白是全宽正文，玩家行动是右侧气泡。
+ * 每一轮旁白下方有 token 遥测（首字/用时/输入/输出/速度/缓存）。
  */
 
 import {
-  $, $$, el, clear, formatClock, formatTime, firstChar, hueFromString, avatarBackground,
-  copyToClipboard, readAsDataURL, isNearBottom, debounce, fmtTokens, truncate,
+  $, el, clear, formatClock, fmtTokens, fmtPercent, isNearBottom, readAsDataURL,
+  copyToClipboard, fmtDuration,
 } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import {
-  navigate, openActionSheet, openSheet, openPopover, confirmDialog, toast,
-  showLoading, hideLoading,
+  navigate, openActionSheet, openSheet, confirmDialog, toast, showLoading, hideLoading,
 } from '../app.js';
-import { syncActive } from '../sidebar.js';
 import { ui } from '../store.js';
-import { openMemoryPanel, buildRing } from '../panels/memory.js';
+import { openMemoryPanel } from '../panels/memory.js';
 import { formatNarrative } from '../markdown.js';
+import { usageBar, buildRing, hueTint } from '../ui-kit.js';
 
-const TONE_EMOJI = { 激进: '⚔', 谨慎: '◈', 探索: '⌖', 情感: '♡', 智取: '◐', 诡道: '☾' };
+const TONE_MARK = { 激进: '!', 谨慎: '·', 探索: '?', 情感: '♡', 智取: '○', 诡道: '△' };
 
 export default {
-  id: 'chat',
-  title: '剧情',
+  id: 'play',
+  title: '演绎',
 
   async mount(root, params) {
     const sessionId = params.id;
-    if (!sessionId) { navigate('#/'); return { unmount() {} }; }
+    if (!sessionId) { navigate('#/worlds'); return { unmount() {} }; }
 
-    /* ---------------- 运行时状态 ---------------- */
+    /* ---------------- 状态 ---------------- */
     let detail = null;
-    let settings = {};
-    let title = '剧情';
-    let hue = 210;
+    let world = null;
     let streaming = false;
     let abortCtl = null;
-    let live = null;              // 流式中的旁白节点引用
+    let live = null;
     let branchSet = null;
     let selectedBranch = null;
     let attachments = [];
-    let contextRatio = 0;
-    let turnCount = 0;
+    let memStats = null;
     let lastTurnNo = 0;
+    let contextMeta = null;
+    let assemblerBudget = null;
 
     /* ---------------- DOM ---------------- */
-    let navEl, scroll, bodyEl, msgListEl, branchHost, composerWrap;
+    let navTitle, navSub, scroll, msgList, branchHost, composerWrap, ctxMeterFill;
     let input, sendBtn, attachStrip, quickRow, selStrip, ringSlot, jumpBtn, fileInput;
-    let memStats = null;
 
     /* ---------------- 骨架 ---------------- */
-    const navAvatar = el('div.nav-avatar', {}, '·');
-    const navName = el('div.nav-identity-name', {}, '加载中');
-    const navSub = el('div.nav-identity-sub', {}, '');
+    navTitle = el('div.topbar-title', {}, '加载中');
+    navSub = el('div.topbar-sub', {}, '');
     ringSlot = el('span', { style: 'display:flex;' });
 
-    const memBtn = el('button.nav-mem', {
-      type: 'button', title: '记忆系统', 'aria-label': '记忆系统',
-      onclick: () => openMemoryPanel(sessionId, { onUpdate: (s) => { if (s) { memStats = s; paintRing(); } } }),
+    const memBtn = el('button.icon-btn', {
+      type: 'button', title: '记忆与上下文', 'aria-label': '记忆与上下文',
+      onclick: () => openMemory(),
     }, ringSlot);
 
     const moreBtn = el('button.icon-btn', {
       type: 'button', title: '更多', 'aria-label': '更多操作',
       onclick: () => openMore(),
-    }, icon('more', { size: 18 }));
+    }, icon('more', { size: 16 }));
 
-    navEl = el('header.nav', {},
-      el('button.icon-btn.nav-hamburger', {
-        type: 'button', 'aria-label': '会话库',
-        onclick: () => import('../sidebar.js').then((m) => m.openSidebar()),
-      }, icon('sidebar', { size: 19 })),
-      el('button.nav-back', {
-        type: 'button', title: '返回', onclick: goBack,
-      }, icon('chevronLeft', { size: 19, stroke: 2.2 })),
-      el('div.nav-identity', {},
-        navAvatar,
-        el('div.nav-identity-text', {}, navName, navSub),
-      ),
-      memBtn,
-      moreBtn,
+    const nav = el('header.topbar', {},
+      el('button.icon-btn.mobile-only', {
+        type: 'button', 'aria-label': '目录',
+        onclick: () => import('../shell.js').then((m) => m.openDrawer()),
+      }, icon('sidebar', { size: 17 })),
+      el('div.topbar-title', {}, navTitle, navSub),
+      el('div.topbar-actions', {}, memBtn, moreBtn),
     );
 
-    msgListEl = el('div.msg-list', {});
+    msgList = el('div.play-body', {});
     branchHost = el('div', {});
-    bodyEl = el('div.chat-body', {}, msgListEl, branchHost);
-    scroll = el('div.scroll.chat-scroll', {}, bodyEl);
+    msgList.appendChild(branchHost);
+    scroll = el('div.scroll.play-scroll', {}, msgList);
+    msgList = msgList; // keep
 
     /* ---------------- 输入区 ---------------- */
     input = el('textarea.composer-input', {
       rows: 1,
-      placeholder: '讲述你的行动，或选择一个分支…',
+      placeholder: '讲述你的行动，或选一个走向…',
       enterkeyhint: 'send',
       'aria-label': '输入行动',
     });
@@ -108,17 +93,18 @@ export default {
     });
 
     const plusBtn = el('button.icon-btn', {
-      type: 'button', title: '添加图片 / 自定义行动', 'aria-label': '添加',
-      onclick: () => openPlus(),
-    }, icon('plus', { size: 19, stroke: 2 }));
+      type: 'button', title: '添加图片', 'aria-label': '添加图片',
+      onclick: () => fileInput.click(),
+    }, icon('plus', { size: 16 }));
 
     sendBtn = el('button.composer-send', {
       type: 'button', 'aria-label': '发送', title: '发送', onclick: onSendClick,
-    }, icon('arrowUp', { size: 17, stroke: 2.4 }));
+    }, icon('arrowUp', { size: 15, stroke: 2.2 }));
 
     selStrip = el('div', { style: 'display:none;' });
     quickRow = el('div.quick-branches', { style: 'display:none;' });
     attachStrip = el('div.attach-strip', { style: 'display:none;' });
+    ctxMeterFill = el('div.ctx-meter-fill', { style: 'width:0%;' });
 
     const composerBox = el('div.composer-box', {},
       plusBtn,
@@ -134,6 +120,11 @@ export default {
         composerBox,
         el('div.composer-hint', {},
           el('span', {}, 'Enter 发送 · Shift+Enter 换行'),
+          el('span.ctx-meter', {},
+            el('span', {}, '上下文'),
+            el('div.ctx-meter-bar', {}, ctxMeterFill),
+            el('span', { class: 'ctx-meter-val' }, '—'),
+          ),
         ),
       ),
     );
@@ -144,17 +135,16 @@ export default {
     });
 
     jumpBtn = el('button.jump-latest', { type: 'button', onclick: () => scrollToBottom(true) },
-      icon('chevronDown', { size: 13 }), '最新',
+      icon('chevronDown', { size: 12 }), '最新',
     );
 
-    const view = el('section.view.chat-view', { 'data-view': 'chat' },
-      navEl, scroll, composerWrap, jumpBtn, fileInput,
+    const view = el('section.view.play-view', { 'data-view': 'play' },
+      nav, scroll, composerWrap, jumpBtn, fileInput,
     );
     root.appendChild(view);
 
     scroll.addEventListener('scroll', () => {
       jumpBtn.classList.toggle('is-visible', !isNearBottom(scroll, 160));
-      navEl.classList.toggle('is-scrolled', scroll.scrollTop > 6);
     }, { passive: true });
 
     /* =====================================================================
@@ -166,96 +156,115 @@ export default {
     } catch (err) {
       hideLoading();
       toast(err.message || '会话加载失败', { type: 'error' });
-      navigate('#/');
+      navigate('#/worlds');
       return { unmount() {} };
     }
     hideLoading();
 
-    settings = detail.session?.settings || {};
-    title = settings.title || detail.session?.title || '剧情';
-    hue = typeof settings.characters?.[0]?.avatar_hue === 'number'
-      ? settings.characters[0].avatar_hue : hueFromString(title);
-    turnCount = detail.session?.turn_count ?? 0;
-
-    navName.textContent = title;
-    navAvatar.textContent = firstChar(title);
-    navAvatar.style.background = avatarBackground(hue);
-    document.title = `${title} · 角色剧场`;
+    world = detail.world || null;
     memStats = detail.memoryStats;
-    paintRing();
-    updateSub();
-    syncActive(sessionId);
+    if (detail.session?.world_id) {
+      try {
+        const shell = await import('../shell.js');
+        shell.setContext({ worldId: detail.session.world_id, sessionId });
+      } catch { /* 忽略 */ }
+    }
 
+    const card = await loadWorldCard();
+    paintHeader(card);
+    paintRing();
+    paintCtxMeter();
     renderTurns();
 
-    document.addEventListener('chat:open-memory', onMemoryEvent);
-    window.addEventListener('sessions:changed', onSessionsChanged);
+    document.addEventListener('sessions:changed', onSessionsChanged);
+
+    async function loadWorldCard() {
+      if (!detail.session?.world_id) return null;
+      try {
+        const w = await api.getWorld(detail.session.world_id);
+        return w?.card || null;
+      } catch { return null; }
+    }
+
+    /* =====================================================================
+     * 头部
+     * ===================================================================== */
+    function paintHeader(card) {
+      const title = detail.session?.title || world?.title || '剧情';
+      navTitle.textContent = title;
+      document.title = `${title} · 叙事台`;
+      updateSub();
+    }
+
+    function updateSub() {
+      const count = detail?.session?.turn_count ?? 0;
+      const turns = detail?.turns || [];
+      const chars = turns.reduce((s, t) => s + (t.kind === 'narrator' ? (t.content || '').length : 0), 0);
+      const uso = detail?.usage;
+      const parts = [];
+      if (count) parts.push(`${count} 轮`);
+      if (chars) parts.push(chars > 10000 ? `${(chars / 10000).toFixed(1)} 万字` : `${chars} 字`);
+      if (uso?.prompt_tokens) parts.push(`累计 ${fmtTokens(uso.prompt_tokens + uso.completion_tokens)} tok`);
+      navSub.textContent = parts.join(' · ');
+    }
 
     /* =====================================================================
      * 渲染既有回合
      * ===================================================================== */
     function renderTurns() {
-      clear(msgListEl);
-      const turns = (detail.turns || []).slice().sort((a, b) => (a.turn_no ?? 0) - (b.turn_no ?? 0));
+      const host = scroll.querySelector('.play-body');
+      clear(host);
+      branchHost = el('div', {});
+      host.appendChild(branchHost);
 
+      const turns = (detail.turns || []).slice().sort((a, b) => (a.turn_no ?? 0) - (b.turn_no ?? 0));
       if (!turns.length) {
-        renderEmptyOpening();
+        renderEmpty(card);
         return;
       }
 
       let shown = 0;
       for (const t of turns) {
-        // 开场轮没有玩家行动，仅为占位（content 为空、无图、无分支）→ 跳过渲染
         if (t.kind === 'player' && !String(t.content || '').trim()
-            && !normalizeImages(t.images).length && !t.branch_choice) {
-          continue;
-        }
+          && !normalizeImages(t.images).length && !t.branch_choice) continue;
         if (t.turn_no !== shown) {
           shown = t.turn_no;
-          msgListEl.appendChild(turnMark(shown, t.created_at));
+          host.insertBefore(host.appendChild(turnMark(shown, t.created_at)), branchHost);
           lastTurnNo = Math.max(lastTurnNo, shown);
         }
-        if (t.kind === 'player') appendPlayer(t.content, t.images, t.branch_choice);
-        else if (t.kind === 'narrator') appendNarrator(t.content, t.reasoning, t.turn_no);
-        else if (t.kind === 'system') appendSystem(t.content);
+        if (t.kind === 'player') appendPlayer(t.content, t.images, t.branch_choice, host);
+        else if (t.kind === 'narrator') appendNarrator(t.content, t.reasoning, t.turn_no, { usage: t.usage, host });
+        else if (t.kind === 'system') host.appendChild(el('div.sysline', {}, el('span.sysline-inner', {}, t.content)));
       }
       scrollToBottom(false);
 
-      // 重新打开会话时，分支选项不在内存里：给一条低摩擦的召回入口，
-      // 而不是自动调用一次昂贵的分支生成。
+      // 重新打开会话：给一个低摩擦的继续入口，而不是自动烧一次分支生成
       const lastNarr = [...turns].reverse().find((t) => t.kind === 'narrator');
-      if (lastNarr && !branchHost.querySelector('.branches')) {
-        branchHost.appendChild(el('div.continue-row', {},
-          el('button.btn.btn-tinted', {
-            type: 'button',
-            onclick: (e) => { e.currentTarget.closest('.continue-row')?.remove(); regenerateBranches(); },
-          }, icon('compass', { size: 15 }), '看看接下来的选项'),
-          el('button.btn.btn-ghost', {
-            type: 'button',
-            onclick: (e) => { e.currentTarget.closest('.continue-row')?.remove(); send({ silent: true }); },
-          }, '直接继续演绎'),
-        ));
+      if (lastNarr && !branchHost.querySelector('.branches')) showContinue();
+    }
+
+    function renderEmpty(card2) {
+      const host = scroll.querySelector('.play-body');
+      const seed = String(card2?.opening_seed || '').trim();
+      if (seed) {
+        appendNarrator(seed, '', 1, { label: '序幕', host, noUsage: true });
+        showStartButtons();
+      } else {
+        host.insertBefore(el('div.empty', { style: 'padding-top:60px;' },
+          el('div.empty-icon', {}, icon('wand', { size: 20 })),
+          el('div.empty-title', {}, '故事还没开始'),
+          el('div.empty-sub', {}, '在下方输入第一个行动，或者直接让引擎起笔。'),
+          el('button.btn.btn-primary', { type: 'button', onclick: () => runOpening() },
+            icon('play', { size: 12, fill: true }), '让它起笔'),
+        ), branchHost);
       }
     }
 
-    function renderEmptyOpening() {
-      const opening = String(settings.opening || '').trim();
-      if (opening) {
-        appendNarrator(opening, '', 1, { label: '序幕', animate: false });
-      } else {
-        msgListEl.appendChild(el('div.empty', {},
-          el('div.empty-icon', {}, icon('wand', { size: 26 })),
-          el('div.empty-title', {}, '故事还没开始'),
-          el('div.empty-sub', {}, '在下方输入你的第一个行动，演绎会从这里展开。'),
-        ));
-      }
-      // 若存在开场但未生成分支，给一个继续入口
-      if (opening) {
-        branchHost.appendChild(el('div.continue-row', {},
-          el('button.btn.btn-tinted', { type: 'button', onclick: () => send({ generateBranches: true }) },
-            icon('sparkles', { size: 15 }), '开始演绎'),
-        ));
-      }
+    function showStartButtons() {
+      branchHost.appendChild(el('div.continue-row', {},
+        el('button.btn.btn-primary', { type: 'button', onclick: () => send({ generateBranches: true }) },
+          icon('sparkles', { size: 13 }), '从这里开始演绎'),
+      ));
     }
 
     function turnMark(no, ts) {
@@ -263,9 +272,7 @@ export default {
       const clock = ts ? formatClock(ts) : '';
       return el('div.turn-mark', { dataset: { turn: no } },
         el('span.turn-mark-line'),
-        el('span.turn-mark-label', {},
-          `第 ${no} 回合${clock ? ` · ${clock}` : ''}`,
-        ),
+        el('span.turn-mark-label', {}, `第 ${no} 轮${clock ? ` · ${clock}` : ''}`),
         el('span.turn-mark-line'),
       );
     }
@@ -273,15 +280,18 @@ export default {
     /* =====================================================================
      * 消息节点
      * ===================================================================== */
-    function appendNarrator(content, reasoning, turnNo, opts = {}) {
-      const { label = '旁白', animate = true } = opts;
-      const node = el('div.narr', { style: animate ? '' : 'animation:none;' });
+    function narratorGlyph() {
+      const hue = world?.cover_hue ?? 220;
+      return el('div.narr-glyph', { style: `background:${hueTint(hue, { s: 26, l: 40 })};` },
+        [...(world?.title || '叙')][0]);
+    }
 
-      const head = el('div.narr-head', {},
-        el('div.narr-avatar', { style: `background:${avatarBackground(hue)};` }, firstChar(title)),
-        el('span.narr-label', {}, label),
-      );
-      node.appendChild(head);
+    function appendNarrator(content, reasoning, turnNo, opts = {}) {
+      const { label = '旁白', usage = null, host = null, noUsage = false } = opts;
+      const target = host || scroll.querySelector('.play-body');
+      const node = el('div.narr');
+
+      node.appendChild(el('div.narr-head', {}, narratorGlyph(), el('span.narr-label', {}, label)));
 
       if (reasoning && String(reasoning).trim()) {
         node.appendChild(thinkBox(String(reasoning), { open: ui.get().showReasoning === true }));
@@ -291,23 +301,29 @@ export default {
       prose.innerHTML = formatNarrative(content);
       node.appendChild(prose);
 
+      if (!noUsage && ui.get().showUsage !== false) {
+        node.appendChild(usageBar(usage, { compact: true }));
+      }
+
       node.appendChild(el('div.narr-actions', {},
         miniBtn('copy', '复制', async () => {
           const ok = await copyToClipboard(prose.innerText);
-          toast(ok ? '已复制正文' : '复制失败', { type: ok ? 'success' : 'error' });
+          toast(ok ? '已复制' : '复制失败', { type: ok ? 'success' : 'error' });
         }),
-        miniBtn('rewind', '重写此轮', () => rewriteTurn(turnNo, node)),
-        miniBtn('edit', '编辑', () => editTurn(turnNo, 'narrator', prose.innerText, node)),
-        miniBtn('history', '回到此轮', () => rollbackTo(turnNo)),
+        turnNo ? miniBtn('rewind', '重写', () => rewriteTurn(turnNo)) : null,
+        turnNo ? miniBtn('edit', '编辑', () => editTurn(turnNo, 'narrator', prose.innerText)) : null,
+        turnNo ? miniBtn('history', '回到此轮', () => rollbackTo(turnNo)) : null,
       ));
 
-      msgListEl.appendChild(node);
+      target.insertBefore(node, branchHost);
       return { node, prose };
     }
 
-    function appendPlayer(content, images, branchChoice) {
+    function appendPlayer(content, images, branchChoice, host) {
+      const target = host || scroll.querySelector('.play-body');
       const node = el('div.player');
       const bubble = el('div.player-bubble');
+
       const imgs = normalizeImages(images);
       if (imgs.length) {
         bubble.appendChild(el('div.player-imgs', {},
@@ -319,13 +335,13 @@ export default {
       }
       if (branchChoice) {
         bubble.appendChild(el('span.branch-tag', {},
-          TONE_EMOJI[branchChoice.tone] || '◈',
-          branchChoice.title || '分支',
+          TONE_MARK[branchChoice.tone] || '·',
+          branchChoice.title || '走向',
         ));
       }
       const text = String(content || '').trim();
       if (text) bubble.appendChild(el('span.player-text', {}, text));
-      else if (!imgs.length) bubble.appendChild(el('span', { style: 'opacity:.6;' }, '（空行动）'));
+      else if (!imgs.length) bubble.appendChild(el('span', { style: 'opacity:.5;' }, '（空行动）'));
 
       node.appendChild(bubble);
       node.appendChild(el('div.player-actions', {},
@@ -334,17 +350,13 @@ export default {
           toast(ok ? '已复制' : '复制失败', { type: ok ? 'success' : 'error' });
         }),
       ));
-      msgListEl.appendChild(node);
+      target.insertBefore(node, branchHost);
       return node;
-    }
-
-    function appendSystem(content) {
-      msgListEl.appendChild(el('div.sysline', {}, el('span.sysline-inner', {}, content)));
     }
 
     function miniBtn(iconName, label, onClick) {
       return el('button.mini-btn', { type: 'button', onclick: onClick },
-        icon(iconName, { size: 13 }), label);
+        icon(iconName, { size: 12 }), label);
     }
 
     function thinkBox(text, { open = false, streaming = false } = {}) {
@@ -352,9 +364,9 @@ export default {
       body.textContent = text;
       const box = el('div.think', { class: `${open ? 'is-open' : ''} ${streaming ? 'is-streaming' : ''}` },
         el('button.think-toggle', { type: 'button' },
-          icon('sparkles', { size: 13 }),
+          icon('sparkles', { size: 12 }),
           '思考过程',
-          el('span.chev', {}, icon('chevronRight', { size: 12 })),
+          el('span.chev', {}, icon('chevronRight', { size: 11 })),
         ),
         body,
       );
@@ -373,30 +385,28 @@ export default {
       clearBranches();
       removeContinue();
 
+      const host = scroll.querySelector('.play-body');
       if (!silent && (playerText || images.length || branchChoice)) {
         const shown = playerText || (branchChoice ? branchChoice.description || branchChoice.title : '');
-        appendPlayer(shown, images, branchChoice);
+        appendPlayer(shown, images, branchChoice, host);
       }
       scrollToBottom(true);
 
-      // 待生成指示
       const pending = el('div.gen-pending', {},
         el('span.typing-dots', {}, el('i'), el('i'), el('i')),
         el('span', {}, '演绎中'),
       );
-      msgListEl.appendChild(pending);
+      host.insertBefore(pending, branchHost);
 
-      live = { node: null, prose: null, think: null, thinkBody: null, reasoning: '', text: '' };
-
-      const payload = {
-        playerText: playerText || (branchChoice ? branchChoice.description || branchChoice.title : ''),
-        images: images.length ? images : undefined,
-        branchChoice: branchChoice || undefined,
-        generateBranches,
-      };
+      live = { node: null, prose: null, think: null, thinkBody: null, reasoning: '', text: '', usage: null, startedAt: Date.now() };
 
       try {
-        await api.runTurn(sessionId, payload, {
+        await api.runTurn(sessionId, {
+          playerText: playerText || (branchChoice ? branchChoice.description || branchChoice.title : ''),
+          images: images.length ? images : undefined,
+          branchChoice: branchChoice || undefined,
+          generateBranches,
+        }, {
           signal: abortCtl.signal,
           onEvent: handleEvent(pending),
         });
@@ -415,6 +425,7 @@ export default {
         abortCtl = null;
         paintSend();
         updateSub();
+        paintRing();
       }
     }
 
@@ -436,9 +447,16 @@ export default {
         switch (evt.type) {
           case 'turn_start': {
             lastTurnNo = evt.turn_no || lastTurnNo + 1;
+            const host = scroll.querySelector('.play-body');
             const mark = turnMark(lastTurnNo, Date.now());
-            if (pending.parentNode) msgListEl.insertBefore(mark, pending);
-            else msgListEl.appendChild(mark);
+            if (pending.parentNode) host.insertBefore(mark, pending);
+            else host.insertBefore(mark, branchHost);
+            break;
+          }
+          case 'context': {
+            assemblerBudget = evt.budget;
+            contextMeta = evt.meta;
+            paintCtxMeter();
             break;
           }
           case 'reasoning': {
@@ -465,7 +483,6 @@ export default {
             if (evt.content) live.text = evt.content;
             break;
           case 'narrative_reset':
-            // 上游只回了思考、没有正文：清空半成品，等待重试结果
             if (live) { live.text = ''; live.reasoning = ''; }
             if (live?.prose) live.prose.innerHTML = '';
             break;
@@ -473,7 +490,6 @@ export default {
             if (evt.branches?.length) {
               renderBranches({ branches: evt.branches, scene_summary: evt.scene_summary });
             } else if (evt.degraded) {
-              // 分支降级：不打扰用户，只给「继续」入口
               showContinue();
             }
             break;
@@ -483,12 +499,14 @@ export default {
               paintRing();
             }
             break;
-          case 'done':
-            finalize();
+          case 'done': {
+            if (evt.usage && live) live.usage = evt.usage;
+            finalize(evt);
             updateSub();
             paintRing();
             window.dispatchEvent(new CustomEvent('sessions:changed'));
             break;
+          }
           case 'error':
             throw new Error(evt.message || '生成失败');
           default:
@@ -509,26 +527,35 @@ export default {
       });
     }
 
-    function finalize() {
+    function finalize(doneEvt) {
       if (!live) return;
       if (live.prose) live.prose.innerHTML = formatNarrative(live.text);
       if (live.think) live.think.classList.remove('is-streaming');
-      if (live.node && !live.text.trim()) live.node.remove();
+      if (live.node) {
+        if (!live.text.trim()) {
+          live.node.remove();
+        } else if (ui.get().showUsage !== false) {
+          // 挂上遥测条
+          const u = doneEvt?.usage || live.usage || null;
+          if (u) live.node.appendChild(usageBar(u, { compact: true }));
+        }
+      }
       live = null;
     }
 
     function showError(message) {
+      const host = scroll.querySelector('.play-body');
       const bar = el('div.err-bar', { role: 'alert' },
-        icon('warn', { size: 16 }),
-        el('div', { class: 'spacer' },
+        icon('warn', { size: 14 }),
+        el('div.spacer', {},
           el('div', {}, message),
-          el('button.btn.btn-tinted.btn-sm', { type: 'button', onclick: () => { bar.remove(); send({ silent: true }); } },
+          el('button.btn.btn-secondary.btn-sm', { type: 'button', style: 'margin-top:6px;', onclick: () => { bar.remove(); send({ silent: true }); } },
             '重试'),
         ),
         el('button.icon-btn.is-sm', { type: 'button', 'aria-label': '关闭', onclick: () => bar.remove() },
-          icon('close', { size: 14 })),
+          icon('close', { size: 12 })),
       );
-      msgListEl.appendChild(bar);
+      host.insertBefore(bar, branchHost);
       scrollToBottom(true);
     }
 
@@ -542,13 +569,12 @@ export default {
       clear(quickRow);
       clear(selStrip);
 
-      const wrap = el('div.branches', {});
+      const wrap = el('div.branches');
       wrap.appendChild(el('div.branches-head', {},
-        icon('compass', { size: 13 }),
         el('span', {}, '接下来'),
         el('span.spacer'),
         el('button.mini-btn', { type: 'button', onclick: regenerateBranches },
-          icon('refresh', { size: 12 }), '换一批'),
+          icon('refresh', { size: 11 }), '换一批'),
       ));
       if (set.scene_summary) {
         wrap.appendChild(el('div.branches-scene', {}, set.scene_summary));
@@ -558,7 +584,6 @@ export default {
       set.branches.forEach((b, i) => {
         list.appendChild(el('button.branch', {
           type: 'button',
-          style: `--stagger:${i * 32}ms;`,
           onclick: () => selectBranch(b),
           ondblclick: () => { selectBranch(b); doSend(); },
         },
@@ -566,9 +591,12 @@ export default {
           el('span.branch-body', {},
             el('span.branch-title-row', {},
               el('span.branch-title', {}, b.title || '行动'),
-              el('span.branch-tone', { dataset: { tone: b.tone || '' } }, b.tone || '行动'),
-              b.tension_delta != null
-                ? el('span.branch-tension', {}, `张力 ${Number(b.tension_delta) > 0 ? '+' : ''}${(Number(b.tension_delta) * 100).toFixed(0)}`)
+              el('span.chip.is-plain', { style: 'font-size:9.5px;padding:0 5px;' }, b.tone || '行动'),
+              typeof b.tension_delta === 'number' && b.tension_delta !== 0
+                ? el('span.chip', {
+                  class: b.tension_delta > 0 ? 'is-warn' : 'is-ok',
+                  style: 'font-size:9.5px;padding:0 5px;margin-left:auto;',
+                }, `张力 ${b.tension_delta > 0 ? '+' : ''}${(b.tension_delta * 100).toFixed(0)}`)
                 : null,
             ),
             el('span.branch-desc', {}, b.description || ''),
@@ -579,57 +607,56 @@ export default {
 
       wrap.appendChild(el('div.branches-foot', {},
         el('button.mini-btn', { type: 'button', onclick: openCustomAction },
-          icon('edit', { size: 12 }), '自定义行动'),
+          icon('edit', { size: 11 }), '自定义行动'),
         el('span.spacer'),
-        el('span', { style: 'font-size:var(--fs-caption);color:var(--label-tertiary);' }, '点两下直接发送'),
+        el('span', { style: 'font-size:10px;color:var(--ink-4);' }, '双击直接发送'),
       ));
 
       branchHost.appendChild(wrap);
       scrollToBottom(true);
 
-      // 输入区上方快捷 pills
-      set.branches.forEach((b, i) => {
+      set.branches.forEach((b) => {
         quickRow.appendChild(el('button.qb', {
-          type: 'button', dataset: { idx: String(i) },
+          type: 'button',
           onclick: () => selectBranch(b),
         },
-          el('span.qb-tone', {}, TONE_EMOJI[b.tone] || '◈'),
+          el('span', { style: 'opacity:.6;font-size:10px;' }, TONE_MARK[b.tone] || '·'),
           b.title || '行动',
         ));
       });
       quickRow.appendChild(el('button.qb', { type: 'button', onclick: openCustomAction },
-        el('span.qb-tone', {}, '✎'), '自由行动'));
+        el('span', { style: 'opacity:.6;font-size:10px;' }, '✎'), '自由行动'));
       quickRow.style.display = '';
     }
 
     function selectBranch(b) {
       selectedBranch = b;
-      $$('.branch', branchHost).forEach((n, i) => {
+      branchHost.querySelectorAll('.branch').forEach((n, i) => {
         n.classList.toggle('is-selected', branchSet?.branches?.[i] === b);
       });
-      $$('.qb', quickRow).forEach((n, i) => {
+      quickRow.querySelectorAll('.qb').forEach((n, i) => {
         n.classList.toggle('is-selected', branchSet?.branches?.[i] === b);
       });
       clear(selStrip);
       selStrip.style.display = '';
-      selStrip.appendChild(icon('compass', { size: 14 }));
-      selStrip.appendChild(el('span.sel-strip-title', {}, b.title || '行动'));
+      selStrip.appendChild(icon('compass', { size: 12 }));
+      selStrip.appendChild(el('span.sel-strip-title', {}, b.title || '走向'));
       selStrip.appendChild(el('span.spacer'));
       selStrip.appendChild(el('button.mini-btn', {
-        type: 'button', onclick: () => { clearSelection(); },
+        type: 'button', onclick: () => clearSelection(),
       }, '取消'));
-      input.placeholder = '点 ↑ 确认这个选择，或先说点什么…';
+      input.placeholder = '按 ↑ 确认这个走向，或先说点什么…';
       input.focus();
       paintSend();
     }
 
     function clearSelection() {
       selectedBranch = null;
-      $$('.branch.is-selected', branchHost).forEach((n) => n.classList.remove('is-selected'));
-      $$('.qb.is-selected', quickRow).forEach((n) => n.classList.remove('is-selected'));
+      branchHost.querySelectorAll('.branch.is-selected').forEach((n) => n.classList.remove('is-selected'));
+      quickRow.querySelectorAll('.qb.is-selected').forEach((n) => n.classList.remove('is-selected'));
       selStrip.style.display = 'none';
       clear(selStrip);
-      input.placeholder = '讲述你的行动，或选择一个分支…';
+      input.placeholder = '讲述你的行动，或选一个走向…';
       paintSend();
     }
 
@@ -646,8 +673,10 @@ export default {
     function showContinue() {
       removeContinue();
       branchHost.appendChild(el('div.continue-row', {},
-        el('button.btn.btn-tinted', { type: 'button', onclick: () => { removeContinue(); send({ silent: true, generateBranches: true }); } },
-          icon('sparkles', { size: 15 }), '接着往下演绎'),
+        el('button.btn.btn-secondary', { type: 'button', onclick: () => { removeContinue(); send({ silent: true, generateBranches: true }); } },
+          icon('sparkles', { size: 13 }), '接着往下演绎'),
+        el('button.btn.btn-ghost', { type: 'button', onclick: () => { removeContinue(); regenerateBranches(); } },
+          icon('compass', { size: 13 }), '看看走向'),
       ));
       scrollToBottom(true);
     }
@@ -658,14 +687,14 @@ export default {
 
     async function regenerateBranches() {
       if (streaming) return toast('正在演绎中');
-      showLoading('正在设计分支…');
+      showLoading('正在设计走向…');
       try {
         const set = await api.generateBranches(sessionId);
         if (set?.branches?.length) {
           renderBranches(set);
-          toast('已换一批分支', { type: 'success' });
+          toast('已换一批', { type: 'success' });
         } else {
-          toast('没能生成分支', { type: 'error' });
+          toast('没能生成走向', { type: 'error' });
         }
       } catch (err) {
         toast(err.message, { type: 'error' });
@@ -675,11 +704,11 @@ export default {
     }
 
     /* =====================================================================
-     * 输入区交互
+     * 输入区
      * ===================================================================== */
     function onInput() {
       input.style.height = 'auto';
-      input.style.height = `${Math.min(input.scrollHeight, 168)}px`;
+      input.style.height = `${Math.min(input.scrollHeight, 160)}px`;
       paintSend();
       if (input.value.trim() && selectedBranch) clearSelection();
     }
@@ -689,23 +718,20 @@ export default {
       if (streaming) {
         sendBtn.classList.add('is-stop');
         clear(sendBtn);
-        sendBtn.appendChild(icon('stop', { size: 14, fill: true }));
+        sendBtn.appendChild(icon('stop', { size: 12, fill: true }));
         sendBtn.title = '停止生成';
         sendBtn.disabled = false;
       } else {
         sendBtn.classList.remove('is-stop');
         clear(sendBtn);
-        sendBtn.appendChild(icon('arrowUp', { size: 17, stroke: 2.4 }));
-        sendBtn.title = selectedBranch && !input.value.trim() ? '确认这个选择' : '发送';
+        sendBtn.appendChild(icon('arrowUp', { size: 15, stroke: 2.2 }));
+        sendBtn.title = selectedBranch && !input.value.trim() ? '确认这个走向' : '发送';
         sendBtn.disabled = !has;
       }
     }
 
     function onSendClick() {
-      if (streaming) {
-        abortCtl?.abort();
-        return;
-      }
+      if (streaming) { abortCtl?.abort(); return; }
       doSend();
     }
 
@@ -721,7 +747,7 @@ export default {
         return;
       }
       if (!text && !imgs.length) {
-        toast('说点什么，或选一个分支');
+        toast('说点什么，或选一个走向');
         return;
       }
       resetInput();
@@ -743,10 +769,10 @@ export default {
         title: '自定义行动',
         confirmText: '发送',
         render(body) {
-          body.appendChild(el('div', { style: 'padding:12px 16px;' }, ta,
+          body.appendChild(el('div', {}, ta,
             el('div.field-hint', {}, '这段文字会作为你的回合交给演绎引擎，NPC 与世界的反应由它续写。'),
           ));
-          setTimeout(() => ta.focus(), 220);
+          setTimeout(() => ta.focus(), 200);
         },
         async onConfirm() {
           const v = ta.value.trim();
@@ -756,25 +782,13 @@ export default {
       });
     }
 
-    async function openPlus() {
-      const action = await openActionSheet({
-        title: '添加内容',
-        actions: [
-          { label: '图片', value: 'image', icon: 'image', desc: '把画面交给演绎引擎参考' },
-          { label: '自定义行动', value: 'custom', icon: 'edit', desc: '打开发送前的编辑面板' },
-        ],
-      });
-      if (action === 'image') fileInput.click();
-      else if (action === 'custom') openCustomAction();
-    }
-
     async function onFiles(e) {
       const files = Array.from(e.target.files || []).filter((f) => f.type.startsWith('image/'));
       for (const f of files.slice(0, 4)) {
         try {
           const dataUrl = await readAsDataURL(f);
           attachments.push({ name: f.name, dataUrl });
-        } catch { /* 跳过读取失败的 */ }
+        } catch { /* 跳过 */ }
       }
       renderAttachments();
       paintSend();
@@ -791,36 +805,33 @@ export default {
           el('button.attach-x', {
             type: 'button', 'aria-label': '移除',
             onclick: () => { attachments.splice(i, 1); renderAttachments(); paintSend(); },
-          }, icon('close', { size: 11, stroke: 2.6 })),
+          }, icon('close', { size: 10, stroke: 2.4 })),
         ));
       });
     }
 
     /* =====================================================================
-     * 消息操作：重写 / 编辑 / 回滚
+     * 消息操作
      * ===================================================================== */
     async function rewriteTurn(turnNo) {
       if (streaming) return toast('正在演绎中');
-      if (!turnNo) return toast('无法定位该回合');
+      if (!turnNo) return toast('无法定位该轮');
 
       const ta = el('textarea.field', { rows: 3, placeholder: '可选：这次要怎么改？（例如「更压抑一些，不要引入新角色」）' });
-      let guidance = '';
-
       openSheet({
-        title: `重写第 ${turnNo} 回合`,
+        title: `重写第 ${turnNo} 轮`,
         confirmText: '重写',
         render(body) {
-          body.appendChild(el('div', { style: 'padding:12px 16px;' },
-            ta,
-            el('div.field-hint', {}, '重写会先删掉这一回合并重新演绎。之前的内容无法恢复。'),
+          body.appendChild(el('div', {}, ta,
+            el('div.field-hint', {}, '重写会先删掉这一轮及其之后的内容，再用同样的行动重新演绎。'),
           ));
-          setTimeout(() => ta.focus(), 220);
+          setTimeout(() => ta.focus(), 200);
         },
         async onConfirm() {
-          guidance = ta.value.trim();
+          const guidance = ta.value.trim();
           const ok = await confirmDialog({
             title: '确认重写',
-            message: `第 ${turnNo} 回合会被重新演绎，此后的剧情也需要重新推进。`,
+            message: `第 ${turnNo} 轮之后的内容都会重来。`,
             confirmText: '重写', destructive: true,
           });
           if (!ok) return false;
@@ -830,7 +841,6 @@ export default {
       });
     }
 
-    /** 实际执行重写：先回滚再流式重跑 */
     async function runRewrite(turnNo, guidance) {
       if (streaming) return;
       streaming = true;
@@ -839,17 +849,20 @@ export default {
       clearBranches();
       removeContinue();
 
-      // 重建消息列表到 turnNo-1
-      clear(msgListEl);
+      const host = scroll.querySelector('.play-body');
+      clear(host);
+      branchHost = el('div', {});
+      host.appendChild(branchHost);
+
       const kept = (detail.turns || []).filter((t) => t.turn_no < turnNo);
       let shown = 0;
       for (const t of kept) {
         if (t.turn_no !== shown) {
           shown = t.turn_no;
-          msgListEl.appendChild(turnMark(shown, t.created_at));
+          host.insertBefore(turnMark(shown, t.created_at), branchHost);
         }
-        if (t.kind === 'player') appendPlayer(t.content, t.images, t.branch_choice);
-        else if (t.kind === 'narrator') appendNarrator(t.content, t.reasoning, t.turn_no);
+        if (t.kind === 'player') appendPlayer(t.content, t.images, t.branch_choice, host);
+        else if (t.kind === 'narrator') appendNarrator(t.content, t.reasoning, t.turn_no, { usage: t.usage, host });
       }
       lastTurnNo = Math.max(0, turnNo - 1);
 
@@ -857,8 +870,8 @@ export default {
         el('span.typing-dots', {}, el('i'), el('i'), el('i')),
         el('span', {}, '重新演绎中'),
       );
-      msgListEl.appendChild(pending);
-      live = { node: null, prose: null, think: null, thinkBody: null, reasoning: '', text: '' };
+      host.insertBefore(pending, branchHost);
+      live = { node: null, prose: null, think: null, thinkBody: null, reasoning: '', text: '', usage: null };
 
       try {
         await api.rewrite(sessionId, { turn_no: turnNo, guidance }, {
@@ -866,7 +879,6 @@ export default {
           onEvent: handleEvent(pending),
         });
         finalize();
-        // 刷新本地快照
         detail = await api.getSession(sessionId);
         renderTurns();
         updateSub();
@@ -882,14 +894,14 @@ export default {
       }
     }
 
-    async function editTurn(turnNo, kind, text, node) {
+    async function editTurn(turnNo, kind, text) {
       const ta = el('textarea.field', { rows: 8 });
       ta.value = text;
       openSheet({
-        title: `编辑第 ${turnNo} 回合 · ${kind === 'player' ? '你的行动' : '旁白'}`,
+        title: `编辑第 ${turnNo} 轮 · ${kind === 'player' ? '你的行动' : '旁白'}`,
         confirmText: '保存',
         render(body) {
-          body.appendChild(el('div', { style: 'padding:12px 16px;' }, ta,
+          body.appendChild(el('div', {}, ta,
             el('div.field-hint', {}, '保存后会以新文本重新归档这一轮的记忆，让记忆与正文保持一致。'),
           ));
         },
@@ -913,8 +925,8 @@ export default {
     async function rollbackTo(turnNo) {
       if (streaming) return toast('正在演绎中');
       const ok = await confirmDialog({
-        title: `回到第 ${turnNo} 回合`,
-        message: `第 ${turnNo} 回合之后的剧情与记忆都会被删除。你可以在这一轮重新选择走向。`,
+        title: `回到第 ${turnNo} 轮`,
+        message: `第 ${turnNo} 轮之后的剧情与记忆都会被删除。你可以在这一轮重新选择走向。`,
         confirmText: '回滚', destructive: true,
       });
       if (!ok) return;
@@ -927,7 +939,7 @@ export default {
         showContinue();
         updateSub();
         paintRing();
-        toast(`已回到第 ${turnNo} 回合`, { type: 'success' });
+        toast(`已回到第 ${turnNo} 轮`, { type: 'success' });
       } catch (err) {
         toast(err.message, { type: 'error' });
       } finally {
@@ -936,48 +948,47 @@ export default {
     }
 
     /* =====================================================================
-     * 更多菜单
+     * 更多 / 搜索
      * ===================================================================== */
     async function openMore() {
       const action = await openActionSheet({
-        title: title,
+        title: detail.session?.title || '剧情',
         actions: [
-          { label: '接着演绎', value: 'continue', icon: 'sparkles', desc: '不输入行动，让故事自己往下走' },
-          { label: '换一批分支', value: 'branches', icon: 'compass' },
-          { label: '搜索剧情', value: 'search', icon: 'search', desc: '全文检索所有回合' },
-          { label: '记忆系统', value: 'memory', icon: 'memory' },
-          { label: '导出剧情', value: 'export', icon: 'download' },
-          { label: '编辑设定', value: 'setup', icon: 'edit' },
-          { label: '删除剧情', value: 'delete', icon: 'trash', destructive: true },
+          { label: '接着演绎', value: 'continue', icon: 'sparkles' },
+          { label: '换一批走向', value: 'branches', icon: 'compass' },
+          { label: '搜索本段剧情', value: 'search', icon: 'search' },
+          { label: '记忆与上下文', value: 'memory', icon: 'memory' },
+          { label: '导出', value: 'export', icon: 'download' },
+          { label: '世界卡', value: 'world', icon: 'book' },
+          { label: '删除这段剧情', value: 'delete', icon: 'trash', destructive: true },
         ],
       });
       if (action === 'continue') send({ silent: true, generateBranches: true });
       else if (action === 'branches') regenerateBranches();
       else if (action === 'search') openSearch();
-      else if (action === 'memory') openMemoryPanel(sessionId, { onUpdate: (s) => { memStats = s; paintRing(); } });
+      else if (action === 'memory') openMemory();
       else if (action === 'export') {
         const { exportMarkdown } = await import('../export.js');
         exportMarkdown(sessionId).catch((e) => toast(e.message, { type: 'error' }));
-      } else if (action === 'setup') navigate(`#/edit/${sessionId}`);
-      else if (action === 'delete') {
+      } else if (action === 'world') {
+        navigate(detail.session?.world_id ? `#/world/${detail.session.world_id}` : '#/worlds');
+      } else if (action === 'delete') {
         const ok = await confirmDialog({
-          title: '删除剧情',
-          message: '全部回合与记忆将被永久删除。',
+          title: '删除剧情', message: '全部轮次与记忆将被永久删除。',
           confirmText: '删除', destructive: true,
         });
         if (ok) {
           await api.deleteSession(sessionId);
           toast('已删除', { type: 'success' });
-          window.dispatchEvent(new CustomEvent('sessions:changed'));
-          navigate('#/');
+          window.dispatchEvent(new CustomEvent('worlds:changed'));
+          navigate(detail.session?.world_id ? `#/world/${detail.session.world_id}` : '#/worlds');
         }
       }
     }
 
-    /** 会话内全文搜索 */
     function openSearch() {
-      const results = el('div', { style: 'padding:0 16px 8px;' });
-      const input2 = el('input.field', { placeholder: '搜索所有回合的正文…', type: 'search' });
+      const results = el('div');
+      const input2 = el('input.field', { placeholder: '搜索所有轮次的正文…', type: 'search' });
       const run = debounce(async () => {
         const q = input2.value.trim();
         clear(results);
@@ -988,31 +999,26 @@ export default {
           clear(results);
           if (!hits.length) {
             results.appendChild(el('div.empty', {},
-              el('div.empty-icon', {}, icon('search', { size: 22 })),
+              el('div.empty-icon', {}, icon('search', { size: 18 })),
               el('div.empty-title', {}, '没有找到'),
-              el('div.empty-sub', {}, `「${q}」在本段剧情中未出现。`),
+              el('div.empty-sub', {}, `「${q}」在这段剧情里没有出现。`),
             ));
             return;
           }
           results.appendChild(el('div', {
-            style: 'padding:6px 2px 10px;font-size:var(--fs-caption);color:var(--label-tertiary);',
+            style: 'padding:4px 2px 10px;font-size:var(--fs-caption);color:var(--ink-4);',
           }, `找到 ${hits.length} 处`));
           for (const h of hits) {
-            results.appendChild(el('button.retrieval', {
+            results.appendChild(el('button', {
               type: 'button',
-              style: 'width:100%;text-align:left;margin-bottom:7px;cursor:pointer;',
-              onclick: () => {
-                handle.close?.();
-                jumpToTurn(h.turn_no);
-              },
+              style: 'display:block;width:100%;text-align:left;padding:9px 11px;margin-bottom:5px;border:1px solid var(--line);border-radius:8px;background:var(--paper-raised);',
+              onclick: () => { handle.close?.(); jumpToTurn(h.turn_no); },
             },
-              el('div.retrieval-head', {},
-                el('span.retrieval-src', {}, `第 ${h.turn_no} 回合 · ${h.kind === 'player' ? '你的行动' : '旁白'}`),
-                el('span.retrieval-score', {}, formatTime(h.created_at)),
-              ),
-              el('div.retrieval-text', {},
+              el('div', { style: 'font-size:10px;color:var(--ink-4);margin-bottom:3px;' },
+                `第 ${h.turn_no} 轮 · ${h.kind === 'player' ? '你的行动' : '旁白'}`),
+              el('div', { style: 'font-size:var(--fs-caption);line-height:1.7;color:var(--ink-2);' },
                 h.before,
-                el('mark', { style: 'background:color-mix(in srgb,var(--yellow) 45%,transparent);color:inherit;border-radius:3px;padding:0 1px;' }, h.match),
+                el('mark', { style: 'background:var(--accent-soft);color:var(--accent);border-radius:2px;padding:0 1px;' }, h.match),
                 h.after,
               ),
             ));
@@ -1021,75 +1027,119 @@ export default {
           clear(results);
           results.appendChild(el('div.err-bar', {}, err.message));
         }
-      }, 320);
+      }, 300);
       input2.addEventListener('input', run);
 
       const handle = openSheet({
         title: '搜索剧情',
         cancelText: '关闭',
         render(body) {
-          body.appendChild(el('div', { style: 'padding:8px 16px;' }, input2));
+          body.appendChild(el('div', { style: 'margin-bottom:10px;' }, input2));
           body.appendChild(results);
-          setTimeout(() => input2.focus(), 220);
+          setTimeout(() => input2.focus(), 200);
         },
       });
     }
 
     function jumpToTurn(turnNo) {
-      const mark = msgListEl.querySelector(`.turn-mark[data-turn="${turnNo}"]`);
+      const mark = scroll.querySelector(`.turn-mark[data-turn="${turnNo}"]`);
       if (mark) {
         mark.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        mark.style.transition = 'opacity .4s';
-        mark.style.opacity = '1';
       } else {
-        toast(`第 ${turnNo} 回合不在当前视图中`);
+        toast(`第 ${turnNo} 轮不在当前视图中`);
       }
     }
 
     /* =====================================================================
-     * 记忆环
+     * 上下文 / 记忆
      * ===================================================================== */
     function paintRing() {
-      const max = Number(memStats?.context_max) || Number(settings.context_max_tokens) || 200000;
+      const max = Number(memStats?.context_max) || 200000;
       const used = Number(memStats?.context_tokens) || 0;
-      contextRatio = max > 0 ? Math.min(1, used / max) : 0;
+      const ratio = max > 0 ? Math.min(1, used / max) : 0;
       clear(ringSlot);
-      ringSlot.appendChild(buildRing(contextRatio, {
-        size: 26, stroke: 3.4,
-        center: `${Math.round(contextRatio * 100)}`,
-        centerSize: '8.5px',
+      ringSlot.appendChild(buildRing(ratio, {
+        size: 20, stroke: 2.4,
+        center: `${Math.round(ratio * 100)}`,
+        centerSize: '7px',
+        color: ratio > 0.85 ? 'var(--warn)' : 'var(--accent)',
       }));
-      memBtn.title = `记忆系统 · 上下文 ${Math.round(contextRatio * 100)}%（${fmtTokens(used)} / ${fmtTokens(max)}）`;
+      memBtn.title = `上下文 ${fmtPercent(ratio)}（${fmtTokens(used)} / ${fmtTokens(max)}）`;
+    }
+
+    function paintCtxMeter() {
+      const soft = Number(memStats?.context_soft) || 52000;
+      const used = assemblerBudget?.total ?? (Number(memStats?.context_tokens) || 0);
+      const ratio = soft > 0 ? Math.min(1, used / soft) : 0;
+      ctxMeterFill.style.width = `${(ratio * 100).toFixed(1)}%`;
+      ctxMeterFill.style.background = ratio > 0.9 ? 'var(--warn)' : 'var(--accent)';
+      const val = composerWrap.querySelector('.ctx-meter-val');
+      if (val) val.textContent = `${fmtTokens(used)} / ${fmtTokens(soft)}`;
+    }
+
+    function openMemory() {
+      openMemoryPanel(sessionId, {
+        onUpdate: (s) => {
+          if (!s) return;
+          memStats = s;
+          paintRing();
+          paintCtxMeter();
+        },
+        onReset: async () => {
+          detail = await api.getSession(sessionId);
+          renderTurns();
+          updateSub();
+        },
+      });
     }
 
     /* =====================================================================
      * 杂项
      * ===================================================================== */
-    function updateSub() {
-      const count = detail?.session?.turn_count ?? turnCount ?? 0;
-      const chars = (detail?.turns || []).reduce((s, t) => s + (t.kind === 'narrator' ? (t.content || '').length : 0), 0);
-      navSub.textContent = count
-        ? `${count} 回合 · ${chars > 10000 ? `${(chars / 10000).toFixed(1)} 万字` : `${chars} 字`}`
-        : '新剧情';
-      turnCount = count;
-    }
-
     function scrollToBottom(smooth) {
       requestAnimationFrame(() => {
         scroll.scrollTo({ top: scroll.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
       });
     }
 
-    function goBack() {
-      navigate('#/');
-    }
+    async function runOpening() {
+      if (streaming) return;
+      streaming = true;
+      abortCtl = new AbortController();
+      paintSend();
+      clearBranches();
+      const host = scroll.querySelector('.play-body');
+      clear(host);
+      branchHost = el('div', {});
+      host.appendChild(branchHost);
 
-    function onMemoryEvent() {
-      openMemoryPanel(sessionId, { onUpdate: (s) => { memStats = s; paintRing(); } });
+      const pending = el('div.gen-pending', {},
+        el('span.typing-dots', {}, el('i'), el('i'), el('i')),
+        el('span', {}, '起笔中'),
+      );
+      host.insertBefore(pending, branchHost);
+      live = { node: null, prose: null, think: null, thinkBody: null, reasoning: '', text: '', usage: null };
+
+      try {
+        await api.generateOpening(sessionId, {
+          signal: abortCtl.signal,
+          onEvent: handleEvent(pending),
+        });
+        finalize();
+        detail = await api.getSession(sessionId);
+        updateSub();
+      } catch (err) {
+        pending.remove();
+        finalize();
+        if (err?.name !== 'AbortError') toast(err.message || '起笔失败', { type: 'error' });
+      } finally {
+        streaming = false;
+        abortCtl = null;
+        paintSend();
+      }
     }
 
     function onSessionsChanged() {
-      // 侧栏自己处理；这里只刷新导航栏计数
       api.getSession(sessionId).then((d) => {
         detail = d;
         updateSub();
@@ -1102,16 +1152,15 @@ export default {
     return {
       unmount() {
         abortCtl?.abort();
-        document.removeEventListener('chat:open-memory', onMemoryEvent);
-        window.removeEventListener('sessions:changed', onSessionsChanged);
-        document.title = '角色剧场';
+        document.removeEventListener('sessions:changed', onSessionsChanged);
+        document.title = '叙事台';
       },
     };
   },
 };
 
 /* =========================================================================
- * 模块级辅助
+ * 辅助
  * ========================================================================= */
 
 function normalizeImages(images) {
@@ -1122,16 +1171,25 @@ function normalizeImages(images) {
   }).filter(Boolean);
 }
 
-/** 图片灯箱 */
-export function openLightbox(src) {
+function openLightbox(src) {
   const box = el('div.lightbox', {
     role: 'dialog', 'aria-modal': 'true', 'aria-label': '图片预览',
-    onclick: () => box.remove(),
   }, el('img', { src, alt: '' }));
   document.body.appendChild(box);
   const onKey = (e) => {
     if (e.key === 'Escape') { box.remove(); document.removeEventListener('keydown', onKey); }
   };
   document.addEventListener('keydown', onKey);
-  box.addEventListener('click', () => document.removeEventListener('keydown', onKey));
+  box.addEventListener('click', () => {
+    box.remove();
+    document.removeEventListener('keydown', onKey);
+  });
+}
+
+function debounce(fn, wait = 300) {
+  let t = null;
+  return function debounced(...args) {
+    if (t != null) clearTimeout(t);
+    t = setTimeout(() => { t = null; fn.apply(this, args); }, wait);
+  };
 }

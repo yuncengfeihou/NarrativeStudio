@@ -6,8 +6,10 @@ import express from 'express';
 import { config, assertConfig } from './config.js';
 import { openaiRouter } from './routes/openai.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { worldsRouter } from './routes/worlds.js';
 import { presetsRouter } from './routes/presets.js';
 import { staticRouter } from './routes/static.js';
+import { getDb } from './memory/store.js';
 
 try {
   assertConfig();
@@ -17,17 +19,15 @@ try {
   process.exit(1);
 }
 
+// 触发建表（幂等）
+getDb();
+
 const app = express();
 
 app.disable('x-powered-by');
-
-// Base64 images can be large; give the JSON parser room.
 app.use(express.json({ limit: '32mb' }));
 app.use(express.urlencoded({ extended: true, limit: '32mb' }));
 
-// Per-request AbortSignal, aborted when the client disconnects.
-// Node ≥18.13 exposes a read-only req.signal natively; only create our own
-// controller when the platform doesn't provide one.
 app.use((req, res, next) => {
   if (req.signal) return next();
   const ac = new AbortController();
@@ -36,7 +36,6 @@ app.use((req, res, next) => {
   next();
 });
 
-// Tiny request logger
 app.use((req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
@@ -49,18 +48,17 @@ app.use((req, res, next) => {
   next();
 });
 
+app.use('/api', worldsRouter);
 app.use('/api', sessionsRouter);
 app.use('/api', presetsRouter);
 app.use(openaiRouter);
 app.use(staticRouter);
 
-// JSON 404 for API routes
 app.use('/api', (req, res) => res.status(404).json({ error: { message: 'not found' } }));
 app.use('/v1', (req, res) => {
   res.status(404).json({ error: { message: `unknown route: ${req.method} ${req.originalUrl}`, type: 'invalid_request_error', code: 'not_found' } });
 });
 
-// Central error handler
 app.use((err, req, res, next) => {
   console.error('[error]', err);
   if (res.headersSent) return res.end();
@@ -69,7 +67,6 @@ app.use((err, req, res, next) => {
   });
 });
 
-// 进程级异常兜底：单个请求/流的未捕获错误不应杀死整个服务
 process.on('uncaughtException', (err) => {
   console.error('[uncaughtException]', err?.stack || err);
 });
@@ -87,7 +84,8 @@ app.listen(config.port, config.host, () => {
   ║  OpenAI 兼容 API http://${shown}:${config.port}/v1
   ║    模型: ${config.upstream.model}
   ║    上游: ${config.upstream.baseUrl}
-  ║  上下文上限      ${config.context.maxTokens.toLocaleString()} tokens
+  ║  上下文软目标    ${config.context.softTokens.toLocaleString()} tokens
+  ║  上下文硬上限    ${config.context.maxTokens.toLocaleString()} tokens
   ╚══════════════════════════════════════════════════════════╝
   `);
 });

@@ -2,17 +2,17 @@
  * app.js — 应用入口
  *
  * 职责：
- *  - 启动 store / 侧栏 / 路由
- *  - hash 路由：#/  #/chat/:id  #/new  #/edit/:id  #/presets  #/settings
+ *  - 启动 store / 外壳（图标栏 + 目录栏）/ 路由
+ *  - hash 路由：#/worlds  #/world/:id  #/play/:id  #/settings  #/new
  *  - 全局浮层：toast / loading / sheet / actionSheet / confirm / popover
  */
 
 import { $, el, clear } from './util.js';
 import { icon } from './icons.js';
 import { initStore, cycleTheme, ui } from './store.js';
-import { initSidebar, openSidebar } from './sidebar.js';
+import { TONE } from './ui-kit.js';
 
-const appRoot = $('#main');
+const mainRoot = $('#main');
 const overlayRoot = $('#overlay-root');
 
 /* =========================================================================
@@ -30,33 +30,30 @@ export function matchRoute() {
   const parts = raw.split('/').filter(Boolean).map((s) => {
     try { return decodeURIComponent(s); } catch { return s; }
   });
-  if (parts.length === 0) return { name: 'home', params: {} };
+  if (parts.length === 0) return { name: 'worlds', params: {} };
   switch (parts[0]) {
-    case 'library': return { name: 'home', params: {} };
-    case 'home': return { name: 'home', params: {} };
-    case 'chat': return { name: 'chat', params: { id: parts[1] || null } };
-    case 'new': return { name: 'editor', params: { id: null } };
-    case 'edit': return { name: 'editor', params: { id: parts[1] || null } };
-    case 'setup': return { name: 'editor', params: { id: parts[1] || null } };
-    case 'presets': return { name: 'presets', params: {} };
+    case 'worlds': return { name: 'worlds', params: {} };
+    case 'world': return { name: 'world', params: { id: parts[1] || null } };
+    case 'play': return { name: 'play', params: { id: parts[1] || null } };
+    case 'new': return { name: 'world-edit', params: { id: null } };
+    case 'edit': return { name: 'world-edit', params: { id: parts[1] || null } };
     case 'settings': return { name: 'settings', params: {} };
-    default: return { name: 'home', params: {} };
+    default: return { name: 'worlds', params: {} };
   }
 }
 
 const loaders = {
-  home: () => import('./views/home.js'),
-  chat: () => import('./views/chat.js'),
-  editor: () => import('./views/editor.js'),
-  presets: () => import('./views/presets.js'),
+  worlds: () => import('./views/worlds.js'),
+  world: () => import('./views/world.js'),
+  play: () => import('./views/play.js'),
+  'world-edit': () => import('./views/world-edit.js'),
   settings: () => import('./views/settings.js'),
 };
 
 let current = null;
 
-/** 关闭所有浮层（路由切换时调用，避免 sheet 跟着页面走） */
 export function closeAllOverlays() {
-  const nodes = overlayRoot.querySelectorAll('.veil, .sheet, .actions, .dialog, .popover');
+  const nodes = overlayRoot.querySelectorAll('.veil, .sheet, .dialog, .popover, .actions');
   nodes.forEach((n) => {
     n.classList.remove('is-open');
     n.remove();
@@ -72,14 +69,14 @@ async function handleRoute() {
     try { current.handle.unmount(); } catch (err) { console.error('[route] unmount', err); }
   }
   current = null;
-  clear(appRoot);
+  clear(mainRoot);
   try {
-    const mod = await (loaders[route.name] || loaders.home)();
+    const mod = await (loaders[route.name] || loaders.worlds)();
     const view = mod.default;
     if (!view?.mount) throw new Error(`视图 ${route.name} 缺少 mount`);
-    const handle = await view.mount(appRoot, route.params);
+    const handle = await view.mount(mainRoot, route.params);
     current = { name: route.name, handle: handle || {} };
-    appRoot.querySelector('.view')?.classList.add('is-active');
+    mainRoot.querySelector('.view')?.classList.add('is-active');
   } catch (err) {
     console.error('[route] mount failed', err);
     renderError(err);
@@ -88,14 +85,13 @@ async function handleRoute() {
 }
 
 function renderError(err) {
-  appRoot.appendChild(el('div.view.is-active', {},
-    el('header.nav', {}, el('div.nav-title', {}, '出错了')),
+  mainRoot.appendChild(el('div.view.is-active', {},
     el('div.scroll', {},
-      el('div.empty', {},
-        el('div.empty-icon', {}, icon('warn', { size: 26 })),
+      el('div.empty', { style: 'padding-top:100px;' },
+        el('div.empty-icon', {}, icon('warn', { size: 20 })),
         el('div.empty-title', {}, '页面加载失败'),
         el('div.empty-sub', {}, err?.message || String(err)),
-        el('button.btn.btn-primary', { onclick: () => navigate('#/') }, '返回首页'),
+        el('button.btn.btn-secondary', { onclick: () => navigate('#/') }, '返回世界卡'),
       ),
     ),
   ));
@@ -106,22 +102,17 @@ function renderError(err) {
  * ========================================================================= */
 
 let toastTimer = null;
-/**
- * @param {string} message
- * @param {{duration?:number, type?:'info'|'error'|'success', icon?:string}} [opts]
- */
+
 export function toast(message, opts = {}) {
-  const { duration = 2200, type = 'info', iconName = null } = typeof opts === 'number' ? { duration: opts } : opts;
+  const { duration = 2000, type = 'info' } = typeof opts === 'number' ? { duration: opts } : opts;
   let node = $('#toast');
   if (!node) {
     node = el('div.toast#toast', { role: 'status', 'aria-live': 'polite' });
     overlayRoot.appendChild(node);
   }
   clear(node);
-  const ic = iconName || (type === 'error' ? 'warn' : type === 'success' ? 'check' : null);
-  if (ic) node.appendChild(el('span.toast-icon', {}, icon(ic, { size: 15 })));
   node.appendChild(el('span', {}, message));
-  node.classList.toggle('is-error', type === 'error');
+  node.dataset.type = type;
   void node.offsetWidth;
   node.classList.add('is-visible');
   if (toastTimer) clearTimeout(toastTimer);
@@ -129,10 +120,11 @@ export function toast(message, opts = {}) {
 }
 
 /* =========================================================================
- * 全屏 loading
+ * Loading
  * ========================================================================= */
 
 let loadingCount = 0;
+
 export function showLoading(text = '') {
   loadingCount++;
   let node = $('#loading');
@@ -144,10 +136,11 @@ export function showLoading(text = '') {
     overlayRoot.appendChild(node);
   }
   const t = node.querySelector('.loading-text');
-  if (t && text) t.textContent = text;
+  if (t) t.textContent = text || '处理中';
   void node.offsetWidth;
   node.classList.add('is-visible');
 }
+
 export function hideLoading() {
   loadingCount = Math.max(0, loadingCount - 1);
   if (loadingCount > 0) return;
@@ -155,7 +148,7 @@ export function hideLoading() {
 }
 
 /* =========================================================================
- * 滚动锁定（多浮层共存时计数）
+ * 滚动锁
  * ========================================================================= */
 
 let lockCount = 0;
@@ -168,38 +161,27 @@ function lockScroll(on) {
  * Sheet
  * ========================================================================= */
 
-/**
- * @param {object} opts
- * @param {string} [opts.title]
- * @param {(body:HTMLElement, api:object)=>void} opts.render
- * @param {string} [opts.confirmText]
- * @param {()=>any} [opts.onConfirm]  返回 false 阻止关闭
- * @param {string} [opts.cancelText]
- * @param {boolean} [opts.fullHeight]
- * @returns {{close:Function, body:HTMLElement, sheet:HTMLElement, confirmBtn:HTMLElement|null}}
- */
 export function openSheet(opts = {}) {
   const {
     title = '', render, confirmText = '', onConfirm, cancelText = '取消', footer = null,
+    width = null,
   } = opts;
 
   const veil = el('div.veil');
   const body = el('div.sheet-body');
-  const sheet = el('div.sheet', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title || '面板' });
+  const sheet = el('div.sheet', {
+    role: 'dialog', 'aria-modal': 'true', 'aria-label': title || '面板',
+    style: width ? `width:${width};` : '',
+  });
 
   let confirmBtn = null;
-  const api = {
-    body,
-    sheet,
-    close: () => close(),
-    setConfirmDisabled(v) { if (confirmBtn) confirmBtn.disabled = v; },
-  };
+  const api = { body, sheet, close: () => close(), setConfirmDisabled(v) { if (confirmBtn) confirmBtn.disabled = v; } };
 
-  const cancelBtn = el('button.sheet-btn', { type: 'button' }, cancelText);
+  const cancelBtn = el('button.btn.btn-ghost', { type: 'button' }, cancelText);
   cancelBtn.addEventListener('click', () => close());
 
   if (confirmText) {
-    confirmBtn = el('button.sheet-btn.is-confirm', { type: 'button' }, confirmText);
+    confirmBtn = el('button.btn.btn-primary', { type: 'button' }, confirmText);
     confirmBtn.addEventListener('click', async () => {
       if (onConfirm) {
         confirmBtn.disabled = true;
@@ -215,12 +197,10 @@ export function openSheet(opts = {}) {
   }
 
   const head = el('div.sheet-head', {},
-    cancelBtn,
     el('div.sheet-title', {}, title),
-    confirmBtn || el('span', { style: 'min-width:52px;' }),
+    el('div.sheet-head-actions', {}, cancelBtn, confirmBtn),
   );
 
-  sheet.appendChild(el('div.sheet-grab'));
   if (title || confirmText) sheet.appendChild(head);
   sheet.appendChild(body);
   if (footer) sheet.appendChild(footer);
@@ -233,7 +213,7 @@ export function openSheet(opts = {}) {
     sheet.classList.remove('is-open');
     lockScroll(false);
     document.removeEventListener('keydown', onKey);
-    setTimeout(() => { veil.remove(); sheet.remove(); }, 420);
+    setTimeout(() => { veil.remove(); sheet.remove(); }, 220);
   }
 
   const onKey = (e) => { if (e.key === 'Escape') close(); };
@@ -244,14 +224,11 @@ export function openSheet(opts = {}) {
   overlayRoot.appendChild(sheet);
   lockScroll(true);
   requestAnimationFrame(() => {
-    requestAnimationFrame(() => {
-      veil.classList.add('is-open');
-      sheet.classList.add('is-open');
-    });
+    veil.classList.add('is-open');
+    sheet.classList.add('is-open');
   });
 
   if (typeof render === 'function') render(body, api);
-
   return { close, body, sheet, veil, confirmBtn };
 }
 
@@ -259,13 +236,6 @@ export function openSheet(opts = {}) {
  * Action Sheet
  * ========================================================================= */
 
-/**
- * @param {object} opts
- * @param {string} [opts.title]
- * @param {Array<{label:string, value?:any, icon?:string, desc?:string, destructive?:boolean}>} opts.actions
- * @param {string} [opts.cancelText]
- * @returns {Promise<any>} 选中的 value；取消为 null
- */
 export function openActionSheet(opts = {}) {
   const { title = '', actions = [], cancelText = '取消' } = opts;
   return new Promise((resolve) => {
@@ -281,7 +251,7 @@ export function openActionSheet(opts = {}) {
       sheet.classList.remove('is-open');
       lockScroll(false);
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => { veil.remove(); sheet.remove(); }, 420);
+      setTimeout(() => { veil.remove(); sheet.remove(); }, 220);
       resolve(result);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(null); };
@@ -289,7 +259,7 @@ export function openActionSheet(opts = {}) {
 
     for (const a of actions) {
       const btn = el('button.action-item', { type: 'button', class: a.destructive ? 'is-destructive' : '' },
-        a.icon ? el('span.action-icon', {}, icon(a.icon, { size: 18 })) : null,
+        a.icon ? el('span.action-icon', {}, icon(a.icon, { size: 15 })) : null,
         el('span.action-main', {},
           el('span.action-label', {}, a.label),
           a.desc ? el('span.action-desc', {}, a.desc) : null,
@@ -311,21 +281,16 @@ export function openActionSheet(opts = {}) {
     overlayRoot.appendChild(sheet);
     lockScroll(true);
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        veil.classList.add('is-open');
-        sheet.classList.add('is-open');
-      });
+      veil.classList.add('is-open');
+      sheet.classList.add('is-open');
     });
   });
 }
 
 /* =========================================================================
- * 确认对话框
+ * 确认框
  * ========================================================================= */
 
-/**
- * @returns {Promise<boolean>}
- */
 export function confirmDialog({ title = '', message = '', confirmText = '确定', cancelText = '取消', destructive = false } = {}) {
   return new Promise((resolve) => {
     const veil = el('div.veil');
@@ -337,7 +302,7 @@ export function confirmDialog({ title = '', message = '', confirmText = '确定'
       dialog.classList.remove('is-open');
       lockScroll(false);
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => { veil.remove(); dialog.remove(); }, 260);
+      setTimeout(() => { veil.remove(); dialog.remove(); }, 180);
       resolve(result);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(false); };
@@ -361,28 +326,20 @@ export function confirmDialog({ title = '', message = '', confirmText = '确定'
     overlayRoot.appendChild(dialog);
     lockScroll(true);
     requestAnimationFrame(() => {
-      requestAnimationFrame(() => {
-        veil.classList.add('is-open');
-        dialog.classList.add('is-open');
-      });
+      veil.classList.add('is-open');
+      dialog.classList.add('is-open');
     });
   });
 }
 
 /* =========================================================================
- * Popover（锚定菜单）
+ * Popover
  * ========================================================================= */
 
-/**
- * @param {HTMLElement} anchor 定位锚点
- * @param {Array<{label:string,icon?:string,value?:any,destructive?:boolean,separator?:boolean}>} items
- * @param {{align?:'start'|'end'}} [opts]
- * @returns {Promise<any>}
- */
 export function openPopover(anchor, items, opts = {}) {
   const { align = 'end' } = opts;
   return new Promise((resolve) => {
-    const veil = el('div.veil', { style: 'background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;' });
+    const veil = el('div.veil', { style: 'background:transparent;' });
     const pop = el('div.popover', { role: 'menu' });
     let closed = false;
     function close(v) {
@@ -391,7 +348,7 @@ export function openPopover(anchor, items, opts = {}) {
       veil.classList.remove('is-open');
       pop.remove();
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => veil.remove(), 260);
+      setTimeout(() => veil.remove(), 160);
       resolve(v);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(null); };
@@ -400,7 +357,7 @@ export function openPopover(anchor, items, opts = {}) {
     for (const it of items) {
       if (it.separator) { pop.appendChild(el('div.pop-sep')); continue; }
       const b = el('button.pop-item', { type: 'button', class: it.destructive ? 'is-destructive' : '' },
-        it.icon ? el('span.pop-icon', {}, icon(it.icon, { size: 16 })) : null,
+        it.icon ? el('span.pop-icon', {}, icon(it.icon, { size: 14 })) : null,
         el('span', {}, it.label),
       );
       b.addEventListener('click', () => close(it.value !== undefined ? it.value : it.label));
@@ -412,53 +369,52 @@ export function openPopover(anchor, items, opts = {}) {
     overlayRoot.appendChild(pop);
     veil.classList.add('is-open');
 
-    // 定位：优先下方，空间不足则上方
     const r = anchor.getBoundingClientRect();
     const pr = pop.getBoundingClientRect();
     let left = align === 'end' ? r.right - pr.width : r.left;
-    left = Math.max(10, Math.min(left, window.innerWidth - pr.width - 10));
-    let top = r.bottom + 6;
-    if (top + pr.height > window.innerHeight - 12) top = Math.max(10, r.top - pr.height - 6);
+    left = Math.max(8, Math.min(left, window.innerWidth - pr.width - 8));
+    let top = r.bottom + 4;
+    if (top + pr.height > window.innerHeight - 8) top = Math.max(8, r.top - pr.height - 4);
     pop.style.left = `${left}px`;
     pop.style.top = `${top}px`;
   });
 }
 
 /* =========================================================================
- * 主题切换
+ * 主题
  * ========================================================================= */
 
 export function toggleTheme() {
   const next = cycleTheme();
   const label = next === 'light' ? '浅色' : next === 'dark' ? '深色' : '跟随系统';
   toast(`外观：${label}`);
+  document.dispatchEvent(new CustomEvent('theme:changed'));
   return next;
 }
 
 ui.subscribe((s, prev) => {
-  if (s.theme !== prev.theme) document.documentElement.dataset.appTheme = s.theme;
+  if (s.theme !== prev.theme) document.documentElement.dataset.prefTheme = s.theme;
 });
 
 /* =========================================================================
  * 启动
  * ========================================================================= */
 
-function boot() {
+async function boot() {
   initStore();
-  initSidebar();
+  const { initShell } = await import('./shell.js');
+  initShell();
   window.addEventListener('hashchange', handleRoute);
   document.addEventListener('keydown', (e) => {
-    // ⌘K / Ctrl+K 全局搜索（在聊天页里聚焦搜索、其它页跳到剧本库）
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      openSidebar();
-      setTimeout(() => $('#sidebar input[type="text"]')?.focus(), 120);
+      document.dispatchEvent(new CustomEvent('shell:focus-search'));
     }
   });
   handleRoute();
 }
 
-export { openSidebar };
+export { TONE };
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot);

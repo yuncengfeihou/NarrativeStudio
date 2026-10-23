@@ -198,44 +198,84 @@ async function runStream(path, body, handlers = {}) {
 // ============================================================
 
 export const api = {
-  /** GET /api/config -> {models, defaults, context_limits} */
+  /** GET /api/config */
   getConfig(signal) {
     return request('/api/config', { signal });
   },
 
-  /** GET /api/sessions -> [{id,title,turn_count,updated_at,settings:{title,style_tags}}] */
-  listSessions(signal) {
-    return request('/api/sessions', { signal });
+  /* ---------------- 世界卡 ---------------- */
+
+  /** GET /api/worlds -> [{id,title,subtitle,cover_hue,tags,card,session_count}] */
+  listWorlds(signal) {
+    return request('/api/worlds', { signal });
   },
 
-  /** POST /api/sessions  body:{title, settings} -> session */
+  /** GET /api/worlds/:id -> {…world, lore, sessions} */
+  getWorld(id, signal) {
+    return request(`/api/worlds/${encodeURIComponent(id)}`, { signal });
+  },
+
+  /** POST /api/worlds  body:{id?, title?, card, lore?, tags?, cover_hue?} */
+  saveWorld(body, signal) {
+    return request('/api/worlds', { method: 'POST', body, signal });
+  },
+
+  /** PATCH /api/worlds/:id */
+  patchWorld(id, body, signal) {
+    return request(`/api/worlds/${encodeURIComponent(id)}`, { method: 'PATCH', body, signal });
+  },
+
+  deleteWorld(id, signal) {
+    return request(`/api/worlds/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
+  },
+
+  /* 词条 */
+  addLore(worldId, body, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/lore`, { method: 'POST', body, signal });
+  },
+  updateLore(worldId, entryId, body, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/lore/${entryId}`, { method: 'PATCH', body, signal });
+  },
+  deleteLore(worldId, entryId, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/lore/${entryId}`, { method: 'DELETE', signal });
+  },
+
+  /** POST /api/worlds/:id/sessions -> session（开一局） */
+  createWorldSession(worldId, body = {}, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/sessions`, { method: 'POST', body, signal });
+  },
+
+  /* ---------------- 剧情会话 ---------------- */
+
+  /** GET /api/sessions?world_id= -> [{id,title,turn_count,updated_at}] */
+  listSessions({ world_id = null } = {}, signal) {
+    const qs = world_id ? `?world_id=${encodeURIComponent(world_id)}` : '';
+    return request(`/api/sessions${qs}`, { signal });
+  },
+
   createSession(body, signal) {
     return request('/api/sessions', { method: 'POST', body, signal });
   },
 
-  /** GET /api/sessions/:id -> {session, turns, state, memoryStats} */
+  /** GET /api/sessions/:id -> {session, world, turns, state, usage, memoryStats} */
   getSession(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}`, { signal });
   },
 
-  /** PATCH /api/sessions/:id  body:{title?, settings?} -> session */
   patchSession(id, body, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}`, { method: 'PATCH', body, signal });
   },
 
-  /** DELETE /api/sessions/:id */
   deleteSession(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
   },
 
-  /** GET /api/sessions/:id/memory -> {stats, tiers, entities, state, notes, ...} */
   getMemory(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/memory`, { signal });
   },
 
   /* ---------------- 分页 / 检索 ---------------- */
 
-  /** GET /api/sessions/:id/turns?from=&to=&kinds= -> {turns, total} */
   getTurns(id, { from = 1, to = '', kinds = '' } = {}, signal) {
     const qs = new URLSearchParams({ from: String(from), limit: '400' });
     if (to !== '' && to != null) qs.set('to', String(to));
@@ -243,7 +283,6 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/turns?${qs}`, { signal });
   },
 
-  /** GET /api/sessions/:id/search?q= -> {hits, query} */
   searchSession(id, q, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/search?q=${encodeURIComponent(q)}`, { signal });
   },
@@ -280,15 +319,22 @@ export const api = {
   putState(id, body, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/state`, { method: 'PUT', body, signal });
   },
+  deleteRelation(id, relId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/relations/${relId}`, { method: 'DELETE', signal });
+  },
+  deleteThread(id, threadId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/threads/${threadId}`, { method: 'DELETE', signal });
+  },
+  deleteReflection(id, refId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/reflections/${refId}`, { method: 'DELETE', signal });
+  },
 
   /* ---------------- 剧情编辑 ---------------- */
 
-  /** PATCH /api/sessions/:id/turns/:turnNo body:{kind, content, rememorize?} */
   updateTurn(id, turnNo, body, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/turns/${turnNo}`, { method: 'PATCH', body, signal });
   },
 
-  /** POST /api/sessions/:id/rollback body:{turn_no} */
   rollback(id, turnNo, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/rollback`, { method: 'POST', body: { turn_no: turnNo }, signal });
   },
@@ -298,36 +344,28 @@ export const api = {
     return runStream(`/api/sessions/${encodeURIComponent(id)}/rewrite`, body, handlers);
   },
 
-  /* ---------------- 预设剧本 ---------------- */
+  /* ---------------- 预设种子 ---------------- */
 
-  /** GET /api/presets -> [{id,title,tags,...}] */
   listPresets(signal) {
     return request('/api/presets', { signal });
   },
   getPreset(id, signal) {
     return request(`/api/presets/${encodeURIComponent(id)}`, { signal });
   },
-  savePreset(body, signal) {
-    return request('/api/presets', { method: 'POST', body, signal });
+  importPreset(id, signal) {
+    return request(`/api/presets/${encodeURIComponent(id)}/import`, { method: 'POST', signal });
   },
 
-  /** POST /api/sessions/:id/branches -> {branches, scene_summary}（非流式） */
+  /** POST /api/sessions/:id/branches -> {branches, scene_summary} */
   generateBranches(id, body = {}, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/branches`, { method: 'POST', body, signal });
   },
 
-  /** POST /api/sessions/:id/opening -> SSE（生成/重扩开场白） */
+  /** POST /api/sessions/:id/opening -> SSE */
   generateOpening(id, handlers = {}) {
     return runStream(`/api/sessions/${encodeURIComponent(id)}/opening`, {}, handlers);
   },
 
-  /**
-   * POST /api/sessions/:id/turn -> SSE（orchestrator 事件协议）
-   * @param {string} sessionId
-   * @param {object} body {playerText, images?, branchChoice?, generateBranches?}
-   * @param {object} [handlers] {onEvent, signal}
-   * @returns {Promise<object>} 最终 done 事件
-   */
   runTurn(sessionId, body, handlers = {}) {
     return runStream(`/api/sessions/${encodeURIComponent(sessionId)}/turn`, body, handlers);
   },

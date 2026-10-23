@@ -1,16 +1,11 @@
 /**
  * store.js — 全局 UI 状态 + localStorage 偏好
- *
- * 主题三态（light / dark / system）在这里被解析成确定值写到 <html data-theme>，
- * 因此 CSS 只需一套令牌，不再需要 prefers-color-scheme 的重复定义。
  */
 
 import { $ } from './util.js';
 
-const PREF_KEY = 'ai-roleplay.prefs.v2';
+const PREF_KEY = 'narra.prefs.v3';
 
-/* ------------------------------------------------------------------ */
-/* 极简响应式 store                                                    */
 /* ------------------------------------------------------------------ */
 
 function createStore(initial = {}) {
@@ -35,16 +30,14 @@ function createStore(initial = {}) {
 export const ui = createStore({
   theme: 'system',
   readingWidth: 'normal',   // compact | normal | wide
-  readingSize: 17.5,        // 正文字号
-  showReasoning: false,     // 默认展开思考过程
-  showTurnMarks: true,      // 显示回合分隔
-  branchStyle: 'cards',     // cards | pills
+  readingSize: 17,          // 正文字号
+  showReasoning: false,
+  showTurnMarks: true,
+  showUsage: true,          // 显示 token 遥测
+  lastWorldId: null,
   lastSessionId: null,
-  sidebarOpen: false,
 });
 
-/* ------------------------------------------------------------------ */
-/* 偏好持久化                                                          */
 /* ------------------------------------------------------------------ */
 
 function readPrefs() {
@@ -71,8 +64,6 @@ export function getPref(key, fallback = null) {
 }
 
 /* ------------------------------------------------------------------ */
-/* 主题                                                                */
-/* ------------------------------------------------------------------ */
 
 const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
@@ -86,7 +77,7 @@ export function applyTheme(theme = ui.get().theme) {
   const root = document.documentElement;
   root.setAttribute('data-theme', resolved);
   const meta = $('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0E0E12' : '#F2F2F7');
+  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#171614' : '#FCFCFB');
 }
 
 export function setTheme(theme) {
@@ -110,13 +101,11 @@ if (mq && typeof mq.addEventListener === 'function') {
 }
 
 /* ------------------------------------------------------------------ */
-/* 阅读偏好应用（写 CSS 变量）                                          */
-/* ------------------------------------------------------------------ */
 
 const WIDTH_MAP = {
   compact: '34em',
-  normal: '40em',
-  wide: '48em',
+  normal: '42em',
+  wide: '50em',
 };
 
 export function applyReadingPrefs() {
@@ -128,8 +117,6 @@ export function applyReadingPrefs() {
   }
 }
 
-/* ------------------------------------------------------------------ */
-/* 初始化                                                              */
 /* ------------------------------------------------------------------ */
 
 export function initStore() {
