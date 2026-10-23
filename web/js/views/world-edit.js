@@ -262,11 +262,30 @@ export default {
       ];
       const styleCard = el('div.group-card');
       for (const [key, label, placeholder] of styleRows) {
-        const inp = el('input', {
-          type: 'text', placeholder, value: style[key] || '',
-          style: 'flex:1;min-width:0;font-size:var(--fs-caption);color:var(--ink-2);padding:2px 0;',
-          oninput: (e) => { style[key] = e.target.value; },
+        // 视角与文风通常较长，用可自增高的 textarea；篇幅/时态用单行即可
+        const long = key === 'pov' || key === 'voice';
+        const inp = long
+          ? el('textarea', {
+            rows: 2, placeholder, value: style[key] || '',
+            style: 'flex:1;min-width:0;font-size:var(--fs-caption);line-height:1.7;color:var(--ink-2);padding:2px 0;resize:none;overflow:hidden;background:transparent;border:none;',
+          })
+          : el('input', {
+            type: 'text', placeholder, value: style[key] || '',
+            style: 'flex:1;min-width:0;font-size:var(--fs-caption);color:var(--ink-2);padding:2px 0;',
+          });
+        inp.addEventListener('input', () => {
+          style[key] = inp.value;
+          if (long) {
+            inp.style.height = 'auto';
+            inp.style.height = `${Math.min(inp.scrollHeight, 160)}px`;
+          }
         });
+        if (long && style[key]) {
+          requestAnimationFrame(() => {
+            inp.style.height = 'auto';
+            inp.style.height = `${Math.min(inp.scrollHeight, 160)}px`;
+          });
+        }
         styleCard.appendChild(el('div', { style: 'display:flex;gap:10px;align-items:flex-start;padding:8px 12px;border-top:1px solid var(--line-soft);' },
           el('span', { style: 'flex:none;width:34px;font-size:10px;font-weight:600;letter-spacing:0.04em;color:var(--ink-4);padding-top:3px;' }, label),
           inp,
