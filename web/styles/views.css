@@ -328,9 +328,15 @@
   color: var(--label-secondary);
 }
 .quick-tile:hover .quick-tile-icon { background: var(--tint-soft); color: var(--tint); }
-.quick-tile-text { min-width: 0; }
-.quick-tile-title { font-size: var(--fs-footnote); font-weight: 600; }
-.quick-tile-sub { font-size: var(--fs-caption); color: var(--label-tertiary); margin-top: 1px; }
+.quick-tile-text { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.quick-tile-title { font-size: var(--fs-footnote); font-weight: 600; white-space: nowrap; }
+.quick-tile-sub {
+  font-size: var(--fs-caption);
+  color: var(--label-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
 
 /* 首次使用引导 */
 .firstrun {
