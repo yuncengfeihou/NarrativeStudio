@@ -31,7 +31,7 @@ function createStore(initial = {}) {
 export const ui = createStore({
   theme: 'system',
   readingWidth: 'normal',   // compact | normal | wide
-  readingSize: 17,          // 正文字号
+  readingSize: 16,          // 正文字号
   uiFont: '',               // 界面字体：除正文外的所有 UI 文字
   readingFont: '',          // 正文内容字体：'' = 跟随系统默认
   showReasoning: false,
@@ -73,7 +73,7 @@ function applyTheme(theme = ui.get().theme) {
   const root = document.documentElement;
   root.setAttribute('data-theme', resolved);
   const meta = $('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0C0B09' : '#F1E9DA');
+  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#141110' : '#f7f4f0');
 }
 
 export function setTheme(theme) {
@@ -99,9 +99,9 @@ if (mq && typeof mq.addEventListener === 'function') {
 /* ------------------------------------------------------------------ */
 
 const WIDTH_MAP = {
-  compact: '34em',
-  normal: '42em',
-  wide: '50em',
+  compact: '720px',
+  normal: '880px',
+  wide: '1040px',
 };
 
 /** 把偏好写进对应的 CSS 变量。空值 = 回到 tokens.css 的出厂默认。 */

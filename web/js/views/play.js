@@ -17,7 +17,7 @@ import {
 import { ui } from '../store.js';
 import { openMemoryPanel } from '../panels/memory.js';
 import { formatNarrative } from '../markdown.js';
-import { usageBar, buildRing, hueTint } from '../ui-kit.js';
+import { usageBar, buildRing } from '../ui-kit.js';
 
 const TONE_MARK = { 激进: '!', 谨慎: '·', 探索: '?', 情感: '♡', 智取: '○', 诡道: '△' };
 
@@ -42,13 +42,14 @@ export default {
     let lastTurnNo = 0;
     let contextMeta = null;
     let assemblerBudget = null;
+    let fallbackNotified = false;
 
     /* ---------------- DOM ---------------- */
     let navTitle, navSub, scroll, msgList, branchHost, composerWrap, ctxMeterFill;
     let input, sendBtn, attachStrip, quickRow, selStrip, ringSlot, jumpBtn, fileInput;
 
     /* ---------------- 骨架 ---------------- */
-    navTitle = el('div.topbar-title', {}, '加载中');
+    navTitle = el('div', {}, '加载中');
     navSub = el('div.topbar-sub', {}, '');
     ringSlot = el('span', { style: 'display:flex;' });
 
@@ -170,7 +171,8 @@ export default {
       } catch { /* 忽略 */ }
     }
 
-    const card = await loadWorldCard();
+    // 阅读视图用会话创建时冻结的卡片快照，不读作者后来改过的模板。
+    const card = detail.card || await loadWorldCard();
     paintHeader(card);
     paintRing();
     paintCtxMeter();
@@ -245,7 +247,8 @@ export default {
 
     function renderEmpty(card2) {
       const host = scroll.querySelector('.play-body');
-      const seed = String(card2?.anchors?.[0]?.opening_seed || '').trim();
+      const anchor = card2?.anchors?.find((a) => a.id === detail?.session?.anchor_id) || card2?.anchors?.[0];
+      const seed = String(anchor?.opening_seed || '').trim();
       if (seed) {
         appendNarrator(seed, '', 1, { label: '序幕', host, noUsage: true });
         showStartButtons();
@@ -281,9 +284,7 @@ export default {
      * 消息节点
      * ===================================================================== */
     function narratorGlyph() {
-      const hue = world?.cover_hue ?? 220;
-      return el('div.narr-glyph', { style: `background:${hueTint(hue, { s: 26, l: 40 })};` },
-        [...(world?.title || '叙')][0]);
+      return el('div.narr-glyph', {}, [...(world?.title || '叙')][0]);
     }
 
     function appendNarrator(content, reasoning, turnNo, opts = {}) {
@@ -323,6 +324,12 @@ export default {
       const target = host || scroll.querySelector('.play-body');
       const node = el('div.player');
       const bubble = el('div.player-bubble');
+      const who = detail?.card?.player?.name || world?.player?.name || '你';
+
+      node.appendChild(el('div.player-head', {},
+        el('span.player-glyph', {}, [...who][0] || '你'),
+        el('span.player-label', {}, who),
+      ));
 
       const imgs = normalizeImages(images);
       if (imgs.length) {
@@ -447,6 +454,7 @@ export default {
         switch (evt.type) {
           case 'turn_start': {
             lastTurnNo = evt.turn_no || lastTurnNo + 1;
+            fallbackNotified = false;
             const host = scroll.querySelector('.play-body');
             const mark = turnMark(lastTurnNo, Date.now());
             if (pending.parentNode) host.insertBefore(mark, pending);
@@ -496,12 +504,45 @@ export default {
             schedulePaint();
             break;
           }
+          case 'draft_start':
+            // 分段演绎开始：此时还没有正文，保持「演绎中」占位。
+            fallbackNotified = false;
+            break;
+          case 'draft_delta': {
+            ensureLive();
+            live.text += evt.delta || '';
+            schedulePaint();
+            break;
+          }
+          case 'draft_reset': {
+            ensureLive();
+            live.text = evt.content || '';
+            schedulePaint();
+            break;
+          }
+          case 'draft_done':
+            if (live && evt.content != null) live.text = evt.content;
+            break;
+          case 'tool_call': {
+            if (!pendingGone) {
+              const label = pending.querySelector('span:last-child');
+              if (label) label.textContent = evt.label ? `${evt.label}…` : '处理中…';
+            }
+            break;
+          }
+          case 'narration_fallback':
+            if (!fallbackNotified) {
+              fallbackNotified = true;
+              toast('分段演绎不可用，已回退单发', { type: 'warn' });
+            }
+            break;
           case 'narrative_done':
-            if (evt.content) live.text = evt.content;
+            if (live && evt.content) live.text = evt.content;
             break;
           case 'narrative_reset':
             if (live) { live.text = ''; live.reasoning = ''; }
             if (live?.prose) live.prose.innerHTML = '';
+            if (live?.thinkBody) live.thinkBody.textContent = '';
             break;
           case 'branches':
             if (evt.branches?.length) {
@@ -516,6 +557,18 @@ export default {
               paintRing();
             }
             break;
+          case 'summary': {
+            // 前情提要：best-effort。成功时给一条轻提示，失败静默（下一拍会再判）。
+            if (evt.state === 'end' && evt.ok) {
+              memStats = {
+                ...(memStats || {}),
+                summary: { covers_turn_to: evt.covers_turn_to, tokens: evt.tokens },
+              };
+              paintRing();
+              toast(`前情提要已更新（覆盖到第 ${evt.covers_turn_to} 轮）`, { type: 'info' });
+            }
+            break;
+          }
           case 'done': {
             if (evt.usage && live) live.usage = evt.usage;
             finalize(evt);
@@ -967,11 +1020,38 @@ export default {
     /* =====================================================================
      * 更多 / 搜索
      * ===================================================================== */
+    function segmentationOn() {
+      return detail?.session?.settings?.narration_mode === 'segmented';
+    }
+
+    function segmentationLabel() {
+      const v = detail?.session?.settings?.narration_mode;
+      if (v === 'segmented') return '分段演绎：已开';
+      if (v === 'single') return '分段演绎：已关';
+      return '开启分段演绎';
+    }
+
+    async function toggleSegmentation() {
+      const next = segmentationOn() ? 'single' : 'segmented';
+      try {
+        const updated = await api.patchSession(sessionId, { settings: { narration_mode: next } });
+        if (detail?.session) detail.session = updated || { ...detail.session, settings: { ...(detail.session.settings || {}), narration_mode: next } };
+        toast(next === 'segmented' ? '已开启分段演绎（下一拍生效）' : '已关闭分段演绎', { type: 'success' });
+      } catch (err) {
+        toast(err.message || '切换失败', { type: 'error' });
+      }
+    }
+
     async function openMore() {
       const action = await openActionSheet({
         title: detail.session?.title || '剧情',
         actions: [
           { label: '接着演绎', value: 'continue', icon: 'sparkles' },
+          {
+            label: segmentationLabel(),
+            value: 'segmented',
+            icon: 'sparkles',
+          },
           { label: '换一批走向', value: 'branches', icon: 'compass' },
           { label: '搜索本段剧情', value: 'search', icon: 'search' },
           { label: '回忆旧事', value: 'recall', icon: 'rewind' },
@@ -983,6 +1063,7 @@ export default {
         ],
       });
       if (action === 'continue') send({ silent: true, generateBranches: true });
+      else if (action === 'segmented') toggleSegmentation();
       else if (action === 'branches') regenerateBranches();
       else if (action === 'search') openSearch();
       else if (action === 'recall') openRecall();

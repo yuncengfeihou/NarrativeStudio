@@ -12,16 +12,23 @@ import { el, fmtTokens, fmtPercent, fmtNumber, fmtDuration } from './util.js';
  * ========================================================================= */
 
 /**
- * 由色相生成一个「纸感」底色——低饱和、低亮度差。
- * 之前的高饱和渐变会让整个界面显得很吵；这里只求能区分不同世界卡。
+ * 由色相生成一个低饱和底色——不抢朱砂，只用来区分不同世界卡。
  */
-export function hueTint(hue, { s = 26, l = 32, alpha = 1 } = {}) {
+export function hueGlyph(hue) {
   const h = ((Number(hue) || 210) % 360 + 360) % 360;
-  return `hsla(${h.toFixed(0)}, ${s}%, ${l}%, ${alpha})`;
+  return {
+    background: `color-mix(in srgb, hsl(${h} 40% 55%) 8%, var(--accent-soft))`,
+    color: `color-mix(in srgb, hsl(${h} 45% 32%) 30%, var(--accent-ink))`,
+  };
 }
 
-export function hueGlyph(hue) {
-  return { background: hueTint(hue, { s: 30, l: 38 }) };
+/** 卡片封面用的低饱和色相底：亮面 + 深字，仍然只有一层很淡的彩色。 */
+export function hueCover(hue) {
+  const h = ((Number(hue) || 210) % 360 + 360) % 360;
+  return {
+    background: `linear-gradient(150deg, color-mix(in srgb, hsl(${h} 40% 58%) 5%, var(--accent-soft)) 0%, color-mix(in srgb, hsl(${h} 40% 52%) 14%, var(--accent-soft)) 100%)`,
+    color: `color-mix(in srgb, hsl(${h} 45% 30%) 25%, var(--accent-ink))`,
+  };
 }
 
 /* =========================================================================

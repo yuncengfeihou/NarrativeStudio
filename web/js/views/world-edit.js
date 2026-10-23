@@ -9,7 +9,7 @@ import { el, clear, charCount } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, showLoading, hideLoading, openSheet, openActionSheet } from '../app.js';
-import { hueTint } from '../ui-kit.js';
+import { hueCover, hueGlyph } from '../ui-kit.js';
 
 export default {
   id: 'world-edit',
@@ -149,7 +149,7 @@ export default {
 
     function hero() {
       const cover = el('div.editor-cover', {
-        style: `background:${hueTint(model.coverHue, { s: 34, l: 38 })};`,
+        style: hueCover(model.coverHue),
         title: '点击更换封面色调',
         role: 'button',
         tabindex: '0',
@@ -191,11 +191,11 @@ export default {
       });
       slider.value = String(draftHue);
       const preview = el('div', {
-        style: `width:48px;height:48px;border-radius:8px;flex:none;background:${hueTint(draftHue, { s: 34, l: 38 })};`,
+        style: { width: '48px', height: '48px', borderRadius: '8px', flex: 'none', ...hueCover(draftHue) },
       });
       slider.addEventListener('input', () => {
         draftHue = Number(slider.value);
-        preview.style.background = hueTint(draftHue, { s: 34, l: 38 });
+        preview.style.background = hueCover(draftHue).background;
       });
       openSheet({
         title: '封面色调',
@@ -546,7 +546,7 @@ export default {
 
         const hue = (index * 47 + 200) % 360;
         const avatar = el('div.cast-avatar', {
-          style: `background:${hueTint(hue, { s: 32, l: 40 })};`,
+          style: hueGlyph(hue),
         }, [...(c.name || '新')][0]);
 
         const nameInput = el('input.cast-name-input', {
@@ -570,7 +570,7 @@ export default {
           alwaysSw.setAttribute('aria-checked', String(c.always_present));
         });
 
-        const card = el('div.cast-card', { style: `--char-hue:${hueTint(hue, { s: 32, l: 40 })};` });
+        const card = el('div.cast-card', { style: `--char-hue:${hueGlyph(hue).color};` });
         const collapseBtn = el('button.btn-icon.cast-collapse', {
           type: 'button', title: '收起', 'aria-label': '收起角色',
           onclick: (e) => {

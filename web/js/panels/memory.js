@@ -17,6 +17,7 @@ const PATCH_KIND_LABEL = {
   contradiction: '矛盾', knowledge_breach: '知识越界', timeline: '时间线',
   alias: '别名冲突', stale_thread: '线索陈旧', state_jump: '状态跳变',
   offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '断言',
+  world_change: '世界变化',
 };
 const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', info: '提示' };
 
@@ -29,6 +30,8 @@ export async function openMemoryPanel(sessionId, opts = {}) {
   let voices = [];
   let patches = [];
   let branches = [];
+  let worldChanges = [];
+  let worldVersion = null;
 
   function renderBody() {
     const body = el('div', {});
@@ -43,6 +46,7 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       { label: '回合', value: fmtNumber(data.turn_count), hint: '原文逐字保留，永不修改' },
       { label: '场次', value: fmtNumber(data.scene_count), hint: '每场从完整原文重写，不是摘要的摘要' },
       { label: '有效断言', value: fmtNumber(assertions.length), hint: '带有效期；冲突时旧的失效，不删除' },
+      { label: '世界变化', value: fmtNumber(worldChanges.length), hint: '本局世界线相对初始卡片的增量，不写回模板' },
       { label: '未回收线索', value: fmtNumber(threads.filter((t) => t.status === 'open').length), hint: '埋了没收的，和已经收掉的' },
       { label: '原声样本', value: fmtNumber(voices.length), hint: '从正文里摘的台词，用来锚定声音' },
       { label: '待处理', value: fmtNumber(patches.filter((p) => p.status !== 'applied' && p.status !== 'dismissed').length), hint: '校勘与幕后推演的提案' },
@@ -69,6 +73,40 @@ export async function openMemoryPanel(sessionId, opts = {}) {
             : '这是一张原创世界卡：没有原著路线，故事完全由玩家与角色推动。'),
       ));
     }
+
+    /* ---------------- 本局世界状态 ---------------- */
+    body.appendChild(el('h4', {}, '本局世界状态'));
+    body.appendChild(el('p.muted', {},
+      `相对初始卡片的变化。它只属于这条世界线，新会话仍从初始设定开始${worldVersion ? `（模板 v${worldVersion}）` : ''}。`));
+    const changeList = el('div.mem-states');
+    if (!worldChanges.length) changeList.appendChild(el('p.muted', {}, '还没有变化。世界仍等于开局设定。'));
+    for (const c of worldChanges.slice(-80).reverse()) {
+      const value = typeof c.value === 'string' ? c.value : JSON.stringify(c.value);
+      changeList.appendChild(el('div.mem-state', {},
+        el('span.mem-state-who', {}, `${c.entity_id}${c.path ? `·${c.path}` : ''}`),
+        el('span.mem-state-fields', {},
+          `${c.op === 'introduce' ? '登场' : c.op === 'add' ? '新增' : c.op === 'remove' ? '移除' : '改为'} ${truncate(value, 90)}`
+          + `（第 ${c.valid_from} 轮）`),
+      ));
+    }
+    body.appendChild(changeList);
+    body.appendChild(el('button.btn.btn-secondary.btn-sm', {
+      type: 'button', style: 'margin-top:8px;',
+      onclick: async () => {
+        const ok = await confirmDialog({
+          title: '定稿为新的世界卡？',
+          message: '会把本局当前的人物状态、知识、辞书与新出场实体固化到一张新卡，并生成一个当前场景的起点锚点。原世界卡与进行中的会话都不会被改动。',
+          confirmText: '定稿',
+        });
+        if (!ok) return;
+        try {
+          const r = await api.canonizeSession(sessionId);
+          toast(`已生成世界卡：${r.world.title}`, { type: 'success' });
+        } catch (err) {
+          toast(err.message || '定稿失败', { type: 'error' });
+        }
+      },
+    }, icon('book', { size: 13 }), '定稿为新世界卡'));
 
     /* ---------------- 分支 ---------------- */
     body.appendChild(el('h4', {}, '分支'));
@@ -258,7 +296,7 @@ export async function openMemoryPanel(sessionId, opts = {}) {
 
   async function refresh() {
     try {
-      const [mem, a, st, sc, th, v, p, br] = await Promise.all([
+      const [mem, a, st, sc, th, v, p, br, ws] = await Promise.all([
         api.getMemory(sessionId),
         api.getAssertions(sessionId),
         api.getStates(sessionId),
@@ -267,6 +305,7 @@ export async function openMemoryPanel(sessionId, opts = {}) {
         api.getVoices(sessionId),
         api.getPatches(sessionId),
         api.getBranches(sessionId),
+        api.getWorldState(sessionId),
       ]);
       data = mem;
       assertions = a.assertions || [];
@@ -276,6 +315,8 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       voices = v.voices || [];
       patches = p.patches || [];
       branches = br.branches || [];
+      worldChanges = ws.changes || [];
+      worldVersion = ws.world_version ?? null;
       clear(sheetApi.body);
       sheetApi.body.appendChild(renderBody());
       opts.onUpdate?.(mem);

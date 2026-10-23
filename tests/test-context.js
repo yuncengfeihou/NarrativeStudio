@@ -235,6 +235,378 @@ console.log('\n=== 分支感知 ===');
   ok(ctx.meta.branch === 'b2', '元数据记录当前分支');
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 会话冻结模板快照 ===');
+{
+  const wid = `w-snap-${Date.now()}`;
+  const snapshotCard = schema.normalizeCard({
+    ...card,
+    prompt: { ...card.prompt, premise: '原始命题：只属于这一局。' },
+  });
+  store.saveWorld({ id: wid, title: '模板', card: snapshotCard });
+  const sid = `s-snap-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: wid, title: '快照局',
+    cardSnapshot: snapshotCard, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const snapSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  // 作者后来改卡：旧会话必须继续用旧快照。
+  store.saveWorld({
+    id: wid,
+    title: '模板',
+    card: schema.normalizeCard({
+      ...snapshotCard,
+      prompt: { ...snapshotCard.prompt, premise: '被改写的命题：只给新会话看。' },
+      cast: [...snapshotCard.cast, { id: 'new-face', name: '新角色' }],
+    }),
+  });
+
+  const ctx = await engine.assembleContext({
+    session: snapSession, world: store.getWorld(wid), turnNo: 1, isOpening: true,
+  });
+  const system = ctx.messages[0].content;
+  ok(system.includes('原始命题'), '旧会话读自己的卡快照');
+  ok(!system.includes('被改写的命题'), '作者改卡不追溯旧会话');
+  ok(!system.includes('新角色'), '旧会话看不到后加的人物');
+  ok(store.getWorld(wid).version >= 2, '世界卡版本递增');
+
+  // 运行期增量叠加在快照上，而不是写回卡片。
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    path: 'knowledge.knows', op: 'add', value: '快照局里她后来才知道的秘密',
+    turn: 2, source: 'archivist',
+  });
+  const after = await engine.assembleContext({
+    session: snapSession, world: store.getWorld(wid), turnNo: 3, playerText: '玥姐姐站在那里。',
+  });
+  const sheet = after.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheet.includes('快照局里她后来才知道的秘密'), '世界线增量进入场记单');
+  const liveLingYue = store.getWorld(wid).card.cast.find((c) => c.id === 'ling-yue');
+  ok(!(liveLingYue?.knowledge?.knows || []).includes('快照局里她后来才知道的秘密'), '运行期不写回模板');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 剧情里新增的实体与事实 ===');
+{
+  const sid = `s-dyn-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: '动态局', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const dynSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: 'a-jiu',
+    op: 'introduce', value: { name: '阿九', role: '听雨楼的跑堂' }, turn: 2,
+  });
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'codex', entity_id: 'tingyu-lou',
+    op: 'introduce', value: { type: 'place', name: '听雨楼', summary: '城南的暗线据点' }, turn: 2,
+  });
+  store.addAssertion(sid, {
+    branch_id: 'main', subject: '凌玥', predicate: '知道', object: '伍卿见过南荣兰冰',
+    valid_from: 2, source_turn: 2, confidence: 1, visibility: 'engine',
+  });
+
+  const ctx = await engine.assembleContext({
+    session: dynSession, world, turnNo: 3, playerText: '阿九把我带进听雨楼，玥姐姐在楼上。',
+  });
+  ok(ctx.meta.present.some((c) => c.name === '阿九'), '剧情新增人物进入在场者');
+  ok(ctx.meta.codex.some((c) => c.name === '听雨楼'), '剧情新增地点能被点名带出');
+  const sheet = ctx.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheet.includes('已成立的事实'), '场记单渲染有效事实');
+  ok(sheet.includes('伍卿见过南荣兰冰'), '引擎事实进入场记单');
+}
+
+console.log('\n=== 前情提要：覆盖边界与最近原文 ===');
+{
+  const sid = `s-sum-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: '摘要局', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const sumSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  for (let i = 1; i <= 10; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `旧行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `旧正文${i}`, branch_id: 'main' });
+  }
+  store.addSummary(sid, {
+    branchId: 'main', coversTurnTo: 6,
+    text: '前六轮摘要：凌玥在雨街带走了伍卿，玉佩还在她手里。',
+  });
+
+  const ctx = await engine.assembleContext({
+    session: sumSession, world, turnNo: 9, playerText: '我继续往前走。',
+  });
+  const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+
+  ok(all.includes('【前情提要】'), '摘要层在场');
+  ok(all.includes('前六轮摘要'), '摘要内容在场');
+  ok(!all.includes('旧正文1'), '被覆盖的早期原文不再逐字出现');
+  ok(all.includes('旧正文7'), '覆盖边界之后的最近原文仍在');
+  ok(ctx.budget.summary > 0, '摘要层有独立预算');
+  eq(ctx.meta.summary?.covers_turn_to, 6, 'meta 记录摘要覆盖边界');
+  ok(ctx.messages[0].role === 'system', '摘要不改变 system 位置');
+  ok(ctx.messages[ctx.messages.length - 1].role === 'user', '本轮输入仍在最后');
+}
+
+console.log('\n=== 摘要触发：计划是纯函数 ===');
+{
+  const { planSummary } = await import('../server/agents/summarizer.js');
+  eq(planSummary({ turnNo: 7, active: null, every: 8, keepRecent: 4 }), null, '未到期不压');
+  eq(
+    planSummary({ turnNo: 8, active: null, every: 8, keepRecent: 4 }),
+    { from: 1, to: 4, covered: 0 },
+    '到期后覆盖到「最近保留」之前',
+  );
+  eq(planSummary({ turnNo: 9, active: { covers_turn_to: 4 }, every: 8, keepRecent: 4 }), null, '二次压缩未到期');
+  eq(
+    planSummary({ turnNo: 12, active: { covers_turn_to: 4 }, every: 8, keepRecent: 4 }),
+    { from: 5, to: 8, covered: 4 },
+    '二次压缩从上一份边界之后开始',
+  );
+  eq(planSummary({ turnNo: 5, active: { covers_turn_to: 4 }, every: 1, keepRecent: 6 }), null, '保留窗口内没有可压内容');
+}
+
+console.log('\n=== 检索结果：current 层、当拍注入 ===');
+{
+  const ctx = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '我走进司楼。',
+    retrieval: {
+      text: '【检索结果】以下是主演主动查阅的设定原文，只作此刻参考，不要整段复述。\n\n· 司楼（institution）\n  官营青楼\n  规则：入内即除籍',
+      queries: ['司楼'],
+      entries: [{ id: 'silou', name: '司楼', why: ['名称精确'] }],
+    },
+  });
+  const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  ok(all.includes('【检索结果】'), '检索结果进入上下文');
+  ok(all.includes('入内即除籍'), '检索到的全文在场');
+  ok(ctx.budget.retrieval > 0, '检索结果有独立预算');
+  eq(ctx.meta.retrieval?.queries, ['司楼'], 'meta 记录检索词');
+  ok(ctx.messages[ctx.messages.length - 1].role === 'user', '本轮输入仍在最后');
+  ok(!all.includes('关键词触发'), '检索不是关键词触发文案');
+}
+
+console.log('\n=== 检索预检：解析与约束 ===');
+{
+  const { parseRetrievalQueries } = await import('../server/agents/retrieval.js');
+  eq(parseRetrievalQueries('{"queries":["司楼","玉佩"]}'), ['司楼', '玉佩'], '解析查询数组');
+  eq(parseRetrievalQueries('```json\n{"queries":["听雨楼"]}\n```'), ['听雨楼'], '容忍代码围栏');
+  eq(parseRetrievalQueries('不需要查'), [], '解析失败返回空');
+  eq(parseRetrievalQueries('{"queries":[]}'), [], '空数组合法');
+}
+
+console.log('\n=== 分段演绎：草稿工作区与工具协议（纯函数） ===');
+{
+  const loop = await import('../server/agents/narrator-loop.js');
+  const narrator = await import('../server/agents/narrator.js');
+
+  eq(
+    loop.SEGMENTED_TOOLS.map((t) => t.function.name),
+    ['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup'],
+    '第一阶段只暴露四个工具',
+  );
+  eq(loop.resolveNarrationMode({ narration_mode: 'segmented' }, 'single'), 'segmented', '会话可开启分段模式');
+  eq(loop.resolveNarrationMode({ narration_mode: 'single' }, 'segmented'), 'single', '会话可显式关闭分段模式');
+  eq(loop.resolveNarrationMode({}, 'segmented'), 'segmented', '未设置时跟随进程默认值');
+  eq(loop.resolveNarrationMode({ narration_mode: 'bogus' }, 'single'), 'single', '非法值回落默认值');
+
+  const edited = loop.applyDraftEdit('雨落下来。保安在赶人。', '保安在赶人。', '保安退开了。');
+  eq(edited.text, '雨落下来。保安退开了。', '草稿修订只替换目标片段');
+  ok(edited.changed, '修订命中');
+  ok(!loop.applyDraftEdit('雨落下来。', '不存在', 'x').changed, '找不到片段时不修改');
+  eq(loop.applyDraftEdit('甲甲', '甲', '乙', { all: true }).text, '乙乙', '可全量替换');
+
+  const map = new Map();
+  loop.mergeToolCallDeltas(map, [{ index: 0, id: 'call_a', function: { name: 'draft_', arguments: '{"text":"' } }]);
+  loop.mergeToolCallDeltas(map, [{ index: 0, function: { name: 'append', arguments: '下一段"}' } }]);
+  eq(map.get(0).function.name, 'draft_append', '工具名分片合并');
+  eq(map.get(0).function.arguments, '{"text":"下一段"}', '工具参数分片合并');
+
+  eq(loop.parseToolArgs('```json\n{"query":"司楼"}\n```'), { query: '司楼' }, '工具参数容忍代码围栏');
+  eq(loop.parseToolArgs('不是 JSON'), {}, '非法参数降级为空对象');
+
+  const appended = loop.runSegmentedTool({ name: 'draft_append', args: { text: '第一段' }, draft: '', card });
+  eq(appended.draft, '第一段', '空草稿直接追加');
+  eq(appended.appended, '第一段', '首段不需要分隔符');
+  const appended2 = loop.runSegmentedTool({ name: 'draft_append', args: { text: '第二段' }, draft: '第一段', card });
+  eq(appended2.draft, '第一段\n\n第二段', '后续段落用空行分隔');
+
+  const hit = loop.runSegmentedTool({ name: 'codex_lookup', args: { query: '司楼' }, draft: '', card });
+  ok(hit.text.includes('入内即除籍'), '工具能按名称检索辞书全文');
+  ok(!hit.error, '有命中时不报错');
+  const miss = loop.runSegmentedTool({ name: 'codex_lookup', args: { query: '不存在的东西' }, draft: '', card });
+  ok(miss.text.includes('不要编造'), '无命中时明确要求不编造');
+
+  const sealEmpty = loop.runSegmentedTool({ name: 'draft_seal', args: {}, draft: '', card });
+  ok(sealEmpty.error, '空草稿不能定稿');
+  ok(!loop.runSegmentedTool({ name: 'draft_seal', args: {}, draft: '正文', card }).error, '有正文可以定稿');
+
+  const u1 = loop.mergeUsage(null, {
+    prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cached_tokens: 5,
+    reasoning_tokens: 0, duration_ms: 100, ttft_ms: 20, output_chars: 5,
+  });
+  const u2 = loop.mergeUsage(u1, {
+    prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cached_tokens: 5,
+    reasoning_tokens: 0, duration_ms: 100, ttft_ms: 30, output_chars: 5,
+  });
+  eq([u2.prompt_tokens, u2.completion_tokens, u2.total_tokens], [20, 10, 30], '多次调用 token 相加');
+  eq(u2.ttft_ms, 20, '首字延迟取第一次');
+  eq(u2.cache_rate, 0.5, '缓存率按新总量重算');
+
+  const history = [
+    { role: 'system', content: '契约' },
+    { role: 'user', content: '本轮行动' },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_1' }] },
+    { role: 'tool', tool_call_id: 'call_1', content: '啊'.repeat(300) },
+    { role: 'assistant', content: null, tool_calls: [{ id: 'call_2' }] },
+    { role: 'tool', tool_call_id: 'call_2', content: '啊'.repeat(300) },
+  ];
+  const removed = loop.trimToolHistory(history, 2, 400);
+  eq(removed, 2, '超预算时删掉最旧的一组工具往返');
+  ok(history[0].content === '契约' && history[1].content === '本轮行动', '基础上下文永不被裁');
+  ok(history.some((m) => m.tool_call_id === 'call_2'), '最新一组工具结果保留');
+  ok(!history.some((m) => m.tool_call_id === 'call_1'), '最旧一组被丢弃');
+
+  const built = narrator.buildNarratorMessages({
+    session: S,
+    world,
+    context: {
+      messages: [
+        { role: 'system', content: '契约' },
+        { role: 'user', content: '场记单' },
+        { role: 'user', content: '本轮行动' },
+      ],
+    },
+    segmentedNote: '【分段演绎】说明',
+  });
+  eq(built.filter((m) => m.role === 'system').length, 1, '分段模式仍然只有一条 system');
+  eq(built[built.length - 1].content, '本轮行动', '本轮行动仍在最后');
+  ok(built[built.length - 2].content.includes('分段演绎'), '分段说明插在最后一条 user 之前');
+}
+
+console.log('\n=== 分段演绎：完整工具循环（假流，无网络） ===');
+{
+  const { runNarratorSegmented } = await import('../server/agents/narrator-loop.js');
+  const { config } = await import('../server/config.js');
+
+  const usage = (p, c) => ({
+    prompt_tokens: p, completion_tokens: c, total_tokens: p + c,
+    cached_tokens: 0, reasoning_tokens: 0,
+    ttft_ms: 10, duration_ms: 20, output_chars: c, tps: 1, cache_rate: 0,
+  });
+  const contentEv = (text) => ({ type: 'content', delta: text });
+  const toolEv = (index, name, args, id) => ({
+    type: 'tool_calls',
+    delta: [{ index, id, function: { name, arguments: JSON.stringify(args) } }],
+  });
+  const metaEv = (u) => ({ type: 'meta', usage: u, model: 'fake-model', finishReason: 'stop' });
+  const fakeStream = (rounds) => {
+    let i = 0;
+    return async function* () {
+      for (const ev of rounds[i++] || []) yield ev;
+    };
+  };
+  const ctx = {
+    messages: [
+      { role: 'system', content: '契约' },
+      { role: 'user', content: '场记单' },
+      { role: 'user', content: '本轮行动' },
+    ],
+  };
+  const base = { session: S, world, context: ctx, turnNo: 1 };
+
+  // 1) 先查辞书，再写正文；没有工具调用的那一轮自动定稿。
+  const events = [];
+  const r1 = await runNarratorSegmented({
+    ...base,
+    stream: fakeStream([
+      [toolEv(0, 'codex_lookup', { query: '司楼' }, 'call_lookup'), metaEv(usage(10, 2))],
+      [contentEv('雨落下来。'), metaEv(usage(10, 3))],
+    ]),
+    onEvent: (e) => events.push(e),
+  });
+  eq(r1.content, '雨落下来。', '循环最终只返回定稿正文');
+  eq(r1.narration.rounds, 2, '查到设定后进入下一轮');
+  eq(r1.narration.tools, 1, '记录工具调用次数');
+  ok(r1.narration.sealed, '没有工具调用时自动定稿');
+  eq(r1.usage.prompt_tokens, 20, '多轮 usage 累加');
+  ok(!r1.content.includes('入内即除籍'), '工具结果不混进正文');
+  ok(events.some((e) => e.type === 'draft_start'), '发出 draft_start');
+  ok(events.some((e) => e.type === 'tool_call' && e.name === 'codex_lookup' && e.ok), '发出工具状态事件');
+  ok(events.some((e) => e.type === 'draft_delta' && e.delta.includes('雨落下来')), '正文增量实时上屏');
+  ok(events.some((e) => e.type === 'draft_done' && e.content === '雨落下来。'), '定稿事件带最终正文');
+
+  // 2) 追加 → 修订 → 定稿；修订必须让 UI 替换整段，而不是继续追加。
+  const events2 = [];
+  const r2 = await runNarratorSegmented({
+    ...base,
+    stream: fakeStream([
+      [toolEv(0, 'draft_append', { text: '第一段' }, 'call_a'), metaEv(usage(1, 1))],
+      [toolEv(0, 'draft_edit', { find: '第一段', replace: '改过的第一段' }, 'call_b'), metaEv(usage(1, 1))],
+      [toolEv(0, 'draft_seal', {}, 'call_c'), metaEv(usage(1, 1))],
+    ]),
+    onEvent: (e) => events2.push(e),
+  });
+  eq(r2.content, '改过的第一段', '修订后的草稿才是定稿');
+  eq(r2.narration.rounds, 3, '三次工具往返');
+  eq(r2.narration.tools, 3, '工具次数正确');
+  ok(r2.narration.sealed, 'draft_seal 结束循环');
+  ok(events2.some((e) => e.type === 'draft_reset' && e.content === '改过的第一段'), '修订发出 draft_reset');
+
+  // 3) 一直调工具时，到上限必须停，不能无限循环。
+  const oldMax = config.narration.maxRounds;
+  config.narration.maxRounds = 2;
+  try {
+    const r3 = await runNarratorSegmented({
+      ...base,
+      stream: fakeStream([
+        [toolEv(0, 'draft_append', { text: '甲' }, 'call_1'), metaEv(usage(1, 1))],
+        [toolEv(0, 'draft_append', { text: '乙' }, 'call_2'), metaEv(usage(1, 1))],
+        [toolEv(0, 'draft_append', { text: '丙' }, 'call_3'), metaEv(usage(1, 1))],
+      ]),
+    });
+    eq(r3.narration.rounds, 2, '到达轮数上限就停');
+    ok(!r3.narration.sealed, '未显式定稿时标记 sealed=false');
+    eq(r3.content, '甲\n\n乙', '上限前写下的内容仍然保留');
+  } finally {
+    config.narration.maxRounds = oldMax;
+  }
+
+  // 4) 工具报错不阻断循环：空草稿定稿被拒后，下一轮仍能继续写。
+  const r4 = await runNarratorSegmented({
+    ...base,
+    stream: fakeStream([
+      [toolEv(0, 'draft_seal', {}, 'call_bad'), metaEv(usage(1, 1))],
+      [contentEv('正文'), metaEv(usage(1, 2))],
+    ]),
+  });
+  eq(r4.content, '正文', '工具错误后继续下一轮');
+  ok(r4.narration.sealed, '下一轮无工具调用时定稿');
+
+  // 5) 取消必须向上抛，不能吞掉后继续写库。
+  let abortName = '';
+  try {
+    await runNarratorSegmented({
+      ...base,
+      stream: async function* () {
+        const err = new Error('aborted');
+        err.name = 'AbortError';
+        throw err;
+      },
+    });
+  } catch (err) {
+    abortName = err?.name || '';
+  }
+  eq(abortName, 'AbortError', '分段循环向上抛取消');
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-context: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

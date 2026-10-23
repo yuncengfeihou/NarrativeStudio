@@ -90,6 +90,12 @@ function normalizeCast(raw) {
         aliases: asStringArray(o.aliases),
         role: str(o.role),
         one_line: str(o.one_line),
+        // 运行期状态字段允许写在卡里作为初始值，但只有一个会话世界线能覆盖它们。
+        status: str(o.status),
+        condition: str(o.condition),
+        mood: str(o.mood),
+        location: str(o.location),
+        goal: str(o.goal),
         identity: {
           age: str(identity.age),
           appearance: str(identity.appearance),
@@ -269,6 +275,11 @@ function normalizePlayer(raw, cast) {
     inner_voice: str(p.inner_voice),
     wants: str(p.wants),
     afraid: str(p.afraid),
+    status: str(p.status),
+    condition: str(p.condition),
+    mood: str(p.mood),
+    location: str(p.location),
+    goal: str(p.goal),
     knowledge: {
       knows: asStringArray(knowledge.knows),
       does_not_know: asStringArray(knowledge.does_not_know),
@@ -378,6 +389,16 @@ export function resolveWho(name, aliasIndex) {
   if (!n) return '';
   const hit = aliasIndex.find((e) => e.alias === n);
   return hit ? hit.id : n;
+}
+
+/** 解析成实体引用；解析不了返回 kind=''，由调用方决定是否当作临时实体。 */
+export function resolveEntity(name, aliasIndex) {
+  const n = str(name);
+  if (!n) return { kind: '', id: '', name: '' };
+  const hit = (aliasIndex || []).find((e) => e.alias === n);
+  return hit
+    ? { kind: hit.kind, id: hit.id, name: hit.name }
+    : { kind: '', id: n, name: n };
 }
 
 /** 场景主题标签：在场实体的 tags ∪ 账本 theme_tags ∪ 线索 tags。 */

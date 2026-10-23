@@ -17,11 +17,12 @@
 import { config } from '../config.js';
 import { estimateMessageTokens, estimateTokens, truncateToTokens } from '../tokens.js';
 import { normalizeCard, buildAliasIndex, linkEntities, sceneThemeTags } from '../world/schema.js';
+import { buildEffectiveWorld, emptyCastEntry } from '../world/effective.js';
 import { renderWorldIndex, selectCodex, renderSceneSheet } from '../world/scene-sheet.js';
 import { narratorTailInstruction } from '../prompts/narrator.js';
 import {
-  getAnchor, getAnchors, getBranch, getCodex, getRelations, getRecentTurnsForBranch,
-  getRecentTextForBranch, getState, getThreads, getVoiceMap, getWorld,
+  getActiveSummary, getAssertions, getBranch, getRelations, getRecentTurnsForBranch,
+  getRecentTextForBranch, getState, getThreads, getVoiceMap, getWorldState,
 } from './store.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -35,8 +36,7 @@ const join = (arr, sep = '、') => (arr || []).filter(Boolean).join(sep);
  * 契约只留「怎么演」，不留世界观细节——细节走宪章、索引和场记单。
  * 硬性规则控制在 10 条以内：规则越多，越没有一条被真正执行。
  */
-export function buildContract(session, world) {
-  const card = normalizeCard(world?.card || {});
+export function buildContract(session, world, card = normalizeCard(world?.card || {})) {
   const p = card.prompt;
   const title = card.title || session?.title || '未命名剧情';
 
@@ -81,9 +81,10 @@ export function buildContract(session, world) {
 }
 
 /** 系统层总装：契约 + 命题 + 宪章 + 世界索引。 */
-export function buildSystemLayer(session, world, { indexCap = config.context.layerBudget.system } = {}) {
-  const card = normalizeCard(world?.card || {});
-  const parts = [buildContract(session, world)];
+export function buildSystemLayer(
+  session, world, { card = normalizeCard(world?.card || {}), indexCap = config.context.layerBudget.system } = {},
+) {
+  const parts = [buildContract(session, world, card)];
 
   const charter = (card.charter || [])
     .map((c, i) => `${i + 1}. ${c.rule}`)
@@ -120,8 +121,8 @@ export function buildSystemLayer(session, world, { indexCap = config.context.lay
 /* ══════════════════════════════════════════════════════════════════════ */
 
 /** 读当前场景账本；没有快照时退回起点锚点的 snapshot。 */
-function loadLedger(sessionId, anchor) {
-  const rec = getState(sessionId);
+function loadLedger(sessionId, anchor, { branchId, atTurn }) {
+  const rec = getState(sessionId, { branchId, atTurn });
   if (rec?.state) return { ...rec.state, turn_no: rec.turn_no };
   return { ...(anchor?.snapshot || {}), turn_no: 0 };
 }
@@ -150,7 +151,11 @@ function pickPresent(card, { ledger, linked }) {
   if (card.player?.canon_character) ids.add(card.player.canon_character);
   else if (card.player?.name) ids.add(card.player.name);
 
-  const present = [...ids].map((id) => byId.get(id) || byName.get(id)).filter(Boolean);
+  // 账本里出现过、但卡司里没有的名字，是剧情即兴造出来的人：
+  // 给一个最小条目，让他至少能进场，而不是被静默丢掉。
+  const present = [...ids]
+    .map((id) => byId.get(id) || byName.get(id) || emptyCastEntry(id, id))
+    .filter(Boolean);
 
   // 玩家角色可能不在卡司里（原创主角）。为他造一个最小条目，保证场记单有他。
   const playerId = card.player?.canon_character || card.player?.name;
@@ -162,6 +167,11 @@ function pickPresent(card, { ledger, linked }) {
       aliases: [],
       role: '主角',
       one_line: '',
+      status: p.status || '',
+      condition: p.condition || '',
+      mood: p.mood || '',
+      location: p.location || '',
+      goal: p.goal || '',
       identity: {},
       voice: { address: {}, rhythm: p.inner_voice || '', lexicon: [], never: [], exemplars: [] },
       psyche: { wants: p.wants ? [p.wants] : [], fears: p.afraid ? [p.afraid] : [], hides: [], values: [] },
@@ -301,6 +311,7 @@ function fitRecent(msgs, capTokens, floor = 3) {
  */
 export async function assembleContext({
   session, world, turnNo, playerText, images, branchChoice, isOpening = false, directive = '',
+  retrieval = null,
 }) {
   const budget = config.context.layerBudget;
   const hardMax = session?.settings?.context_max_tokens ?? config.context.maxTokens;
@@ -310,15 +321,17 @@ export async function assembleContext({
   const branch = getBranch(sessionId, branchId);
   const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
 
-  /* ---- 世界卡与锚点 ---- */
-  const card = normalizeCard(world?.card || {});
-  const worldRow = world ? getWorld(world.id) : null;
-  const anchors = worldRow ? getAnchors(world.id) : [];
-  const anchorId = session.anchor_id || anchors[0]?.anchor_id || null;
-  const anchor = worldRow && anchorId ? getAnchor(world.id, anchorId) : (anchors[0] || null);
+  /* ---- 模板快照 + 世界线增量 → 本轮真实有效的世界 ---- */
+  const templateCard = normalizeCard(session?.card_snapshot || world?.card || {});
+  const deltas = getWorldState(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0 });
+  const card = buildEffectiveWorld(templateCard, deltas);
+  const anchors = card.anchors || [];
+  const anchorId = session.anchor_id || anchors[0]?.id || null;
+  const anchor = anchors.find((a) => a.id === anchorId) || anchors[0] || null;
 
   /* ---- 账本 ---- */
-  const ledger = loadLedger(sessionId, anchor);
+  const ledgerAtTurn = Number.isInteger(turnNo) && turnNo > 0 ? turnNo - 1 : 0;
+  const ledger = loadLedger(sessionId, anchor, { branchId, atTurn: ledgerAtTurn });
 
   /* ---- 实体链接：只回答「提到了谁」，不回答「注入什么」 ---- */
   const aliasIndex = buildAliasIndex(card);
@@ -331,14 +344,16 @@ export async function assembleContext({
   const present = pickPresent(card, { ledger, linked });
 
   /* ---- 辞书 ---- */
-  const pinnedIds = worldRow
-    ? getCodex(world.id).filter((e) => e.pinned).map((e) => e.codex_id)
-    : [];
+  const pinnedIds = (card.codex || []).filter((e) => e.pinned).map((e) => e.id);
   const { candidates, themeTags } = pickCodex(card, { ledger, linked, pinnedIds });
 
-  /* ---- 关系 / 线索 ---- */
-  const relations = getRelations(sessionId, { limit: 60 });
-  const threads = getThreads(sessionId, { limit: 40 });
+  /* ---- 关系 / 线索 / 已成立的事实 ---- */
+  const relations = getRelations(sessionId, { branchId, limit: 60 });
+  const threads = getThreads(sessionId, { branchId, limit: 40 });
+  const presentKeys = new Set(present.flatMap((c) => [c.id, c.name]));
+  const facts = getAssertions(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0, limit: 60 })
+    .filter((a) => a.visibility !== 'secret' || presentKeys.has(a.subject))
+    .slice(0, 6);
 
   /* ---- 原声 → 回声 ---- */
   const echoes = buildEchoes(sessionId, { branchId, present });
@@ -357,19 +372,35 @@ export async function assembleContext({
     codex: candidates.slice(0, codexSlots),
     voices: {},
     echoes,
+    facts,
+    worldRuntime: card.runtime || {},
     directive: directive || str(session.settings?.scene_directive),
     capTokens: sceneCap,
   });
 
   /* ---- 系统层（稳定前缀） ---- */
-  const systemMsg = { role: 'system', content: buildSystemLayer(session, world, { indexCap: budget.system }) };
+  const systemMsg = { role: 'system', content: buildSystemLayer(session, world, { card, indexCap: budget.system }) };
+
+  /* ---- 前情提要（滚动摘要） ---- */
+  // atTurn 传当前回合：只取覆盖边界不超过本轮的摘要。摘要只影响装配，不改写 turns。
+  const summary = getActiveSummary(sessionId, {
+    branchId,
+    atTurn: Number.isInteger(turnNo) ? turnNo : 0,
+  });
+  const summaryMsg = summary
+    ? { role: 'user', content: `【前情提要】以下是更早剧情的接力摘要，是既定事实。\n\n${summary.text}` }
+    : null;
 
   /* ---- 最近原文 ---- */
   const rawRows = getRecentTurnsForBranch(sessionId, branchId, forkTurn, config.context.recentRawTurns + 4);
-  const recentRows = (Number.isInteger(turnNo) && turnNo > 0)
+  const visibleRows = (Number.isInteger(turnNo) && turnNo > 0)
     ? rawRows.filter((r) => r.turn_no < turnNo)
     : rawRows;
-  const recentMsgs = fitRecent(toRecentMessages(recentRows), budget.recent);
+  // 摘要覆盖过的回合不再逐字重复；最近保留回合永远逐字。
+  const recentRows = summary
+    ? visibleRows.filter((r) => r.turn_no > summary.covers_turn_to)
+    : visibleRows;
+  let recentMsgs = fitRecent(toRecentMessages(recentRows), budget.recent);
 
   /* ---- 本轮输入 ---- */
   const sceneNotes = (card.author_notes || []).filter((n) => n.scope === 'scene' || n.scope === 'session');
@@ -382,27 +413,40 @@ export async function assembleContext({
   }
   const currentMsg = buildCurrent(playerText, images, branchChoice, extra, buildTail(card, { directive: directiveText, isOpening }));
 
-  /* ---- 汇总 ---- */
-  const messages = [systemMsg, ...recentMsgs];
-  if (sheet.text) messages.push({ role: 'user', content: sheet.text });
-  messages.push(currentMsg);
+  /* ---- 汇总：system → 前情提要 → 最近原文 → 场记单 → 检索结果 → 本轮输入 ---- */
+  const sheetMsg = sheet.text ? { role: 'user', content: sheet.text } : null;
+  const retrievalMsg = retrieval?.text ? { role: 'user', content: retrieval.text } : null;
+  const compose = () => [
+    systemMsg,
+    ...(summaryMsg ? [summaryMsg] : []),
+    ...recentMsgs,
+    ...(sheetMsg ? [sheetMsg] : []),
+    ...(retrievalMsg ? [retrievalMsg] : []),
+    currentMsg,
+  ];
+  let messages = compose();
 
-  /* ---- 超预算降级：先砍回声，再按比例裁场记单，最后截最近原文 ---- */
+  /* ---- 超预算降级：场记单 → 摘要 → 最近原文减半 → 截最长非 system ---- */
+  // 最近原文是续演点，优先保住；摘要是压缩过的，截尾损失最小。
   const totalNow = () => messages.reduce((s, m) => s + estimateMessageTokens(m), 0);
-  let degraded = [];
-  if (totalNow() > softMax) {
-    const idx = messages.findIndex((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'));
-    if (idx >= 0) {
-      const excess = totalNow() - softMax;
-      const cur = estimateMessageTokens(messages[idx]);
-      const target = Math.max(600, cur - excess);
-      messages[idx] = { ...messages[idx], content: truncateToTokens(messages[idx].content, target) };
-      degraded.push('scene_sheet');
-    }
+  const degraded = [];
+  if (totalNow() > softMax && sheetMsg) {
+    const excess = totalNow() - softMax;
+    const cur = estimateMessageTokens(sheetMsg);
+    sheetMsg.content = truncateToTokens(sheetMsg.content, Math.max(600, cur - excess));
+    messages = compose();
+    degraded.push('scene_sheet');
+  }
+  if (totalNow() > softMax && summaryMsg) {
+    const excess = totalNow() - softMax;
+    const cur = estimateMessageTokens(summaryMsg);
+    summaryMsg.content = truncateToTokens(summaryMsg.content, Math.max(600, cur - excess));
+    messages = compose();
+    degraded.push('summary');
   }
   if (totalNow() > softMax) {
-    const trimmed = fitRecent(toRecentMessages(recentRows), Math.max(2000, budget.recent * 0.5));
-    messages.splice(1, messages.length - 2, ...trimmed);
+    recentMsgs = fitRecent(toRecentMessages(recentRows), Math.max(2000, budget.recent * 0.5));
+    messages = compose();
     degraded.push('recent');
   }
   for (let guard = 0; guard < 30 && totalNow() > hardMax; guard++) {
@@ -420,18 +464,23 @@ export async function assembleContext({
   const budgetOf = (content) => (content ? estimateTokens(content) + 4 : 0);
   const breakdown = {
     system: budgetOf(systemMsg.content),
+    summary: summaryMsg ? budgetOf(summaryMsg.content) : 0,
     recent: recentMsgs.reduce((s, m) => s + estimateMessageTokens(m), 0),
-    scene: budgetOf(messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content),
+    scene: sheetMsg ? budgetOf(sheetMsg.content) : 0,
+    retrieval: retrievalMsg ? budgetOf(retrievalMsg.content) : 0,
     current: estimateMessageTokens(currentMsg),
   };
-  breakdown.total = breakdown.system + breakdown.recent + breakdown.scene + breakdown.current;
+  breakdown.total = breakdown.system + breakdown.summary + breakdown.recent
+    + breakdown.scene + breakdown.retrieval + breakdown.current;
 
   return {
     messages,
     budget: breakdown,
+    // 本轮投影后的世界：下游 Agent（史官/世界呼吸/走向）用它，而不是模板。
+    card,
     state: ledger,
     ledger,
-    anchor: anchor ? { id: anchor.anchor_id, label: anchor.label } : null,
+    anchor: anchor ? { id: anchor.id, label: anchor.label } : null,
     recentTurns: recentRows,
     echoes,
     meta: {
@@ -442,7 +491,13 @@ export async function assembleContext({
       codex_total: card.codex.length,
       timeline_past: (card.timeline || []).filter((t) => t.canon === 'past').length,
       timeline_future_held: (card.timeline || []).filter((t) => t.canon === 'future').length,
+      world_state_changes: deltas.length,
+      facts: facts.length,
       branch: branchId,
+      summary: summary ? { id: summary.id, covers_turn_to: summary.covers_turn_to, tokens: breakdown.summary } : null,
+      retrieval: retrieval?.text
+        ? { queries: retrieval.queries || [], entries: retrieval.entries || [], tokens: breakdown.retrieval }
+        : null,
       degraded,
       soft_max: softMax,
       hard_max: hardMax,

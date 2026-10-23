@@ -54,6 +54,7 @@ async function handlePassthrough(req, res, body) {
 
   if (!wantsStream) {
     const out = await chat({
+      model: upstreamBody.model,
       messages: upstreamBody.messages,
       temperature: upstreamBody.temperature,
       maxTokens: upstreamBody.max_tokens,
@@ -230,6 +231,7 @@ async function handleRoleplay(req, res, body, sessionIdRaw) {
   send({ role: 'assistant', content: '' });
 
   let usage = null;
+  let sentContent = false;
   const aborter = new AbortController();
   res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
   const onEvent = (evt) => {
@@ -238,7 +240,15 @@ async function handleRoleplay(req, res, body, sessionIdRaw) {
         send({ reasoning_content: evt.delta, reasoning: evt.delta });
         break;
       case 'narrative':
+        sentContent = true;
         send({ content: evt.delta });
+        break;
+      case 'narrative_done':
+        // 分段演绎不逐段推 content（草稿可能被 draft_edit 改写），定稿后一次给出。
+        if (!sentContent && evt.content) {
+          sentContent = true;
+          send({ content: evt.content });
+        }
         break;
       case 'branches':
         if (evt.branches?.length) {

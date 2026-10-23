@@ -274,6 +274,41 @@ console.log('\n=== renderCardText（导出）===');
   ok(text.includes('## 可玩时间点'), '可玩时间点段');
 }
 
+console.log('\n=== 辞书检索（模型主动取证） ===');
+{
+  const card = schema.normalizeCard({
+    title: '检索测试',
+    codex: [
+      {
+        id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'],
+        summary: '官营青楼', tags: ['制度'], facets: { rules: ['入内即除籍'] },
+      },
+      {
+        id: 'yupei', type: 'item', name: '无纹玉佩', aliases: ['玉佩'],
+        summary: '遇暗发绿光', facets: { history: '凌玥所赠' },
+      },
+      {
+        id: 'chenghu', type: 'concept', name: '称呼礼法',
+        summary: '称公子是抬举', tags: ['制度'],
+      },
+    ],
+  });
+
+  eq(sheet.lookupCodex(card, '司楼').map((h) => h.entry.name), ['司楼'], '名称精确命中');
+  eq(sheet.lookupCodex(card, '青楼').map((h) => h.entry.name), ['司楼'], '别名命中');
+  eq(sheet.lookupCodex(card, '绿光').map((h) => h.entry.name), ['无纹玉佩'], '摘要命中');
+  eq(
+    sheet.lookupCodex(card, '制度').map((h) => h.entry.name).sort(),
+    ['司楼', '称呼礼法'].sort(),
+    '标签命中',
+  );
+  eq(sheet.lookupCodex(card, '不存在'), [], '无命中返回空');
+
+  const text = sheet.renderCodexHit(card.codex[0]);
+  ok(text.includes('入内即除籍'), '检索结果渲染规则');
+  ok(text.includes('官营青楼'), '检索结果渲染摘要');
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-world-card: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

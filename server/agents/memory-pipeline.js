@@ -12,9 +12,10 @@
  */
 import { config } from '../config.js';
 import { chat } from '../llm.js';
-import { normalizeCard } from '../world/schema.js';
+import { buildAliasIndex, normalizeCard, resolveEntity } from '../world/schema.js';
+import { pathsFor } from '../world/state-paths.js';
 import {
-  addPatch, addScene, getAssertions, getBranch, getCharStateMap, getScenes, getState,
+  addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getScenes, getState,
   getThreads, getTurnsForBranch, invalidateAssertion, latestScene,
   searchAssertions, searchTurns, setCharState, upsertThread,
 } from '../memory/store.js';
@@ -53,7 +54,7 @@ function branchCtx(session) {
  * 一场戏结束时调用：读这一场的完整原文，写一行场次记录。
  * 记录是检索入口，不是摘要——它必须能让人判断「这场里有什么」。
  */
-export async function closeScene({ session, world, turnNo, reason = '' }) {
+export async function closeScene({ session, world, turnNo, reason = '', guard }) {
   const { sessionId, branchId, forkTurn } = branchCtx(session);
   const prev = latestScene(sessionId, branchId);
   const from = prev ? prev.turn_to + 1 : 1;
@@ -62,7 +63,7 @@ export async function closeScene({ session, world, turnNo, reason = '' }) {
   const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { from, to: turnNo });
   if (!rows.length) return null;
 
-  const ledger = getState(sessionId)?.state || {};
+  const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const sceneNo = (prev ? Number(String(prev.scene_id).replace(/\D/g, '')) || 0 : 0) + 1;
   const sceneId = `S${String(sceneNo).padStart(3, '0')}`;
 
@@ -85,6 +86,7 @@ export async function closeScene({ session, world, turnNo, reason = '' }) {
       temperature: cfg.temperature,
       maxTokens: cfg.maxTokens,
       reasoningEffort: cfg.reasoningEffort,
+      model: cfg.model || undefined,
       responseFormat: { type: 'json_object' },
     });
     const parsed = obj(tryParseJson(res.content));
@@ -97,6 +99,8 @@ export async function closeScene({ session, world, turnNo, reason = '' }) {
   } catch (err) {
     console.warn(`[scene-keeper] LLM 失败，降级为纯结构记录：${err?.message || err}`);
   }
+
+  if (typeof guard === 'function' && !guard()) return null;
 
   addScene(sessionId, {
     branch_id: branchId,
@@ -128,7 +132,7 @@ export function detectSceneChange(session, update, turnNo) {
   if (!prev) return true;
   const sc = update?.scene_change || {};
   if (sc.changed) return true;
-  const ledger = getState(sessionId)?.state || {};
+  const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   if (str(ledger.place) && str(prev.place) && str(ledger.place) !== str(prev.place)) return true;
   const every = config.context.sceneEvery;
   if (every > 0 && turnNo > 0 && turnNo % every === 0) return true;
@@ -144,13 +148,16 @@ export function detectSceneChange(session, update, turnNo) {
  * 安全的补丁（invalidate_assertion / set_state / resolve_thread）由代码直接应用，
  * 其余留在 patches 表里给人看。
  */
-export async function runContinuity({ session, world, turnNo, signal }) {
+export async function runContinuity({ session, world, turnNo, signal, guard }) {
   const { sessionId, branchId, forkTurn } = branchCtx(session);
   const cfg = config.agents.continuity;
+  const card = normalizeCard(world?.card || {});
+  const aliasIndex = buildAliasIndex(card);
+  const playerName = card.player?.name || '';
 
   const assertions = getAssertions(sessionId, { branchId, limit: 200 });
   const states = getCharStateMap(sessionId, { branchId });
-  const threads = getThreads(sessionId, { limit: 40 });
+  const threads = getThreads(sessionId, { branchId, limit: 40 });
   const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { from: Math.max(1, turnNo - 12), to: turnNo });
   const recentText = rows.map((r) => `第${r.turn_no}轮${r.kind === 'player' ? '（玩家）' : ''}：${r.content}`).join('\n\n');
   if (!recentText) return { issues: [], healthy: [] };
@@ -171,6 +178,7 @@ export async function runContinuity({ session, world, turnNo, signal }) {
       temperature: cfg.temperature,
       maxTokens: cfg.maxTokens,
       reasoningEffort: cfg.reasoningEffort,
+      model: cfg.model || undefined,
       responseFormat: { type: 'json_object' },
       signal,
     });
@@ -200,6 +208,11 @@ export async function runContinuity({ session, world, turnNo, signal }) {
     })
     .filter((i) => i.claim);
 
+  // 分支守卫：审查是异步的，落补丁前核对分支/回合没变。
+  if (typeof guard === 'function' && !guard()) {
+    return { issues: [], healthy: [], applied: 0, stale: true };
+  }
+
   /* ---- 应用安全补丁 ---- */
   let applied = 0;
   for (const issue of issues) {
@@ -212,12 +225,29 @@ export async function runContinuity({ session, world, turnNo, signal }) {
     } else if (action === 'set_state' && issue.subject && value) {
       const [who, field] = target.includes('::') ? target.split('::') : [issue.subject, 'condition'];
       setCharState(sessionId, { branchId, who, field, value, turn: turnNo });
+      const ref = resolveEntity(who, aliasIndex);
+      const isPlayer = who === playerName;
+      const kind = isPlayer ? 'player' : (ref.kind || 'cast');
+      // 校勘模型可能给出任意字段；只有投影器认识的路径才写进世界状态。
+      if (pathsFor(kind)?.has(field)) {
+        addWorldState(sessionId, {
+          branch_id: branchId,
+          entity_kind: kind,
+          entity_id: isPlayer ? 'player' : (ref.id || who),
+          path: field,
+          op: 'set',
+          value,
+          turn: turnNo,
+          source: 'continuity',
+          evidence: issue.evidence,
+        });
+      }
       status = 'applied';
       applied++;
     } else if (action === 'resolve_thread' && target) {
       const hit = threads.find((t) => t.title === target);
       if (hit) {
-        upsertThread(sessionId, { title: hit.title, status: 'resolved', resolved_turn: turnNo });
+        upsertThread(sessionId, { branch_id: branchId, title: hit.title, status: 'resolved', resolved_turn: turnNo });
         status = 'applied';
         applied++;
       }
@@ -242,7 +272,7 @@ const TOOLS = {
   },
   get_threads: (sessionId, branchId, args) => {
     const status = str(args.status) || 'all';
-    return getThreads(sessionId, { status: status === 'all' ? null : status, limit: 30 })
+    return getThreads(sessionId, { branchId, status: status === 'all' ? null : status, limit: 30 })
       .map((t) => ({ title: t.title, status: t.status, note: t.note, planted_turn: t.planted_turn }));
   },
   get_scene: (sessionId, branchId, args) => {
@@ -260,7 +290,7 @@ const TOOLS = {
 export async function runLibrarian({ session, question, signal }) {
   const { sessionId, branchId } = branchCtx(session);
   const cfg = config.agents.librarian;
-  const scene = getState(sessionId)?.state || {};
+  const scene = getState(sessionId, { branchId })?.state || {};
   const sceneSummary = [scene.time, scene.place].filter(Boolean).join(' · ');
 
   const messages = [
@@ -275,6 +305,7 @@ export async function runLibrarian({ session, question, signal }) {
       temperature: cfg.temperature,
       maxTokens: cfg.maxTokens,
       reasoningEffort: cfg.reasoningEffort,
+      model: cfg.model || undefined,
       responseFormat: { type: 'json_object' },
       signal,
     });
@@ -317,12 +348,12 @@ export async function runLibrarian({ session, question, signal }) {
  * 玩家看不见的地方，人物按自己的私心行动。产出的事件只作为压力与流言
  * 进入下一场的场记单，不得改写已发生的剧情。
  */
-export async function runWorldTick({ session, world, turnNo, signal }) {
+export async function runWorldTick({ session, world, turnNo, signal, guard }) {
   const { sessionId, branchId } = branchCtx(session);
   const card = normalizeCard(world?.card || {});
   const cfg = config.agents.worldTick;
 
-  const ledger = getState(sessionId)?.state || {};
+  const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const presentIds = new Set(Object.keys(ledger.characters || {}));
   const playerName = card.player?.name || '';
   const offstage = (card.cast || [])
@@ -356,6 +387,7 @@ export async function runWorldTick({ session, world, turnNo, signal }) {
       temperature: cfg.temperature,
       maxTokens: cfg.maxTokens,
       reasoningEffort: cfg.reasoningEffort,
+      model: cfg.model || undefined,
       responseFormat: { type: 'json_object' },
       signal,
     });
@@ -380,6 +412,8 @@ export async function runWorldTick({ session, world, turnNo, signal }) {
     return { events: [], error: err?.message || String(err) };
   }
 
+  if (typeof guard === 'function' && !guard()) return { events: [], stale: true };
+
   for (const e of events) {
     addPatch(sessionId, {
       branchId, agent: 'world-tick', kind: 'offstage_event', turn_no: turnNo,
@@ -388,9 +422,9 @@ export async function runWorldTick({ session, world, turnNo, signal }) {
       payload: e, evidence: `第 ${turnNo} 轮幕后推演`,
     });
     if (e.thread) {
-      const open = getThreads(sessionId, { status: 'open', limit: 50 });
+      const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
       if (!open.some((t) => t.title === e.thread)) {
-        upsertThread(sessionId, { title: e.thread, status: 'open', weight: 0.5, planted_turn: turnNo, note: '世界呼吸推演' });
+        upsertThread(sessionId, { branch_id: branchId, title: e.thread, status: 'open', weight: 0.5, planted_turn: turnNo, note: '世界呼吸推演' });
       }
     }
   }

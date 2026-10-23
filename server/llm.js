@@ -202,6 +202,9 @@ function buildBody(opts, stream) {
   if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
   if (opts.reasoningFormat) body.reasoning_format = opts.reasoningFormat;
   if (opts.responseFormat) body.response_format = opts.responseFormat;
+  // 工具循环只用于分段演绎；工具结果由调用方自己管理，不进入 messages 的持久层。
+  if (Array.isArray(opts.tools) && opts.tools.length) body.tools = opts.tools;
+  if (opts.toolChoice) body.tool_choice = opts.toolChoice;
   // 请求上游在流末尾带上 usage，否则流式拿不到 token 统计
   if (stream) body.stream_options = { include_usage: true, ...(opts.streamOptions || {}) };
   return body;

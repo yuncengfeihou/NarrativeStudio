@@ -44,6 +44,13 @@ schema：
     "quests_update": [{"goal": "弄清她为什么认识自己", "progress": "还没问出口", "status": "active"}],
     "last_hook": "她说出「以前认识」四个字"
   },
+  "changes": [
+    {"kind": "cast", "id": "凌玥", "path": "knowledge.knows", "op": "add", "value": "七年前是她母亲把伍卿丢在街上"},
+    {"kind": "cast", "id": "凌玥", "path": "status", "op": "set", "value": "左肩中箭，强撑着"},
+    {"kind": "codex", "id": "玉佩", "path": "reveal", "op": "set", "value": "public"},
+    {"kind": "codex", "id": "tingyu-lou", "op": "introduce", "fields": {"type": "place", "name": "听雨楼", "summary": "城南的暗线据点"}},
+    {"kind": "cast", "id": "a-jiu", "op": "introduce", "fields": {"name": "阿九", "role": "听雨楼的跑堂"}}
+  ],
   "assertions": [
     {"subject": "凌玥", "predicate": "知道", "object": "七年前是她母亲把伍卿丢在街上", "confidence": 0.95, "visibility": "public", "evidence": "她盯着那条街看了一眼"}
   ],
@@ -72,6 +79,24 @@ schema：
 
 ## states
 - 与 ledger.characters 二选一即可，都写则以 states 为准。字段限定：${STATE_FIELDS.join(' / ')}
+
+## changes（世界线的运行期状态）
+- 用来记「这个世界后来变了什么」，只写本轮正文明确支撑的变化。
+- kind / path 白名单（不在表内的会被代码拒绝）：
+  - cast: status / condition / mood / location / goal / one_line / role / aliases；
+    knowledge.knows / knowledge.does_not_know / knowledge.believes_falsely；
+    psyche.wants / psyche.fears / psyche.hides / psyche.values
+  - codex: summary / detail / reveal / facets.sensory / facets.history；
+    facets.rules / facets.consequences / aliases / tags / links
+  - player: situation / capability / inner_voice / wants / afraid；
+    status / condition / mood / location / goal；
+    knowledge.knows / knowledge.does_not_know
+  - world: status（城邦/阵营/天下的整体局势，例如「全城戒严」）
+- op：set 写标量；add / remove 写列表；introduce 让剧情里第一次出现的实体进入当前世界线。
+- 角色在正文里学到/误解/遗忘一件事，必须写 knowledge.*；不要只写进 assertions 就完事。
+- 死亡、重伤、失势、身份变化写 cast.status；不要让世界索引一直显示开局标签。
+- 新地点/新物件/新人物用 introduce，给出 name 与最小 fields；它们只属于这一局，不会写回世界卡。
+- 身份根（id / name / identity / voice）不可写。运行时改名请用 aliases，不要改 name。
 
 ## relations
 - 只写本轮**态度发生实质变化**的人物对。sentiment -1（死敌）到 +1（性命相托）。

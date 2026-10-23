@@ -170,6 +170,20 @@ console.log('\n=== 记忆六表 ===');
 
   const br = await req('GET', `/api/sessions/${SESSION_ID}/branches`);
   ok(br.data.current === 'main', '分支列表');
+
+  const detail = await req('GET', `/api/sessions/${SESSION_ID}`);
+  ok(detail.data.card?.title === '接口测试世界', '会话返回冻结的卡片快照');
+  ok(detail.data.world_version >= 1, '会话记录模板版本');
+
+  const ws = await req('GET', `/api/sessions/${SESSION_ID}/world-state`);
+  ok(ws.status === 200 && Array.isArray(ws.data.changes), '世界状态增量可读');
+
+  const canon = await req('POST', `/api/sessions/${SESSION_ID}/canonize`, {
+    title: '接口测试定稿', anchor_label: '从屋内继续',
+  });
+  ok(canon.status === 201 && canon.data.world.id !== WORLD_ID, '世界线可定稿为独立新卡');
+  ok(canon.data.card.anchors.some((a) => a.label === '从屋内继续'), '定稿生成新锚点');
+  await req('DELETE', `/api/worlds/${canon.data.world.id}`);
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -179,6 +193,9 @@ console.log('\n=== 作者笔记与场记指令 ===');
   ok(n.status === 201, '添加作者笔记');
   const d = await req('PATCH', `/api/sessions/${SESSION_ID}`, { scene_directive: '这一场只写两个人对视' });
   ok(d.data.settings.scene_directive === '这一场只写两个人对视', '设置本场指令');
+  const seg = await req('PATCH', `/api/sessions/${SESSION_ID}`, { settings: { narration_mode: 'segmented' } });
+  ok(seg.data.settings.narration_mode === 'segmented', '可开启分段演绎');
+  ok(seg.data.settings.scene_directive === '这一场只写两个人对视', 'settings 局部更新不丢已有键');
   const del = await req('DELETE', `/api/sessions/${SESSION_ID}/notes/${n.data.id}`);
   ok(del.status === 200, '删除笔记');
 }

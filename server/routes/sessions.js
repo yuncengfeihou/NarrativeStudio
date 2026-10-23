@@ -7,13 +7,13 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import {
-  auditSession, createSessionWithSettings, forkSession, getMemoryStats, getSessionSnapshot,
-  recallSession, runTurn,
+  auditSession, canonizeSession, createSessionWithSettings, forkSessionSafe, getMemoryStats,
+  getSessionSnapshot, recallSession, runTurn,
 } from '../agents/orchestrator.js';
 import {
   addAssertion, addNote, deleteNote, deleteSession, deleteVoice, getAssertions,
   getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
-  getTurnsForBranch, getTurn, getVoices, getWorld, listBranches, listPatches, listSessions,
+  getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
   retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
   updateTurnContent,
 } from '../memory/store.js';
@@ -47,6 +47,13 @@ sessionsRouter.get('/config', (req, res) => {
       narrator_max_tokens: config.agents.narrator.maxTokens,
     },
     budget: config.context.layerBudget,
+    narration: {
+      default_mode: config.narration.mode,
+      max_rounds: config.narration.maxRounds,
+      round_max_tokens: config.narration.roundMaxTokens,
+      tool_history_tokens: config.narration.toolHistoryTokens,
+      tool_result_max_tokens: config.narration.toolResultMaxTokens,
+    },
   });
 });
 
@@ -227,7 +234,7 @@ sessionsRouter.post('/sessions/:id/branches', async (req, res) => {
     const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
     const recent = getRecentTurnsForBranch(session.id, branchId, forkTurn, 2)
       .filter((t) => t.kind === 'narrator').pop();
-    const st = getState(session.id);
+    const st = getState(session.id, { branchId: session.branch_id || 'main' });
     const result = await runBranchAgent({
       world,
       state: st?.state || null,
@@ -260,7 +267,7 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
 
   try {
     // 重写 = 从这一轮开新分支，旧线保留为「如果当时那么写」
-    const fork = forkSession({ sessionId: session.id, toTurn: turnNo - 1, note: `重写第 ${turnNo} 轮` });
+    const fork = await forkSessionSafe({ sessionId: session.id, toTurn: turnNo - 1, note: `重写第 ${turnNo} 轮` });
     send({ type: 'fork', branch: fork.branch_id, fork_turn: fork.fork_turn });
     const guidance = String(req.body?.guidance || '').trim();
     await runTurn({
@@ -282,21 +289,48 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
 });
 
 /** 回滚 = 开新分支。旧分支标 abandoned，历史不删。 */
-sessionsRouter.post('/sessions/:id/rollback', (req, res) => {
+sessionsRouter.post('/sessions/:id/rollback', async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
   const turnNo = Number(req.body?.turn_no);
   if (!Number.isInteger(turnNo) || turnNo < 0) {
     return res.status(400).json({ error: { message: 'turn_no must be a non-negative integer' } });
   }
-  const fork = forkSession({ sessionId: session.id, toTurn: turnNo, note: `回到第 ${turnNo} 轮` });
-  res.json({ ...fork, turn_no: turnNo, memoryStats: getMemoryStats(session.id) });
+  try {
+    const fork = await forkSessionSafe({ sessionId: session.id, toTurn: turnNo, note: `回到第 ${turnNo} 轮` });
+    res.json({ ...fork, turn_no: turnNo, memoryStats: getMemoryStats(session.id) });
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
 
 sessionsRouter.get('/sessions/:id/branches', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
   res.json({ branches: listBranches(session.id), current: session.branch_id || 'main' });
+});
+
+/** 把当前世界线定稿为一张新世界卡（显式操作，不改动旧会话）。 */
+sessionsRouter.post('/sessions/:id/canonize', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  try {
+    const body = req.body || {};
+    const targetId = body.id ? String(body.id) : null;
+    if (targetId && getWorld(targetId)) {
+      return res.status(409).json({ error: { message: 'world id already exists' } });
+    }
+    const result = canonizeSession({
+      sessionId: session.id,
+      title: String(body.title || '').trim(),
+      anchorLabel: String(body.anchor_label || '').trim(),
+      openingSeed: String(body.opening_seed || '').trim(),
+      id: targetId,
+    });
+    res.status(201).json(result);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
 
 /* --------------------------- 检索与校勘 --------------------------- */
@@ -386,8 +420,8 @@ sessionsRouter.put('/sessions/:id/state', (req, res) => {
   const next = req.body?.state;
   if (!next || typeof next !== 'object') return res.status(400).json({ error: { message: 'state object is required' } });
   const turnNo = req.body?.turn_no ?? getMaxTurnNo(session.id);
-  setState(session.id, Number(turnNo), next);
-  res.json({ state: next, turn_no: Number(turnNo) });
+  setState(session.id, Number(turnNo), next, session.branch_id || 'main');
+  res.json({ state: next, turn_no: Number(turnNo), branch: session.branch_id || 'main' });
 });
 
 sessionsRouter.get('/sessions/:id/scenes', (req, res) => {
@@ -399,7 +433,22 @@ sessionsRouter.get('/sessions/:id/scenes', (req, res) => {
 sessionsRouter.get('/sessions/:id/threads', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  res.json({ threads: getThreads(session.id, { limit: 100 }) });
+  res.json({ threads: getThreads(session.id, { branchId: session.branch_id || 'main', limit: 100 }) });
+});
+
+/** 本局世界线的运行期变化（不是世界卡模板）。 */
+sessionsRouter.get('/sessions/:id/world-state', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const branchId = session.branch_id || 'main';
+  res.json({
+    branch: branchId,
+    world_version: session.world_version ?? null,
+    changes: getWorldState(session.id, {
+      branchId,
+      atTurn: req.query.at_turn != null ? Number(req.query.at_turn) : getMaxTurnNo(session.id),
+    }),
+  });
 });
 
 sessionsRouter.get('/sessions/:id/voices', (req, res) => {

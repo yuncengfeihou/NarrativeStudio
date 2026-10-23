@@ -14,16 +14,22 @@ ai-roleplay/
 │   ├── llm.js              OpenAI 兼容客户端 + usage 归一化
 │   ├── world/
 │   │   ├── schema.js       v4 卡形状归一 + 实体链接
-│   │   └── scene-sheet.js  世界索引 / 辞书挑选 / 场记单渲染（纯函数）
+│   │   ├── scene-sheet.js  世界索引 / 辞书挑选 / 场记单渲染 / 辞书检索（纯函数）
+│   │   ├── effective.js    EffectiveWorld 投影（模板 + world_state）
+│   │   └── state-paths.js  world_state 路径白名单
 │   ├── agents/
 │   │   ├── orchestrator.js    回合管线（会话级串行锁、分支感知）
 │   │   ├── narrator.js        剧情演绎（流式，永不输出 JSON）
+│   │   ├── narrator-loop.js   分段演绎：草稿工作区 + codex_lookup（默认关）
 │   │   ├── archivist.js       史官：类型化抽取 + 确定性落库
+│   │   ├── summarizer.js      前情提要（滚动摘要）
+│   │   ├── retrieval.js       辞书检索预检（模型主动取证）
 │   │   ├── memory-pipeline.js 场记 / 校勘 / 检索 / 世界呼吸
 │   │   ├── branch.js          走向生成
 │   │   └── card-smith.js      小说 → 世界卡制卡流水线
 │   ├── memory/
-│   │   ├── store.js        SQLite CRUD（世界卡/会话/记忆/分支/提案）
+│   │   ├── store.js        SQLite CRUD（世界卡/会话/记忆/分支/提案/摘要）
+│   │   ├── branch-guard.js 异步写入的分支/叶守卫
 │   │   └── context-engine.js 上下文装配（核心）
 │   ├── routes/
 │   │   ├── worlds.js       世界卡 + 辞书钉选 + 导出
@@ -35,7 +41,7 @@ ai-roleplay/
 │   └── prompts/
 │       ├── archivist.js    史官 / 场记 / 校勘 / 检索 / 世界呼吸
 │       ├── branch.js
-│       └── narrator.js     尾注
+│       └── narrator.js     尾注 + 分段演绎说明
 ├── web/                    原生 ESM，无构建
 │   ├── index.html
 │   ├── styles/             tokens · base · shell · views · chat · panels
@@ -94,6 +100,10 @@ ai-roleplay/
 }
 ```
 
+**模板快照**：`worlds.version` 在每次 `saveWorld()`（含辞书钉选）时递增。
+会话创建时把整张卡写入 `sessions.card_snapshot_json` 并记录 `world_version`；
+之后所有回合、阅读视图、记忆面板只读这份快照。作者编辑世界卡只影响新会话。
+
 **投影表**（可 SQL 查询，随 saveWorld 同步）：
 
 ```sql
@@ -106,14 +116,23 @@ anchors(world_id, anchor_id, label, after_event, snapshot_json, opening_seed, no
 ### 会话与回合
 
 ```js
-sessions { id, world_id, title, settings_json, turn_count, usage_json, status,
-           branch_id, anchor_id, scene_seq, created_at, updated_at }
+sessions { id, world_id, title, settings_json, card_snapshot_json, world_version,
+           turn_count, usage_json, status, branch_id, anchor_id, scene_seq, … }
 turns    { id, session_id, turn_no, kind, content, images_json, reasoning,
            branch_choice_json, token_count, usage_json, meta_json, branch_id, … }
 branches { session_id, branch_id, parent_branch, fork_turn, status, note }
 ```
 
 回合编号全局递增；`branch_id` 标记归属。分支可见 = 本分支回合 + fork_turn 之前的继承回合。
+
+**分支隔离**：`states / relations / threads / character_states / assertions / voices /
+scenes / world_state / summaries` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork：把分叉点仍有效的
+状态复制到新分支，新分支不会读到旧线在分叉点之后写下的任何内容。
+
+`summaries` 只复制 `covers_turn_to <= fork_turn` 的摘要；分叉后写的摘要不会出现在新分支。
+
+**异步写入守卫**：旁路 Agent 在落库前用 `branchSnapshot()/isBranchCurrent()` 核对
+`branch_id + 回合水位`。`forkSessionSafe()` 在会话锁内 fork，`/rollback`、`/rewrite` 必须走它。
 
 ### 记忆六表
 
@@ -123,9 +142,21 @@ scenes(session_id, branch_id, scene_id, level, turn_from, turn_to, when_label,
 assertions(session_id, branch_id, subject, predicate, object, valid_from, valid_to,
            asserted_turn, source_turn, confidence, visibility, status, superseded_by, evidence)
 character_states(session_id, branch_id, who, field, value, valid_from, valid_to, updated_turn)
+world_state(session_id, branch_id, entity_kind, entity_id, path, op, value_json,
+            valid_from, valid_to, source, evidence)
 voices(session_id, branch_id, who, text, turn_no, kind, pinned)
 patches(session_id, branch_id, agent, kind, payload_json, evidence, status, severity, turn_no, applied_at)
+summaries(session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
 ```
+
+`summaries` 是**装配层的派生数据**：`covers_turn_to` 及之前的回合在装配时不再逐字出现，
+改由一条 `user` 级 `【前情提要】` 送达。原文永不删除；摘要可按 `covers_turn_to` 重压覆盖，
+不可回写 `turns`。`getActiveSummary(sessionId, {branchId, atTurn})` 取覆盖边界不超过该轮的最新一份。
+
+**world_state 是运行期世界变化的唯一写入口**：`entity_kind` 为 `cast | codex | player | world`，
+`op` 为 `set | add | remove | introduce`，路径白名单在 `server/world/state-paths.js`。
+身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas)` 把
+模板与增量投影成当轮有效的世界；上下文引擎只读投影结果，永远不把运行期状态写回 `card_json`。
 
 **断言语义**：冲突（同主同谓、对象不同、有效期重叠）时旧断言 `status='invalidated'`
 并记 `valid_to`，**不删除**。`getAssertions(atTurn)` 按时间点回溯，不过滤 status
@@ -174,50 +205,103 @@ renderSceneSheet({ ledger, present, relations, threads, codex, voices, echoes, d
 import { assembleContext, buildSystemLayer, buildContract } from './memory/context-engine.js';
 
 const ctx = await assembleContext({ session, world, turnNo, playerText, images,
-                                    branchChoice, isOpening, directive });
-// -> { messages, budget:{system,recent,scene,current,total}, state, ledger, anchor,
-//      recentTurns, echoes, meta:{present, mentioned, theme_tags, codex, branch, degraded} }
+                                    branchChoice, isOpening, directive, retrieval });
+// retrieval = { text, queries, entries } | null   // 模型主动检索的辞书全文（当拍）
+// -> { messages, budget:{system,summary,recent,scene,retrieval,current,total}, state, ledger, anchor,
+//      recentTurns, echoes, meta:{present, mentioned, theme_tags, codex, branch, summary,
+//                                 retrieval, degraded} }
 ```
 
-装配顺序（缓存友好）：**稳定前缀 → 追加原文 → 易变尾部**
+装配顺序（缓存友好）：**稳定前缀 → 前情提要 → 追加原文 → 易变尾部**
 
 ```
 1. system   契约 + 命题 + 宪章 + 世界索引
-2. …        最近原文（player/assistant 交替）
-3. user     场记单（每场变一次）
-4. user     本场指令 + 本轮行动 + 尾注
+2. user     【前情提要】滚动摘要（覆盖到 covers_turn_to）
+3. …        最近原文（turn_no > covers_turn_to，player/assistant 交替）
+4. user     场记单（每场变一次）
+5. user     【检索结果】（模型主动查阅的辞书全文，当拍蒸发）
+6. user     本场指令 + 本轮行动 + 尾注
 ```
 
 ### 硬约束
 
 - **只有一条 `role:'system'`，且必须在最前。**
 - **没有关键词触发、没有扫描深度、没有递归、没有优先级、没有常驻开关。**
+- 辞书自动进场仍只有三条路（实体连接 / 主题标签 / 钉选）；`retrieval` 是模型发起的取证，
+  不是第四条自动注入路径，代码不因文本匹配自动塞设定。
 - codex 条目按预估成本决定条数（`scene * 0.45 / 90`），高分优先，低分整条放弃。
-- 超预算降级：裁场记单 → 砍一半最近原文 → 截断最长非 system 消息。
+- 超预算降级：裁场记单 → 裁前情提要 → 砍一半最近原文 → 截断最长非 system 消息。
 - 玩家角色永远在场（即使不在 cast 里，也会造一个最小条目）。
+- `turns.meta.assembly` 持久化本轮装配清单（层预算、在场、辞书候选与原因、摘要/检索、降级标记）。
 
 ## Agent 接口
 
 ```js
+// 旁白（单发）
+runNarrator({ session, world, context, turnNo, options, onDelta, signal })
+// -> {content, reasoning, usage, model, finishReason}
+
+// 旁白（分段演绎，P1-1 第一阶段；会话 settings.narration_mode='segmented' 才走）
+runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal })
+// -> {content, reasoning, usage, model, finishReason,
+//     narration:{mode:'segmented', rounds, tools, sealed}}
+// 工具：draft_append / draft_edit / draft_seal / codex_lookup
+// 工具结果只进当拍临时消息；总预算 config.narration.toolHistoryTokens（默认 1200）。
+// 上游不支持 tools 时由 orchestrator 回退 runNarrator（narration.fallback='segmented'）。
+
+// 纯函数（便于单测）
+resolveNarrationMode(settings, defaultMode?) -> 'single'|'segmented'
+applyDraftEdit(draft, find, replace, {all?}) -> {text, changed, count}
+mergeToolCallDeltas(map, deltas) / parseToolArgs(raw) / mergeUsage(acc, next)
+trimToolHistory(messages, baseLen, budgetTokens) -> removed
+
 // 史官（每轮后）
-runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, signal })
-// -> { applied:{assertions, assertions_invalidated, states, relations, threads, voices, ledger},
-//      scene_change, uncertain, usage }
-applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex })   // 纯函数，可单测
+runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, signal, guard })
+// -> { applied:{assertions, assertions_invalidated, states, changes, relations, threads, voices, ledger},
+//      scene_change, uncertain, usage, stale? }
+// guard: () => boolean；false = 调用期间分支/回合已变，整批丢弃并记 patches(status='stale')。
+applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerName })   // 纯函数，可单测
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
-sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex) / mergeLedger(old, delta, {aliasIndex})
+sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
+sanitizeChange(raw, { aliasIndex, playerName }) / mergeLedger(old, delta, {aliasIndex})
+// buildEffectiveWorld(cardSnapshot, deltas) 在 server/world/effective.js，纯函数
+
+// 定稿：把当前世界线固化成新的世界卡（显式作者操作）
+canonizeSession({ sessionId, title?, anchorLabel?, openingSeed?, id? })
+// -> { world, card, from: { session_id, turn_no, branch } }
 
 // 场记 / 校勘 / 检索 / 世界呼吸（server/agents/memory-pipeline.js）
-closeScene({ session, world, turnNo, reason })        // 切场归档
-detectSceneChange(session, update, turnNo)            // 地点/时间/在场者变了就切
-runContinuity({ session, world, turnNo, signal })     // -> {issues, healthy, applied}
-runLibrarian({ session, question, signal })           // -> {found, answer, citations, calls}
-runWorldTick({ session, world, turnNo, signal })      // -> {events}
+closeScene({ session, world, turnNo, reason, guard })    // 切场归档；stale 返回 null
+detectSceneChange(session, update, turnNo)                // 地点/时间/在场者变了就切
+runContinuity({ session, world, turnNo, signal, guard })  // -> {issues, healthy, applied, stale?}
+runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}
+runWorldTick({ session, world, turnNo, signal, guard })   // -> {events, stale?}
+
+// 前情提要（server/agents/summarizer.js）
+planSummary({ turnNo, active, every, keepRecent })   // 纯函数 -> {from,to,covered}|null
+runSummarizer({ session, branchId, turnFrom, turnTo, previousSummary, playerName, charName, signal })
+// -> {text, turns, chars, usage} | {skipped:true, reason, chars?}
+
+// 辞书检索预检（server/agents/retrieval.js）
+runRetrieval({ card, playerText, ledger, lastNarrative, signal })
+// -> {text, queries, entries:[{id,name,why}], usage} | null
+// parseRetrievalQueries(content) -> string[]（宽容解析，失败返回空数组）
+
+// 分支守卫（server/memory/branch-guard.js）
+branchSnapshot(sessionId, branchId?) -> {sessionId, branchId, maxTurnNo, maxTurnId} | null
+isBranchCurrent(snapshot) -> boolean
+guardOf(snapshot) -> () => boolean
 
 // 制卡（server/agents/card-smith.js）
 smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed, player, onProgress, signal })
 // 内部步骤（不导出）：readChapters / parseChapterExtract / buildCardFromExtracts
 ```
+
+模型选择：每个 Agent 调 `chat()` 时传 `model: cfg.model || undefined`，`cfg.model` 来自
+`<AGENT>_MODEL`（summarizer 为 `SUMMARY_MODEL`）。Agent 函数层还接受 `options.model`
+单次覆盖（narrator 由 `runTurn` 的 `options` 直接透传，archivist / branch 走各自的
+`options.<agent>.model`）；留空时由 `llm.js` 回落到 `config.upstream.model`。
+`/v1` 非流式透传沿用客户端 `model`，流式透传原样转发请求体。
 
 ## Orchestrator 接口
 
@@ -225,7 +309,8 @@ smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed,
 runTurn({ sessionId, playerText, images, branchChoice, generateBranches,
           isOpening, options:{directive}, onEvent, signal })
 createSessionWithSettings({ title, settings, worldId, anchorId })   // 用锚点快照初始化账本
-forkSession({ sessionId, toTurn, note })                            // 回滚 = 开新分支
+forkSession({ sessionId, toTurn, note })                            // 回滚 = 开新分支（同步，内部/测试）
+forkSessionSafe({ sessionId, toTurn, note })                        // 路由必须走：会话锁内 fork
 getSessionSnapshot(sessionId) / getMemoryStats(sessionId)
 recallSession({ sessionId, question }) / auditSession({ sessionId })
 ```
@@ -236,14 +321,20 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 {type:'turn_start', turn_no, is_opening, branch}
 {type:'context', turn_no, budget, meta, scene_sheet}
 {type:'reasoning', delta} / {type:'narrative', delta}
+{type:'draft_start', turn_no, mode:'segmented', max_rounds}
+{type:'draft_delta', delta} / {type:'draft_reset', content}
+{type:'draft_done', turn_no, content, rounds, tools, sealed}
+{type:'tool_call', turn_no, round, name, ok, label}
+{type:'narration_fallback', mode:'segmented', reason}
 {type:'narrative_done', content, token_count, finish_reason, usage}
 {type:'narrative_reset', reason}
 {type:'memory', stats} / {type:'state', state, turn_no}
+{type:'summary', state:'start'|'end', ok?, from?, to?, covers_turn_to?, turns?, chars?, tokens?, reason?}
 {type:'scene', scene}                    // 切场归档
 {type:'world_tick', events}              // 幕后推演
 {type:'continuity', report}              // 校勘
-{type:'branches', branches, scene_summary}
-{type:'done', turn_no, branch, usage, session_usage, memory}
+{type:'branches', branches, scene_summary, stale?}
+{type:'done', turn_no, branch, narration_mode, usage, session_usage, memory}
 {type:'error', message, aborted?} / {type:'ping'}
 ```
 
@@ -265,8 +356,9 @@ POST   /api/worlds/:id/sessions           body:{anchor_id?}
 
 GET    /api/sessions?world_id=
 POST   /api/sessions                      body:{world_id?, anchor_id?}
-GET    /api/sessions/:id                  -> {session, world, turns, state, usage, memoryStats}
-PATCH  /api/sessions/:id                  body:{scene_directive?}
+GET    /api/sessions/:id                  -> {session, card, world, turns, state, usage, memoryStats}
+PATCH  /api/sessions/:id                  body:{scene_directive?, title?, settings?}
+                                          // settings 合并写入；narration_mode:'single'|'segmented'
 DELETE /api/sessions/:id
 GET    /api/sessions/:id/turns            ?from=&to=&limit=
 GET    /api/sessions/:id/search           ?q=
@@ -276,6 +368,7 @@ POST   /api/sessions/:id/branches         -> {branches, scene_summary}
 POST   /api/sessions/:id/rewrite          -> SSE（自动开新分支）
 POST   /api/sessions/:id/rollback         body:{turn_no}   -> 新分支
 GET    /api/sessions/:id/branches
+POST   /api/sessions/:id/canonize         body:{title?, anchor_label?, opening_seed?} -> 新世界卡
 
 GET    /api/sessions/:id/memory           -> 完整统计
 GET    /api/sessions/:id/assertions       ?subject=
@@ -285,6 +378,7 @@ GET    /api/sessions/:id/states
 PUT    /api/sessions/:id/state            body:{state, turn_no?}
 GET    /api/sessions/:id/scenes
 GET    /api/sessions/:id/threads
+GET    /api/sessions/:id/world-state      ?at_turn= -> 本局世界线增量
 GET    /api/sessions/:id/voices
 POST   /api/sessions/:id/voices/:id/pin   body:{pinned}
 DELETE /api/sessions/:id/voices/:id

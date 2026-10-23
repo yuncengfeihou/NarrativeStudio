@@ -6,7 +6,7 @@ import { el, clear, firstChar } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, openActionSheet, confirmDialog } from '../app.js';
-import { hueTint } from '../ui-kit.js';
+import { hueCover } from '../ui-kit.js';
 
 export default {
   id: 'worlds',
@@ -21,14 +21,12 @@ export default {
         type: 'button', 'aria-label': '目录',
         onclick: () => import('../shell.js').then((m) => m.openDrawer()),
       }, icon('sidebar', { size: 17 })),
-      el('div.topbar-title', {}, '叙事台', el('span.topbar-sub', {}, '世界卡')),
+      el('div.topbar-title', {}, '世界卡'),
       el('div.topbar-actions', {},
-        el('button.btn.btn-secondary.btn-sm', {
-          type: 'button', onclick: () => navigate('#/settings'),
-        }, icon('settings', { size: 13 }), '设置'),
-        el('button.btn.btn-primary.btn-sm', {
-          type: 'button', onclick: () => navigate('#/new'),
-        }, icon('plus', { size: 13 }), '新建'),
+        el('button.icon-btn', {
+          type: 'button', title: '设置', 'aria-label': '设置',
+          onclick: () => navigate('#/settings'),
+        }, icon('settings', { size: 16 })),
       ),
     );
 
@@ -52,7 +50,7 @@ export default {
 
     function render() {
       clear(scroll);
-      const page = el('div.page');
+      const page = el('div.page.is-home');
       scroll.appendChild(page);
 
       if (loading) {
@@ -62,14 +60,25 @@ export default {
         return;
       }
 
-      page.appendChild(el('div.page-head', {},
-        el('div.page-head-text', {},
-          el('div.eyebrow', {}, 'World Codex'),
-          el('h1.page-title', {}, '世界卡'),
-          el('div.page-sub', {},
-            worlds.length
-              ? `${worlds.length} 张卡 · 一共 ${worlds.reduce((s, w) => s + (w.session_count || 0), 0)} 段剧情`
-              : '一张世界卡 = 一套设定。可以从它开出任意多段剧情。'),
+      const totalSessions = worlds.reduce((s, w) => s + (w.session_count || 0), 0);
+
+      page.appendChild(el('div.home-welcome', {},
+        el('div.home-mark', {}, '叙'),
+        el('div.home-copy', {},
+          el('div.home-greet', {}, greet()),
+          el('h1.home-title', {}, '叙事台'),
+          el('div.home-tag', {}, '世界卡驱动的长篇剧情演绎工作台'),
+          el('div.home-stat', {},
+            el('span.dot'),
+            el('span', {}, worlds.length ? `${worlds.length} 张世界卡 · ${totalSessions} 段剧情` : '还没有世界卡'),
+          ),
+        ),
+        el('div.home-actions', {},
+          el('button.btn.btn-primary', { type: 'button', onclick: () => navigate('#/new') },
+            icon('plus', { size: 13 }), '新建世界卡'),
+          el('button.btn.btn-secondary', {
+            type: 'button', onclick: () => navigate('#/settings'),
+          }, icon('settings', { size: 13 }), '设置'),
         ),
       ));
 
@@ -85,11 +94,17 @@ export default {
         return;
       }
 
+      page.appendChild(el('div.home-section-head', {},
+        el('span.home-section-title', {}, '世界卡库'),
+        el('button.home-section-link', { type: 'button', onclick: () => navigate('#/new') },
+          icon('plus', { size: 11 }), '新建'),
+      ));
+
       const list = el('div.worlds-list');
       worlds.forEach((w, i) => list.appendChild(worldRow(w, load, i)));
       page.appendChild(list);
 
-      page.appendChild(el('div.group-note', { style: 'padding-top:14px;' },
+      page.appendChild(el('div.group-note', { style: 'padding:12px 2px 0;' },
         '提示：世界卡的「辞书」靠实体在场、主题匹配或你手动钉选进入上下文，不靠关键词触发——所以卡可以写得很细，却不会撑爆提示词。'));
     }
 
@@ -107,9 +122,7 @@ function worldRow(w, reload, index = 0) {
     onclick: () => navigate(`#/world/${w.id}`),
     onkeydown: (e) => { if (e.key === 'Enter') navigate(`#/world/${w.id}`); },
   },
-    el('div.world-cover', {
-      style: `background:linear-gradient(135deg, ${hueTint(hue, { s: 42, l: 40 })}, ${hueTint(hue + 24, { s: 38, l: 24 })});`,
-    },
+    el('div.world-cover', { style: hueCover(hue) },
       el('span.world-cover-glyph', {}, firstChar(w.title || '世')),
       el('span.world-cover-index', {}, String(index + 1).padStart(2, '0')),
     ),
@@ -168,4 +181,12 @@ function fact(value, label) {
     el('div.world-fact-v', {}, String(value)),
     el('div.world-fact-k', {}, label),
   );
+}
+
+function greet() {
+  const h = new Date().getHours();
+  if (h < 6) return '夜深了，旅人';
+  if (h < 12) return '早上好，旅人';
+  if (h < 18) return '下午好，旅人';
+  return '晚上好，旅人';
 }
