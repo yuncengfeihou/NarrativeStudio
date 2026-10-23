@@ -34,6 +34,26 @@ node _work/seed-worlds.mjs --reset   # 清空旧数据后导入
 
 ---
 
+## 界面
+
+| 世界卡 | 世界卡 · 宪章 |
+|---|---|
+| ![世界卡](docs/screenshots/v3/worlds.png) | ![宪章](docs/screenshots/v3/world-charter.png) |
+
+| 卡司 | 幕结构 |
+|---|---|
+| ![卡司](docs/screenshots/v3/world-cast.png) | ![幕](docs/screenshots/v3/world-arcs.png) |
+
+| 演绎阅读器 | 走向 + 记忆面板 |
+|---|---|
+| ![演绎](docs/screenshots/v3/play.png) | ![走向](docs/screenshots/v3/play-branches.png) |
+
+| 世界卡编辑器 |
+|---|
+| ![编辑](docs/screenshots/v3/editor.png) |
+
+---
+
 ## 它解决什么问题
 
 写长剧情的 AI 应用通常死在同一个地方：**设定与记忆无节制地堆进提示词**。
