@@ -30,7 +30,7 @@ function lastUserIndex(messages) {
  * @param {boolean} [opts.isOpening] 是否开场轮
  * @returns {Array<{role:string, content:string}>}
  */
-export function buildNarratorMessages({ session, context, isOpening = false } = {}) {
+export function buildNarratorMessages({ session, context, isOpening = false, guidance = '' } = {}) {
   const messages = Array.isArray(context?.messages)
     ? context.messages.map(m => ({ ...m }))
     : [];
@@ -57,6 +57,18 @@ export function buildNarratorMessages({ session, context, isOpening = false } = 
     else messages.push(msg);
   }
 
+  // 重写指令（作者对本次演绎的额外要求，例如「更压抑，不要引入新角色」）
+  const note = String(guidance || '').trim();
+  if (note) {
+    const idx = lastUserIndex(messages);
+    const msg = {
+      role: 'system',
+      content: `【本轮改稿要求】（作者对本次演绎的额外要求，优先级高，但不得违背世界观与角色设定）\n${note}`,
+    };
+    if (idx >= 0) messages.splice(idx, 0, msg);
+    else messages.push(msg);
+  }
+
   return messages;
 }
 
@@ -74,7 +86,7 @@ export function buildNarratorMessages({ session, context, isOpening = false } = 
  */
 export async function runNarrator({ session, context, turnNo, isOpening = false, options = {}, onDelta, signal } = {}) {
   const cfg = config.agents.narrator;
-  const messages = buildNarratorMessages({ session, context, isOpening });
+  const messages = buildNarratorMessages({ session, context, isOpening, guidance: options.guidance });
 
   let content = '';
   let reasoning = '';

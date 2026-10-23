@@ -12,7 +12,7 @@ import { config } from '../config.js';
 import { estimateTokens, estimateMessagesTokens } from '../tokens.js';
 import {
   getSession, createSession, getMaxTurnNo, addTurn, getRecentTurns, getState,
-  getEntities, getFacts, getSummaries, touchSession,
+  getEntities, getFacts, getNotes, getSummaries, touchSession, getDb,
 } from '../memory/store.js';
 
 // Per-session promise chain enforcing serial turns.
@@ -114,7 +114,7 @@ async function runTurnInner({
   try {
     narrator = await runNarrator({
       session, context, turnNo, isOpening,
-      options: { ...options, ...(isOpening ? {} : {}) },
+      options: { ...options, ...(isOpening ? {} : {}), guidance: options.narrator?.guidance },
       onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
       signal,
     });
@@ -125,6 +125,32 @@ async function runTurnInner({
     }
     emit({ type: 'error', message: `剧情演绎失败: ${err.message}`, turn_no: turnNo });
     throw err;
+  }
+
+  // 上游偶发只产出 reasoning 而 content 为空（推理占满了 token 预算）。
+  // 这种情况重试一次，并关闭本次推理以给正文留出空间。
+  if (!String(narrator.content || '').trim() && !signal?.aborted) {
+    emit({ type: 'narrative_reset', reason: 'empty_content' });
+    console.warn(`[orchestrator] turn ${turnNo} 正文为空，重试一次（关闭推理）`);
+    try {
+      narrator = await runNarrator({
+        session, context, turnNo, isOpening,
+        options: {
+          ...options,
+          reasoningEffort: 'low',
+          maxTokens: Math.max(config.agents.narrator.maxTokens, 8000),
+          guidance: [
+            options.narrator?.guidance,
+            '上一轮只输出了思考而没有任何正文。这次请直接输出剧情正文，不要输出思考过程。',
+          ].filter(Boolean).join('\n'),
+        },
+        onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
+        signal,
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) throw err;
+      console.warn(`[orchestrator] turn ${turnNo} 重试失败：${err.message}`);
+    }
   }
 
   const narrative = narrator.content || '';
@@ -170,6 +196,9 @@ async function runTurnInner({
         turn_count: ctxStats.turn_count,
         entities: ctxStats.entities.length,
         facts: ctxStats.facts.length,
+        notes: ctxStats.notes.length,
+        compression: ctxStats.compression,
+        tiers: ctxStats.tiers,
       },
     });
     const st = getState(sessionId);
@@ -231,21 +260,39 @@ export function getMemoryStats(sessionId) {
 
   const tiers = [1, 2, 3, 4].map(level => {
     const rows = getSummaries(sessionId, { level, archived: 0 });
-    return { level, count: rows.length, tokens: rows.reduce((s, r) => s + r.token_count, 0) };
+    return {
+      level, count: rows.length,
+      tokens: rows.reduce((s, r) => s + r.token_count, 0),
+      // 最近一条摘要覆盖到第几轮 + 摘要正文预览（前端展开查看）
+      last: rows.length ? {
+        turn_from: rows[rows.length - 1].turn_from,
+        turn_to: rows[rows.length - 1].turn_to,
+        tokens: rows[rows.length - 1].token_count,
+      } : null,
+    };
   });
+  const archivedTiers = [1, 2, 3, 4].map(level => ({
+    level,
+    count: getSummaries(sessionId, { level, archived: 1 }).length,
+  }));
 
   const entities = getEntities(sessionId, { limit: 500 });
   const facts = getFacts(sessionId, { limit: 10000 });
+  const notes = getNotes(sessionId, { activeOnly: true });
   const recentTurns = getRecentTurns(sessionId, config.context.recentRawTurns);
   const archiveTokens = getSummaries(sessionId, { archived: 1 }).reduce((s, r) => s + r.token_count, 0);
+  const rawTokens = getDb().prepare(
+    `SELECT COALESCE(SUM(token_count),0) AS t FROM turns WHERE session_id=?`
+  ).get(sessionId)?.t || 0;
 
   // Cheap context estimate that mirrors assembler priorities (no retrieval call).
   const settingsTokens = estimateTokens(JSON.stringify(session.settings));
+  const notesTokens = notes.reduce((s, n) => s + estimateTokens(n.content) + 8, 0);
   const stateEntry = getState(sessionId);
   const stateTokens = stateEntry ? estimateTokens(JSON.stringify(stateEntry.state)) : 0;
   const recentTokens = recentTurns.reduce((s, t) => s + t.token_count, 0);
   const summaryTokens = tiers.reduce((s, t) => s + t.tokens, 0);
-  const contextEstimate = settingsTokens + stateTokens + recentTokens + Math.min(summaryTokens, 60000);
+  const contextEstimate = settingsTokens + notesTokens + stateTokens + recentTokens + Math.min(summaryTokens, 60000);
 
   return {
     turn_count: turnCount,
@@ -254,6 +301,7 @@ export function getMemoryStats(sessionId) {
     last_retrieval: lastRetrievals.get(sessionId) || [],
     budget: {
       settings: settingsTokens,
+      notes: notesTokens,
       state: stateTokens,
       summaries: Math.min(summaryTokens, 60000),
       recent_raw: recentTokens,
@@ -261,13 +309,20 @@ export function getMemoryStats(sessionId) {
       facts: facts.length,
     },
     tiers,
-    entities: entities.slice(0, 60).map(e => ({
-      type: e.type, name: e.name, summary: e.summary,
-      importance: e.importance, last_turn: e.last_turn,
-    })),
-    facts: facts.slice(0, 60),
-    state: stateEntry?.state || null,
+    archived_tiers: archivedTiers,
     archive_tokens: archiveTokens,
+    raw_tokens: rawTokens,
+    notes,
+    entities: entities.slice(0, 80).map(e => ({
+      id: e.id, type: e.type, name: e.name, summary: e.summary,
+      importance: e.importance, last_turn: e.last_turn, pinned: !!e.pinned,
+      mention_count: e.mention_count, attributes: e.attributes,
+    })),
+    facts: facts.slice(0, 80),
+    state: stateEntry?.state || null,
+    state_turn: stateEntry?.turn_no ?? null,
+    // 压缩效率：原始归档体积 vs 当前上下文体积
+    compression: rawTokens > 0 ? Math.max(1, Math.round(rawTokens / Math.max(1, contextEstimate))) : 1,
   };
 }
 

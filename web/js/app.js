@@ -1,343 +1,433 @@
 /**
- * app.js — 应用入口：hash 路由 + 视图调度 + 启动
+ * app.js — 应用入口
  *
  * 职责：
- *  - 初始化 store（主题恢复）与侧栏（会话库）
- *  - hash 路由：#/library、#/setup、#/setup/:id、#/chat/:id、#/settings
- *  - 动态加载并挂载视图模块（每个视图 default 导出 {mount(root, params) -> {unmount}}）
- *  - 提供全局共享浮层 UI：toast / loading / sheet / actionSheet / confirm
+ *  - 启动 store / 侧栏 / 路由
+ *  - hash 路由：#/  #/chat/:id  #/new  #/edit/:id  #/presets  #/settings
+ *  - 全局浮层：toast / loading / sheet / actionSheet / confirm / popover
  */
 
 import { $, el, clear } from './util.js';
+import { icon } from './icons.js';
 import { initStore, cycleTheme, ui } from './store.js';
-import { initSidebar } from './sidebar.js';
+import { initSidebar, openSidebar } from './sidebar.js';
 
 const appRoot = $('#main');
 const overlayRoot = $('#overlay-root');
 
-// ============================================================
-// 导航
-// ============================================================
+/* =========================================================================
+ * 路由
+ * ========================================================================= */
 
-/** 跳转到某个 hash 路由 */
 export function navigate(path) {
   const target = path.startsWith('#') ? path : '#' + path;
-  if (location.hash === target) {
-    // 相同 hash 时手动触发一次（hashchange 不会触发）
-    handleRoute();
-  } else {
-    location.hash = target;
-  }
+  if (location.hash === target) handleRoute();
+  else location.hash = target;
 }
 
-/** 解析当前 hash 为 {name, params} */
 export function matchRoute() {
   const raw = (location.hash || '').replace(/^#\/?/, '');
-  const parts = raw.split('/').filter(Boolean).map(decodeURIComponent);
-  if (parts.length === 0) return { name: 'library', params: {} };
+  const parts = raw.split('/').filter(Boolean).map((s) => {
+    try { return decodeURIComponent(s); } catch { return s; }
+  });
+  if (parts.length === 0) return { name: 'home', params: {} };
   switch (parts[0]) {
-    case 'library': return { name: 'library', params: {} };
-    case 'setup': return { name: 'setup', params: { id: parts[1] || null } };
+    case 'library': return { name: 'home', params: {} };
+    case 'home': return { name: 'home', params: {} };
     case 'chat': return { name: 'chat', params: { id: parts[1] || null } };
+    case 'new': return { name: 'editor', params: { id: null } };
+    case 'edit': return { name: 'editor', params: { id: parts[1] || null } };
+    case 'setup': return { name: 'editor', params: { id: parts[1] || null } };
+    case 'presets': return { name: 'presets', params: {} };
     case 'settings': return { name: 'settings', params: {} };
-    default: return { name: 'library', params: {} };
+    default: return { name: 'home', params: {} };
   }
 }
 
-// 视图懒加载器（原生动态 import，等价代码分割）
-const viewLoaders = {
-  library: () => import('./library.js'),
-  setup: () => import('./setup.js'),
-  chat: () => import('./chat.js'),
-  settings: () => import('./settings.js'),
+const loaders = {
+  home: () => import('./views/home.js'),
+  chat: () => import('./views/chat.js'),
+  editor: () => import('./views/editor.js'),
+  presets: () => import('./views/presets.js'),
+  settings: () => import('./views/settings.js'),
 };
 
-let currentView = null; // {name, handle}
+let current = null;
 
-/** 路由变化 → 卸载旧视图 + 挂载新视图 */
+/** 关闭所有浮层（路由切换时调用，避免 sheet 跟着页面走） */
+export function closeAllOverlays() {
+  const nodes = overlayRoot.querySelectorAll('.veil, .sheet, .actions, .dialog, .popover');
+  nodes.forEach((n) => {
+    n.classList.remove('is-open');
+    n.remove();
+  });
+  lockCount = 0;
+  document.body.style.overflow = '';
+}
+
 async function handleRoute() {
   const route = matchRoute();
-
-  // 卸载旧视图
-  if (currentView && currentView.handle && typeof currentView.handle.unmount === 'function') {
-    try { currentView.handle.unmount(); } catch (err) { console.error('[app] unmount error', err); }
+  closeAllOverlays();
+  if (current?.handle?.unmount) {
+    try { current.handle.unmount(); } catch (err) { console.error('[route] unmount', err); }
   }
-  currentView = null;
+  current = null;
   clear(appRoot);
-
-  const loader = viewLoaders[route.name] || viewLoaders.library;
   try {
-    const mod = await loader();
+    const mod = await (loaders[route.name] || loaders.home)();
     const view = mod.default;
-    if (!view || typeof view.mount !== 'function') {
-      throw new Error(`视图模块 ${route.name} 缺少 default.mount`);
-    }
+    if (!view?.mount) throw new Error(`视图 ${route.name} 缺少 mount`);
     const handle = await view.mount(appRoot, route.params);
-    currentView = { name: route.name, handle: handle || {} };
-    // 视图根默认为 display:none，挂载后激活（单一来源，避免各视图遗漏）
-    const viewEl = appRoot.querySelector('.view');
-    if (viewEl) viewEl.classList.add('is-active');
+    current = { name: route.name, handle: handle || {} };
+    appRoot.querySelector('.view')?.classList.add('is-active');
   } catch (err) {
-    console.error('[app] 视图挂载失败', err);
-    renderRouteError(err);
+    console.error('[route] mount failed', err);
+    renderError(err);
   }
+  document.dispatchEvent(new CustomEvent('route:changed', { detail: route }));
 }
 
-/** 渲染路由级错误 */
-function renderRouteError(err) {
-  const box = el('div.view.is-active', {},
-    el('div.main-nav', {}, el('span.main-nav-title', {}, '出错了')),
-    el('div.main-scroll', { style: 'padding:32px;' },
-      el('div.empty-state', {},
+function renderError(err) {
+  appRoot.appendChild(el('div.view.is-active', {},
+    el('header.nav', {}, el('div.nav-title', {}, '出错了')),
+    el('div.scroll', {},
+      el('div.empty', {},
+        el('div.empty-icon', {}, icon('warn', { size: 26 })),
         el('div.empty-title', {}, '页面加载失败'),
-        el('div.empty-sub', {}, err && err.message ? err.message : String(err)),
-        el('button.btn-filled', { onclick: () => navigate('#/library') }, '返回角色库'),
+        el('div.empty-sub', {}, err?.message || String(err)),
+        el('button.btn.btn-primary', { onclick: () => navigate('#/') }, '返回首页'),
       ),
     ),
-  );
-  appRoot.appendChild(box);
+  ));
 }
 
-// ============================================================
-// 全局浮层 UI（挂载到 #overlay-root）
-// ============================================================
+/* =========================================================================
+ * Toast
+ * ========================================================================= */
 
-/** 轻提示 toast */
 let toastTimer = null;
-export function toast(message, duration = 2200) {
-  let node = $('#app-toast');
+/**
+ * @param {string} message
+ * @param {{duration?:number, type?:'info'|'error'|'success', icon?:string}} [opts]
+ */
+export function toast(message, opts = {}) {
+  const { duration = 2200, type = 'info', iconName = null } = typeof opts === 'number' ? { duration: opts } : opts;
+  let node = $('#toast');
   if (!node) {
-    node = el('div.toast#app-toast');
+    node = el('div.toast#toast', { role: 'status', 'aria-live': 'polite' });
     overlayRoot.appendChild(node);
   }
-  node.textContent = message;
-  // 强制 reflow 以重启动画
+  clear(node);
+  const ic = iconName || (type === 'error' ? 'warn' : type === 'success' ? 'check' : null);
+  if (ic) node.appendChild(el('span.toast-icon', {}, icon(ic, { size: 15 })));
+  node.appendChild(el('span', {}, message));
+  node.classList.toggle('is-error', type === 'error');
   void node.offsetWidth;
   node.classList.add('is-visible');
   if (toastTimer) clearTimeout(toastTimer);
   toastTimer = setTimeout(() => node.classList.remove('is-visible'), duration);
 }
 
-/** 全屏加载遮罩 */
+/* =========================================================================
+ * 全屏 loading
+ * ========================================================================= */
+
 let loadingCount = 0;
-export function showLoading() {
+export function showLoading(text = '') {
   loadingCount++;
-  let veil = $('#app-loading');
-  if (!veil) {
-    veil = el('div.loading-veil#app-loading', {}, el('span.spinner'));
-    overlayRoot.appendChild(veil);
+  let node = $('#loading');
+  if (!node) {
+    node = el('div.loading#loading', {},
+      el('span.spinner'),
+      el('div.loading-text', {}, text),
+    );
+    overlayRoot.appendChild(node);
   }
-  void veil.offsetWidth;
-  veil.classList.add('is-visible');
+  const t = node.querySelector('.loading-text');
+  if (t && text) t.textContent = text;
+  void node.offsetWidth;
+  node.classList.add('is-visible');
 }
 export function hideLoading() {
   loadingCount = Math.max(0, loadingCount - 1);
   if (loadingCount > 0) return;
-  const veil = $('#app-loading');
-  if (veil) veil.classList.remove('is-visible');
+  $('#loading')?.classList.remove('is-visible');
 }
 
-/** 锁定 body 滚动（打开 sheet 时） */
-function lockScroll(lock) {
-  document.body.style.overflow = lock ? 'hidden' : '';
+/* =========================================================================
+ * 滚动锁定（多浮层共存时计数）
+ * ========================================================================= */
+
+let lockCount = 0;
+function lockScroll(on) {
+  lockCount = Math.max(0, lockCount + (on ? 1 : -1));
+  document.body.style.overflow = lockCount > 0 ? 'hidden' : '';
 }
+
+/* =========================================================================
+ * Sheet
+ * ========================================================================= */
 
 /**
- * 打开底部 sheet。
  * @param {object} opts
- * @param {string} [opts.title] 标题（为空则不显示 header）
- * @param {(body:HTMLElement, api:object)=>void} opts.render 内容渲染回调
- * @param {string} [opts.confirmText] 确认按钮文字（有则显示）
- * @param {(api:object)=>void} [opts.onConfirm] 确认回调；返回 false 可阻止关闭
- * @param {string} [opts.cancelText] 取消按钮文字（默认「取消」）
- * @returns {{close:Function, body:HTMLElement}}
+ * @param {string} [opts.title]
+ * @param {(body:HTMLElement, api:object)=>void} opts.render
+ * @param {string} [opts.confirmText]
+ * @param {()=>any} [opts.onConfirm]  返回 false 阻止关闭
+ * @param {string} [opts.cancelText]
+ * @param {boolean} [opts.fullHeight]
+ * @returns {{close:Function, body:HTMLElement, sheet:HTMLElement, confirmBtn:HTMLElement|null}}
  */
 export function openSheet(opts = {}) {
   const {
-    title = '',
-    render,
-    confirmText = '',
-    onConfirm,
-    cancelText = '取消',
+    title = '', render, confirmText = '', onConfirm, cancelText = '取消', footer = null,
   } = opts;
 
-  const mask = el('div.sheet-mask');
+  const veil = el('div.veil');
   const body = el('div.sheet-body');
-
-  const api = {
-    body,
-    close,
-    setConfirmDisabled(disabled) {
-      if (confirmBtn) confirmBtn.disabled = disabled;
-    },
-  };
-
-  const doClose = () => {
-    mask.classList.remove('is-open');
-    sheet.classList.remove('is-open');
-    lockScroll(false);
-    const done = () => {
-      mask.remove();
-      sheet.remove();
-      document.removeEventListener('keydown', onKey);
-    };
-    setTimeout(done, 300);
-  };
+  const sheet = el('div.sheet', { role: 'dialog', 'aria-modal': 'true', 'aria-label': title || '面板' });
 
   let confirmBtn = null;
+  const api = {
+    body,
+    sheet,
+    close: () => close(),
+    setConfirmDisabled(v) { if (confirmBtn) confirmBtn.disabled = v; },
+  };
+
+  const cancelBtn = el('button.sheet-btn', { type: 'button' }, cancelText);
+  cancelBtn.addEventListener('click', () => close());
+
   if (confirmText) {
-    confirmBtn = el('button.sheet-confirm', { type: 'button' }, confirmText);
+    confirmBtn = el('button.sheet-btn.is-confirm', { type: 'button' }, confirmText);
     confirmBtn.addEventListener('click', async () => {
       if (onConfirm) {
-        const r = await onConfirm(api);
-        if (r === false) return;
+        confirmBtn.disabled = true;
+        try {
+          const r = await onConfirm(api);
+          if (r === false) return;
+        } finally {
+          confirmBtn.disabled = false;
+        }
       }
-      doClose();
+      close();
     });
   }
-  const cancelBtn = el('button.sheet-cancel', { type: 'button' }, cancelText);
 
-  const header = el('div.sheet-header', {},
+  const head = el('div.sheet-head', {},
     cancelBtn,
-    title ? el('div.sheet-title', {}, title) : el('div.sheet-title'),
-    confirmBtn || el('span', { style: 'min-width:48px;' }),
+    el('div.sheet-title', {}, title),
+    confirmBtn || el('span', { style: 'min-width:52px;' }),
   );
 
-  const sheet = el('div.sheet', { role: 'dialog', 'aria-modal': 'true' },
-    el('div.sheet-grabber'),
-    title || confirmText ? header : el('div', { style: 'height:8px;' }),
-    body,
-  );
+  sheet.appendChild(el('div.sheet-grab'));
+  if (title || confirmText) sheet.appendChild(head);
+  sheet.appendChild(body);
+  if (footer) sheet.appendChild(footer);
 
-  mask.addEventListener('click', doClose);
+  let closed = false;
+  function close() {
+    if (closed) return;
+    closed = true;
+    veil.classList.remove('is-open');
+    sheet.classList.remove('is-open');
+    lockScroll(false);
+    document.removeEventListener('keydown', onKey);
+    setTimeout(() => { veil.remove(); sheet.remove(); }, 420);
+  }
 
-  const onKey = (e) => { if (e.key === 'Escape') doClose(); };
+  const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
+  veil.addEventListener('click', close);
 
-  overlayRoot.appendChild(mask);
+  overlayRoot.appendChild(veil);
   overlayRoot.appendChild(sheet);
   lockScroll(true);
-  // 触发进场动画
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
-      mask.classList.add('is-open');
+      veil.classList.add('is-open');
       sheet.classList.add('is-open');
     });
   });
 
   if (typeof render === 'function') render(body, api);
 
-  function close() { doClose(); }
-  return { close, body, sheet };
+  return { close, body, sheet, veil, confirmBtn };
 }
 
+/* =========================================================================
+ * Action Sheet
+ * ========================================================================= */
+
 /**
- * 打开 action sheet（底部动作菜单）。
  * @param {object} opts
- * @param {string} [opts.title] 顶部说明文字
- * @param {Array<{label:string, destructive?:boolean, value?:any}>} opts.actions
+ * @param {string} [opts.title]
+ * @param {Array<{label:string, value?:any, icon?:string, desc?:string, destructive?:boolean}>} opts.actions
  * @param {string} [opts.cancelText]
- * @returns {Promise<any>} 选中项的 value（取消时 resolve null）
+ * @returns {Promise<any>} 选中的 value；取消为 null
  */
 export function openActionSheet(opts = {}) {
-  const {
-    title = '',
-    actions = [],
-    cancelText = '取消',
-  } = opts;
-
+  const { title = '', actions = [], cancelText = '取消' } = opts;
   return new Promise((resolve) => {
-    const mask = el('div.sheet-mask');
-    const group = el('div.action-group');
-    const cancelGroup = el('div.action-group');
+    const veil = el('div.veil');
+    const group = el('div.actions-group');
+    if (title) group.appendChild(el('div.actions-title', {}, title));
 
-    const close = (result) => {
-      mask.classList.remove('is-open');
+    let closed = false;
+    function close(result) {
+      if (closed) return;
+      closed = true;
+      veil.classList.remove('is-open');
       sheet.classList.remove('is-open');
       lockScroll(false);
-      setTimeout(() => { mask.remove(); sheet.remove(); }, 300);
+      document.removeEventListener('keydown', onKey);
+      setTimeout(() => { veil.remove(); sheet.remove(); }, 420);
       resolve(result);
-    };
+    }
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
 
-    if (title) group.appendChild(el('div.action-title', {}, title));
-
-    for (const action of actions) {
-      const btn = el('button.action-item', {
-        type: 'button',
-        class: action.destructive ? 'is-destructive' : '',
-      }, action.label);
-      btn.addEventListener('click', () => close(action.value !== undefined ? action.value : action.label));
+    for (const a of actions) {
+      const btn = el('button.action-item', { type: 'button', class: a.destructive ? 'is-destructive' : '' },
+        a.icon ? el('span.action-icon', {}, icon(a.icon, { size: 18 })) : null,
+        el('span.action-main', {},
+          el('span.action-label', {}, a.label),
+          a.desc ? el('span.action-desc', {}, a.desc) : null,
+        ),
+      );
+      btn.addEventListener('click', () => close(a.value !== undefined ? a.value : a.label));
       group.appendChild(btn);
     }
 
+    const cancelGroup = el('div.actions-group');
     const cancelBtn = el('button.action-item.is-cancel', { type: 'button' }, cancelText);
     cancelBtn.addEventListener('click', () => close(null));
     cancelGroup.appendChild(cancelBtn);
 
-    const sheet = el('div.action-sheet', { role: 'dialog', 'aria-modal': 'true' }, group, cancelGroup);
-    mask.addEventListener('click', () => close(null));
+    const sheet = el('div.actions', { role: 'dialog', 'aria-modal': 'true' }, group, cancelGroup);
+    veil.addEventListener('click', () => close(null));
 
-    overlayRoot.appendChild(mask);
+    overlayRoot.appendChild(veil);
     overlayRoot.appendChild(sheet);
     lockScroll(true);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        mask.classList.add('is-open');
+        veil.classList.add('is-open');
         sheet.classList.add('is-open');
       });
     });
   });
 }
 
+/* =========================================================================
+ * 确认对话框
+ * ========================================================================= */
+
 /**
- * iOS 风确认对话框（居中 alert）。
  * @returns {Promise<boolean>}
  */
-export function confirmDialog({ title = '', message = '', confirmText = '确定', cancelText = '取消', destructive = false }) {
+export function confirmDialog({ title = '', message = '', confirmText = '确定', cancelText = '取消', destructive = false } = {}) {
   return new Promise((resolve) => {
-    const mask = el('div.sheet-mask');
-    const close = (result) => {
-      mask.classList.remove('is-open');
+    const veil = el('div.veil');
+    let closed = false;
+    function close(result) {
+      if (closed) return;
+      closed = true;
+      veil.classList.remove('is-open');
       dialog.classList.remove('is-open');
       lockScroll(false);
-      setTimeout(() => { mask.remove(); dialog.remove(); }, 220);
+      document.removeEventListener('keydown', onKey);
+      setTimeout(() => { veil.remove(); dialog.remove(); }, 260);
       resolve(result);
-    };
+    }
+    const onKey = (e) => { if (e.key === 'Escape') close(false); };
+    document.addEventListener('keydown', onKey);
 
-    const confirmBtn = el('button.btn-filled', {
-      type: 'button',
-      class: destructive ? 'btn-red' : '',
-      style: 'flex:1;',
-    }, confirmText);
-    confirmBtn.addEventListener('click', () => close(true));
-    const cancelBtn = el('button.btn-tinted', { type: 'button', style: 'flex:1;background:var(--fill-secondary);color:var(--label);' }, cancelText);
-    cancelBtn.addEventListener('click', () => close(false));
-
-    const dialog = el('div', {
-      role: 'alertdialog',
-      'aria-modal': 'true',
-      style: 'position:fixed;left:50%;top:50%;transform:translate(-50%,-46%) scale(0.92);z-index:201;width:min(300px,82vw);background:var(--glass-bg-strong);-webkit-backdrop-filter:var(--glass-blur);backdrop-filter:var(--glass-blur);border:0.5px solid var(--glass-border);border-radius:14px;box-shadow:var(--shadow-float);overflow:hidden;opacity:0;transition:opacity 0.22s var(--ease-fade), transform 0.28s var(--ease-spring);padding:20px;text-align:center;',
-    },
-      el('div', { style: 'font-size:17px;font-weight:700;margin-bottom:6px;' }, title),
-      message ? el('div', { style: 'font-size:14px;color:var(--label-secondary);line-height:1.45;margin-bottom:18px;white-space:pre-wrap;' }, message) : el('div', { style: 'height:12px;' }),
-      el('div', { style: 'display:flex;gap:10px;' }, cancelBtn, confirmBtn),
+    const dialog = el('div.dialog', { role: 'alertdialog', 'aria-modal': 'true' },
+      el('div.dialog-title', {}, title),
+      message ? el('div.dialog-msg', {}, message) : null,
+      el('div.dialog-actions', {},
+        el('button.btn.btn-secondary', { type: 'button', onclick: () => close(false) }, cancelText),
+        el('button.btn', {
+          type: 'button',
+          class: destructive ? 'btn-danger' : 'btn-primary',
+          onclick: () => close(true),
+        }, confirmText),
+      ),
     );
 
-    mask.addEventListener('click', () => close(false));
-    overlayRoot.appendChild(mask);
+    veil.addEventListener('click', () => close(false));
+    overlayRoot.appendChild(veil);
     overlayRoot.appendChild(dialog);
     lockScroll(true);
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        mask.classList.add('is-open');
-        dialog.style.opacity = '1';
-        dialog.style.transform = 'translate(-50%,-50%) scale(1)';
+        veil.classList.add('is-open');
+        dialog.classList.add('is-open');
       });
     });
   });
 }
 
-/** 切换主题（light → dark → system），并 toast 提示 */
+/* =========================================================================
+ * Popover（锚定菜单）
+ * ========================================================================= */
+
+/**
+ * @param {HTMLElement} anchor 定位锚点
+ * @param {Array<{label:string,icon?:string,value?:any,destructive?:boolean,separator?:boolean}>} items
+ * @param {{align?:'start'|'end'}} [opts]
+ * @returns {Promise<any>}
+ */
+export function openPopover(anchor, items, opts = {}) {
+  const { align = 'end' } = opts;
+  return new Promise((resolve) => {
+    const veil = el('div.veil', { style: 'background:transparent;backdrop-filter:none;-webkit-backdrop-filter:none;' });
+    const pop = el('div.popover', { role: 'menu' });
+    let closed = false;
+    function close(v) {
+      if (closed) return;
+      closed = true;
+      veil.classList.remove('is-open');
+      pop.remove();
+      document.removeEventListener('keydown', onKey);
+      setTimeout(() => veil.remove(), 260);
+      resolve(v);
+    }
+    const onKey = (e) => { if (e.key === 'Escape') close(null); };
+    document.addEventListener('keydown', onKey);
+
+    for (const it of items) {
+      if (it.separator) { pop.appendChild(el('div.pop-sep')); continue; }
+      const b = el('button.pop-item', { type: 'button', class: it.destructive ? 'is-destructive' : '' },
+        it.icon ? el('span.pop-icon', {}, icon(it.icon, { size: 16 })) : null,
+        el('span', {}, it.label),
+      );
+      b.addEventListener('click', () => close(it.value !== undefined ? it.value : it.label));
+      pop.appendChild(b);
+    }
+
+    veil.addEventListener('click', () => close(null));
+    overlayRoot.appendChild(veil);
+    overlayRoot.appendChild(pop);
+    veil.classList.add('is-open');
+
+    // 定位：优先下方，空间不足则上方
+    const r = anchor.getBoundingClientRect();
+    const pr = pop.getBoundingClientRect();
+    let left = align === 'end' ? r.right - pr.width : r.left;
+    left = Math.max(10, Math.min(left, window.innerWidth - pr.width - 10));
+    let top = r.bottom + 6;
+    if (top + pr.height > window.innerHeight - 12) top = Math.max(10, r.top - pr.height - 6);
+    pop.style.left = `${left}px`;
+    pop.style.top = `${top}px`;
+  });
+}
+
+/* =========================================================================
+ * 主题切换
+ * ========================================================================= */
+
 export function toggleTheme() {
   const next = cycleTheme();
   const label = next === 'light' ? '浅色' : next === 'dark' ? '深色' : '跟随系统';
@@ -345,23 +435,31 @@ export function toggleTheme() {
   return next;
 }
 
-// 订阅 store 变化（可用于调试 / 全局响应）
-ui.subscribe((state) => {
-  document.documentElement.dataset.appTheme = state.theme;
+ui.subscribe((s, prev) => {
+  if (s.theme !== prev.theme) document.documentElement.dataset.appTheme = s.theme;
 });
 
-// ============================================================
-// 启动
-// ============================================================
+/* =========================================================================
+ * 启动
+ * ========================================================================= */
 
 function boot() {
   initStore();
   initSidebar();
   window.addEventListener('hashchange', handleRoute);
-  handleRoute(); // 首次进入
+  document.addEventListener('keydown', (e) => {
+    // ⌘K / Ctrl+K 全局搜索（在聊天页里聚焦搜索、其它页跳到剧本库）
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      openSidebar();
+      setTimeout(() => $('#sidebar input[type="text"]')?.focus(), 120);
+    }
+  });
+  handleRoute();
 }
 
-// DOM 已就绪（script type=module 默认 defer，DOM 已解析完成）
+export { openSidebar };
+
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot);
 } else {

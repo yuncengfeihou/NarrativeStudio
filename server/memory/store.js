@@ -99,8 +99,39 @@ export function getDb() {
       created_at INTEGER NOT NULL,
       PRIMARY KEY (session_id, turn_no)
     );
+
+    -- 用户手写的记忆笔记：确定性事实，永不压缩、每轮强制进入上下文
+    CREATE TABLE IF NOT EXISTS notes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      content TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT 'note',      -- note | rule | foreshadow | retcon
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_notes_session ON notes(session_id, active, turn_no);
   `);
+  migrate(db);
   return db;
+}
+
+/**
+ * 轻量迁移：为旧库补齐后续版本新增的列。
+ * SQLite 的 ALTER TABLE ADD COLUMN 幂等性由 PRAGMA 检查保证。
+ */
+function migrate(d) {
+  const addColumn = (table, column, ddl) => {
+    const cols = d.prepare(`PRAGMA table_info(${table})`).all();
+    if (!cols.some(c => c.name === column)) {
+      d.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
+    }
+  };
+  addColumn('entities', 'pinned', 'pinned INTEGER NOT NULL DEFAULT 0');
+  addColumn('facts', 'pinned', 'pinned INTEGER NOT NULL DEFAULT 0');
+  addColumn('facts', 'status', "status TEXT NOT NULL DEFAULT 'active'");  // active | retracted
+  addColumn('turns', 'edited', 'edited INTEGER NOT NULL DEFAULT 0');
+  addColumn('turns', 'branch_taken', 'branch_taken TEXT');
 }
 
 /* ------------------------------ sessions ------------------------------ */
@@ -150,6 +181,7 @@ export function deleteSession(id) {
     d.prepare(`DELETE FROM entities WHERE session_id=?`).run(id);
     d.prepare(`DELETE FROM facts WHERE session_id=?`).run(id);
     d.prepare(`DELETE FROM states WHERE session_id=?`).run(id);
+    d.prepare(`DELETE FROM notes WHERE session_id=?`).run(id);
     d.prepare(`DELETE FROM sessions WHERE id=?`).run(id);
   };
   d.exec('BEGIN'); try { tx(); d.exec('COMMIT'); } catch (e) { d.exec('ROLLBACK'); throw e; }
@@ -213,6 +245,50 @@ function decorateTurn(row) {
 export function getMaxTurnNo(sessionId) {
   const row = getDb().prepare(`SELECT MAX(turn_no) AS m FROM turns WHERE session_id=?`).get(sessionId);
   return row?.m || 0;
+}
+
+/** 单条 turn（用于编辑/审核正文）。 */
+export function getTurn(sessionId, turnNo, kind) {
+  const row = getDb().prepare(
+    `SELECT * FROM turns WHERE session_id=? AND turn_no=? AND kind=?`
+  ).get(sessionId, turnNo, kind);
+  return row ? decorateTurn(row) : null;
+}
+
+/** 改写某条 turn 的正文（人工订正叙事，后续记忆将以此为准）。 */
+export function updateTurnContent(sessionId, turnNo, kind, content) {
+  const info = getDb().prepare(
+    `UPDATE turns SET content=?, token_count=?, edited=1 WHERE session_id=? AND turn_no=? AND kind=?`
+  ).run(content, estimateTokens(content), sessionId, turnNo, kind);
+  return Number(info.changes) > 0;
+}
+
+/**
+ * 回滚到第 n 轮（含）：删除其后所有回合与由这些回合派生的记忆。
+ * 用于「这段剧情走歪了，退回去重来」。
+ * @returns {{turns:number, summaries:number, states:number, facts:number}}
+ */
+export function truncateSession(sessionId, turnNo) {
+  const d = getDb();
+  const q = (sql) => d.prepare(sql).run(sessionId, turnNo);
+  d.exec('BEGIN');
+  try {
+    const t = q(`DELETE FROM turns WHERE session_id=? AND turn_no>?`);
+    const s = q(`DELETE FROM summaries WHERE session_id=? AND turn_to>?`);
+    const st = q(`DELETE FROM states WHERE session_id=? AND turn_no>?`);
+    const f = q(`DELETE FROM facts WHERE session_id=? AND turn_no>?`);
+    // 该轮之后实体最后出现位置需要修正，否则会指向已删除的回合
+    d.prepare(`UPDATE entities SET last_turn=? WHERE session_id=? AND last_turn>?`)
+      .run(turnNo, sessionId, turnNo);
+    d.prepare(`DELETE FROM entities WHERE session_id=? AND last_turn<? AND first_turn>?`)
+      .run(sessionId, 1, turnNo);
+    d.exec('COMMIT');
+    touchSession(sessionId, Math.max(getMaxTurnNo(sessionId), 0));
+    return { turns: t.changes, summaries: s.changes, states: st.changes, facts: f.changes };
+  } catch (e) {
+    d.exec('ROLLBACK');
+    throw e;
+  }
 }
 
 /* ----------------------------- summaries ------------------------------ */
@@ -301,9 +377,40 @@ export function getEntities(sessionId, { types = null, limit = 60 } = {}) {
   let sql = `SELECT * FROM entities WHERE session_id=?`;
   const params = [sessionId];
   if (types?.length) { sql += ` AND type IN (${types.map(() => '?').join(',')})`; params.push(...types); }
-  sql += ` ORDER BY importance DESC, last_turn DESC LIMIT ?`;
+  sql += ` ORDER BY pinned DESC, importance DESC, last_turn DESC LIMIT ?`;
   params.push(limit);
   return getDb().prepare(sql).all(...params).map(e => ({ ...e, attributes: JSON.parse(e.attributes_json) }));
+}
+
+/** 固定 / 取消固定实体（固定的实体优先进入上下文，且不会被预算挤掉）。 */
+export function setEntityPinned(sessionId, entityId, pinned) {
+  const info = getDb().prepare(
+    `UPDATE entities SET pinned=? WHERE session_id=? AND id=?`
+  ).run(pinned ? 1 : 0, sessionId, entityId);
+  return Number(info.changes) > 0;
+}
+
+/** 人工编辑实体档案（订正名称/摘要/重要度）。 */
+export function updateEntity(sessionId, entityId, patch = {}) {
+  const row = getDb().prepare(`SELECT * FROM entities WHERE session_id=? AND id=?`).get(sessionId, entityId);
+  if (!row) return false;
+  getDb().prepare(
+    `UPDATE entities SET name=?, summary=?, importance=?, attributes_json=?, updated_at=? WHERE id=?`
+  ).run(
+    patch.name ?? row.name,
+    patch.summary ?? row.summary,
+    patch.importance ?? row.importance,
+    patch.attributes ? JSON.stringify({ ...JSON.parse(row.attributes_json), ...patch.attributes }) : row.attributes_json,
+    Date.now(),
+    entityId,
+  );
+  return true;
+}
+
+/** 删除实体（错误的记忆可以人工剔除）。 */
+export function deleteEntity(sessionId, entityId) {
+  const info = getDb().prepare(`DELETE FROM entities WHERE session_id=? AND id=?`).run(sessionId, entityId);
+  return Number(info.changes) > 0;
 }
 
 /* ------------------------------- facts -------------------------------- */
@@ -321,13 +428,75 @@ export function addFact(sessionId, fact) {
   return Number(info.lastInsertRowid);
 }
 
-export function getFacts(sessionId, { limit = 200, subject = null } = {}) {
+export function getFacts(sessionId, { limit = 200, subject = null, includeRetracted = false } = {}) {
   let sql = `SELECT * FROM facts WHERE session_id=?`;
   const params = [sessionId];
+  if (!includeRetracted) sql += ` AND status='active'`;
   if (subject) { sql += ` AND subject=?`; params.push(subject); }
-  sql += ` ORDER BY turn_no DESC, id DESC LIMIT ?`;
+  sql += ` ORDER BY pinned DESC, turn_no DESC, id DESC LIMIT ?`;
   params.push(limit);
   return getDb().prepare(sql).all(...params);
+}
+
+/** 固定 / 取消固定事实。 */
+export function setFactPinned(sessionId, factId, pinned) {
+  const info = getDb().prepare(
+    `UPDATE facts SET pinned=? WHERE session_id=? AND id=?`
+  ).run(pinned ? 1 : 0, sessionId, factId);
+  return Number(info.changes) > 0;
+}
+
+/** 撤回（作废）一条事实：不物理删除，便于审计与「剧情推翻设定」。 */
+export function deleteFact(sessionId, factId, { hard = false } = {}) {
+  const info = hard
+    ? getDb().prepare(`DELETE FROM facts WHERE session_id=? AND id=?`).run(sessionId, factId)
+    : getDb().prepare(`UPDATE facts SET status='retracted' WHERE session_id=? AND id=?`).run(sessionId, factId);
+  return Number(info.changes) > 0;
+}
+
+/** 人工新增一条事实（作者钦定的设定，例如「伍卿 - 腿有旧疾 - 左腿」）。 */
+export function addManualFact(sessionId, { subject, predicate, object, turn_no = 0, confidence = 1 }) {
+  return addFact(sessionId, { subject, predicate, object, turn_no, confidence });
+}
+
+/* ------------------------------- notes -------------------------------- */
+
+/**
+ * 作者手写记忆笔记。与自动记忆的区别：永不被压缩、永不遗忘、每轮强制注入上下文。
+ * kind: note（一般事实/偏好）| rule（硬性演出规则）| foreshadow（伏笔待回收）| retcon（覆盖既有记忆）
+ */
+export function addNote(sessionId, { content, kind = 'note', turn_no = 0 }) {
+  const info = getDb().prepare(`
+    INSERT INTO notes (session_id, content, kind, turn_no, active, created_at)
+    VALUES (?, ?, ?, ?, 1, ?)
+  `).run(sessionId, String(content || '').trim(), kind, turn_no, Date.now());
+  return Number(info.lastInsertRowid);
+}
+
+export function getNotes(sessionId, { activeOnly = true, kind = null } = {}) {
+  let sql = `SELECT * FROM notes WHERE session_id=?`;
+  const params = [sessionId];
+  if (activeOnly) sql += ` AND active=1`;
+  if (kind) { sql += ` AND kind=?`; params.push(kind); }
+  sql += ` ORDER BY turn_no ASC, id ASC`;
+  return getDb().prepare(sql).all(...params);
+}
+
+export function updateNote(sessionId, noteId, patch = {}) {
+  const row = getDb().prepare(`SELECT * FROM notes WHERE id=? AND session_id=?`).get(noteId, sessionId);
+  if (!row) return false;
+  getDb().prepare(`UPDATE notes SET content=?, kind=?, active=? WHERE id=?`).run(
+    patch.content ?? row.content,
+    patch.kind ?? row.kind,
+    patch.active == null ? row.active : (patch.active ? 1 : 0),
+    noteId,
+  );
+  return true;
+}
+
+export function deleteNote(sessionId, noteId) {
+  const info = getDb().prepare(`DELETE FROM notes WHERE id=? AND session_id=?`).run(noteId, sessionId);
+  return Number(info.changes) > 0;
 }
 
 /* ------------------------------- states ------------------------------- */

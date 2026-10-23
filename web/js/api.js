@@ -228,9 +228,87 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
   },
 
-  /** GET /api/sessions/:id/memory -> {stats, tiers, entities, state} */
+  /** GET /api/sessions/:id/memory -> {stats, tiers, entities, state, notes, ...} */
   getMemory(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/memory`, { signal });
+  },
+
+  /* ---------------- 分页 / 检索 ---------------- */
+
+  /** GET /api/sessions/:id/turns?from=&to=&kinds= -> {turns, total} */
+  getTurns(id, { from = 1, to = '', kinds = '' } = {}, signal) {
+    const qs = new URLSearchParams({ from: String(from), limit: '400' });
+    if (to !== '' && to != null) qs.set('to', String(to));
+    if (kinds) qs.set('kinds', kinds);
+    return request(`/api/sessions/${encodeURIComponent(id)}/turns?${qs}`, { signal });
+  },
+
+  /** GET /api/sessions/:id/search?q= -> {hits, query} */
+  searchSession(id, q, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/search?q=${encodeURIComponent(q)}`, { signal });
+  },
+
+  /* ---------------- 记忆编辑 ---------------- */
+
+  getNotes(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/notes`, { signal });
+  },
+  addNote(id, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/notes`, { method: 'POST', body, signal });
+  },
+  updateNote(id, noteId, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/notes/${noteId}`, { method: 'PATCH', body, signal });
+  },
+  deleteNote(id, noteId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/notes/${noteId}`, { method: 'DELETE', signal });
+  },
+  updateEntity(id, entityId, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/entities/${entityId}`, { method: 'PATCH', body, signal });
+  },
+  deleteEntity(id, entityId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/entities/${entityId}`, { method: 'DELETE', signal });
+  },
+  addFact(id, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/facts`, { method: 'POST', body, signal });
+  },
+  updateFact(id, factId, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/facts/${factId}`, { method: 'PATCH', body, signal });
+  },
+  deleteFact(id, factId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/facts/${factId}`, { method: 'DELETE', signal });
+  },
+  putState(id, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/state`, { method: 'PUT', body, signal });
+  },
+
+  /* ---------------- 剧情编辑 ---------------- */
+
+  /** PATCH /api/sessions/:id/turns/:turnNo body:{kind, content, rememorize?} */
+  updateTurn(id, turnNo, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/turns/${turnNo}`, { method: 'PATCH', body, signal });
+  },
+
+  /** POST /api/sessions/:id/rollback body:{turn_no} */
+  rollback(id, turnNo, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/rollback`, { method: 'POST', body: { turn_no: turnNo }, signal });
+  },
+
+  /** POST /api/sessions/:id/rewrite -> SSE（先回滚再重跑该轮） */
+  rewrite(id, body = {}, handlers = {}) {
+    return runStream(`/api/sessions/${encodeURIComponent(id)}/rewrite`, body, handlers);
+  },
+
+  /* ---------------- 预设剧本 ---------------- */
+
+  /** GET /api/presets -> [{id,title,tags,...}] */
+  listPresets(signal) {
+    return request('/api/presets', { signal });
+  },
+  getPreset(id, signal) {
+    return request(`/api/presets/${encodeURIComponent(id)}`, { signal });
+  },
+  savePreset(body, signal) {
+    return request('/api/presets', { method: 'POST', body, signal });
   },
 
   /** POST /api/sessions/:id/branches -> {branches, scene_summary}（非流式） */

@@ -6,6 +6,7 @@ import express from 'express';
 import { config, assertConfig } from './config.js';
 import { openaiRouter } from './routes/openai.js';
 import { sessionsRouter } from './routes/sessions.js';
+import { presetsRouter } from './routes/presets.js';
 import { staticRouter } from './routes/static.js';
 
 try {
@@ -49,6 +50,7 @@ app.use((req, res, next) => {
 });
 
 app.use('/api', sessionsRouter);
+app.use('/api', presetsRouter);
 app.use(openaiRouter);
 app.use(staticRouter);
 
@@ -65,6 +67,14 @@ app.use((err, req, res, next) => {
   res.status(err.status || 500).json({
     error: { message: err.message || 'internal server error', type: 'server_error', code: err.code || null },
   });
+});
+
+// 进程级异常兜底：单个请求/流的未捕获错误不应杀死整个服务
+process.on('uncaughtException', (err) => {
+  console.error('[uncaughtException]', err?.stack || err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[unhandledRejection]', reason?.stack || reason);
 });
 
 app.listen(config.port, config.host, () => {

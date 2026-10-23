@@ -210,11 +210,16 @@ async function handleRoleplay(req, res, body, sessionIdRaw) {
     'X-Accel-Buffering': 'no',
   });
   const send = (delta, finish) => {
+    if (res.writableEnded) return;
     const chunk = {
       id: completionId, object: 'chat.completion.chunk', created, model,
       choices: [{ index: 0, delta, finish_reason: finish || null }],
     };
-    res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    try {
+      res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+    } catch {
+      /* 客户端已断开：写入失败静默忽略 */
+    }
   };
   send({ role: 'assistant', content: '' });
 

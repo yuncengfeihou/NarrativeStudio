@@ -54,7 +54,7 @@ for await (const ev of chatStream({ messages, reasoningEffort, signal })) {
 }
 ```
 
-## 记忆存储接口 (server/memory/store.js, 已建)
+## 记忆存储接口 (server/memory/store.js)
 
 ```js
 createSession({id, title, settings}) -> session
@@ -62,13 +62,44 @@ getSession(id) -> {id,title,settings,turn_count,...} | null
 listSessions(), updateSession(id,{title,settings,status}), deleteSession(id)
 addTurn(sessionId, {turn_no, kind:'player'|'narrator'|'system', content, images?, reasoning?, branch_choice?, meta?, token_count?})
 getTurns(sessionId,{from,to,kinds}), getRecentTurns(sessionId,n), getMaxTurnNo(sessionId)
+getTurn(sessionId, turnNo, kind) -> turn | null
+updateTurnContent(sessionId, turnNo, kind, content) -> bool      // 置 edited=1
+truncateSession(sessionId, turnNo) -> {turns,summaries,states,facts}  // 回滚（含级联清理）
 addSummary(sessionId,{level,turnFrom,turnTo,content}), getSummaries(sessionId,{level,archived,limit}),
 getLatestSummaries(sessionId,level,n), archiveSummaries(ids), countSummaries(sessionId,level)
 upsertEntity(sessionId,{type,name,summary,attributes,first_turn,last_turn,importance})
-getEntities(sessionId,{types,limit})
-addFact(sessionId,{subject,predicate,object,turn_no,confidence}), getFacts(sessionId,{limit,subject})
+getEntities(sessionId,{types,limit})      // 排序：pinned DESC, importance DESC, last_turn DESC
+setEntityPinned(sessionId, entityId, pinned), updateEntity(sessionId, entityId, patch), deleteEntity(sessionId, entityId)
+addFact(sessionId,{subject,predicate,object,turn_no,confidence}), getFacts(sessionId,{limit,subject,includeRetracted})
+addManualFact(sessionId,{subject,predicate,object,turn_no,confidence})
+setFactPinned(sessionId, factId, pinned), deleteFact(sessionId, factId, {hard})
 setState(sessionId,turnNo,state), getState(sessionId) -> {turn_no, state} | null
-touchSession(id, turnCount)
+// 作者笔记（确定性记忆，永不压缩）
+addNote(sessionId,{content,kind:'note'|'rule'|'foreshadow'|'retcon',turn_no}), getNotes(sessionId,{activeOnly,kind}),
+updateNote(sessionId, noteId, {content,kind,active}), deleteNote(sessionId, noteId)
+touchSession(id, turnCount), closeDb()
+```
+
+### 数据 Schema 增量（v2）
+
+```sql
+-- notes：作者手写记忆
+CREATE TABLE notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+  content TEXT NOT NULL,
+  kind TEXT NOT NULL DEFAULT 'note',      -- note | rule | foreshadow | retcon
+  turn_no INTEGER NOT NULL DEFAULT 0,
+  active INTEGER NOT NULL DEFAULT 1,
+  created_at INTEGER NOT NULL
+);
+
+-- 迁移新增列（migrate() 幂等补齐）
+entities.pinned        INTEGER NOT NULL DEFAULT 0
+facts.pinned           INTEGER NOT NULL DEFAULT 0
+facts.status           TEXT NOT NULL DEFAULT 'active'   -- active | retracted
+turns.edited           INTEGER NOT NULL DEFAULT 0
+turns.branch_taken     TEXT
 ```
 
 ## 数据 Schema
@@ -175,12 +206,16 @@ export class MemoryRetriever {
 ```js
 export async function assembleContext({ session, turnNo, playerText, images, branchChoice })
 // 返回 {
-//   messages: [...],            // 完整可发送的 messages（system + memory + recent + current）
-//   budget: {system, bible, summaries, entities, retrieval, recent, current, total},
-//   retriever, state, recentTurns
+//   messages: [...],            // 完整可发送的 messages（system + bible + notes + state + 记忆层 + recent + current）
+//   budget: {system, bible, notes, state, summaries, entities, retrieval, recent, current, total},
+//   retriever, state, recentTurns, retrievalSnippets
 // }
 // 硬约束：budget.total ≤ settings.context_max_tokens（默认200K）
-// 装配优先级（超预算时从低到高丢弃）：retrieval > 旧summaries > entities > recent(保留至少2轮)
+// 装配优先级（超预算时从低到高丢弃）：retrieval > 旧summaries > entities > recent(保留至少2轮) > state > notes > bible
+//
+// 角色约定（重要）：只有 system 人设与 bible 使用 role:'system'，且必须位于开头；
+//   notes/state/summaries/entities/retrieval 全部使用 role:'user'。
+//   把额外的 system 消息插进对话中段会让上游把正文写进 reasoning、content 为空。
 ```
 
 ## Orchestrator 接口 (agents/orchestrator.js)
@@ -203,7 +238,7 @@ export async function runTurn({ sessionId, playerText, images, branchChoice, gen
 export async function getSessionSnapshot(sessionId)  // 前端初始化用
 ```
 
-## 原生 HTTP API (routes/sessions.js)
+## 原生 HTTP API (routes/sessions.js + routes/presets.js)
 
 ```
 GET    /api/config                      -> {models, defaults, context_limits}
@@ -215,11 +250,51 @@ DELETE /api/sessions/:id
 POST   /api/sessions/:id/turn           body:{playerText, images?, branchChoice?, generateBranches?}
                                            -> SSE 流（orchestrator 事件协议，data: {json}）
 POST   /api/sessions/:id/branches       -> {branches, scene_summary}（非流式 JSON）
-GET    /api/sessions/:id/memory         -> {stats, tiers:[{level,count,tokens}], entities, state}
+GET    /api/sessions/:id/memory         -> {stats, tiers, archived_tiers, entities, facts, notes, state, compression}
+GET    /api/sessions/:id/turns          ?from=&to=&kinds=&limit= -> {turns, total, from, to}
+GET    /api/sessions/:id/search         ?q= -> {hits:[{turn_no,kind,created_at,before,match,after}], query}
 POST   /api/sessions/:id/opening        -> SSE 流（生成/重扩开场白，事件同 narrator）
+
+# 记忆编辑
+GET    /api/sessions/:id/notes              -> {notes}
+POST   /api/sessions/:id/notes              body:{content, kind?} -> {id, notes}
+PATCH  /api/sessions/:id/notes/:noteId      body:{content?, kind?, active?} -> {notes}
+DELETE /api/sessions/:id/notes/:noteId      -> {notes}
+PATCH  /api/sessions/:id/entities/:entityId body:{pinned?, name?, summary?, importance?} -> {entities}
+DELETE /api/sessions/:id/entities/:entityId -> {entities}
+POST   /api/sessions/:id/facts              body:{subject,predicate,object} -> {id, facts}
+PATCH  /api/sessions/:id/facts/:factId      body:{pinned?} -> {facts}
+DELETE /api/sessions/:id/facts/:factId      ?hard=1 -> {facts}   （默认软删 = retracted）
+PUT    /api/sessions/:id/state              body:{state, turn_no?} -> {state, turn_no}
+
+# 剧情编辑
+PATCH  /api/sessions/:id/turns/:turnNo      body:{kind:'player'|'narrator', content, rememorize?}
+                                               -> {turn, rememorized}
+POST   /api/sessions/:id/rollback           body:{turn_no} -> {turns,summaries,states,facts,turn_no,memoryStats}
+POST   /api/sessions/:id/rewrite            body:{turn_no, guidance?, generateBranches?}
+                                               -> SSE（先发 rollback 事件，再走 turn 协议）
+
+# 剧本预设
+GET    /api/presets                     -> [{id,title,subtitle,tags,characters,accent_hue,source,...}]
+GET    /api/presets/:id                 -> {id, title, settings, ...}
+POST   /api/presets                     body:{id, settings, title?, ...} -> {id}
 ```
 
-memoryStats: `{turn_count, total_tokens, context_tokens, context_max, budget:{...}, tiers:[...], entities:n, facts:n, summaries:[{level,count,tokens}]}`
+memoryStats: `{turn_count, total_tokens, context_tokens, context_max, budget:{settings,notes,state,summaries,retrieval,recent_raw,entities,facts}, tiers:[{level,count,tokens,last}], archived_tiers:[{level,count}], archive_tokens, raw_tokens, compression, entities, facts, notes, state, state_turn, last_retrieval}`
+
+### SSE 事件协议（扩展）
+
+除原有的 `turn_start / reasoning / narrative / narrative_done / memory / state / branches / done / error` 外，
+新增：
+
+- `rollback`（仅 `/rewrite`）：`{turn_no, removed}` — 重写前已回滚到的位置
+- `narrative_reset`：`{reason}` — 上游只返回 reasoning 而 content 为空时，
+  orchestrator 会清空半成品并重试一次（关闭推理、追加「直接输出正文」指令）
+
+> **重要约束**：装配后的 messages 中，`role:'system'` 只允许出现在**开头**
+> （system 人设 + bible）。把额外的 system 消息插进对话中段，会让 step-5-preview
+> 把正文全部写进 reasoning 通道、content 为空（已实测）。各记忆层
+> （notes / state / summaries / entities / retrieval）一律使用 `role:'user'`。
 
 ## OpenAI 兼容 API (routes/openai.js)
 
@@ -249,4 +324,49 @@ POST /v1/chat/completions
 - api.js 导出: `api.listSessions()`, `api.createSession()`, `api.getSession()`, `api.deleteSession()`,
   `api.runTurn(sessionId, body, handlers)` (handlers: {onEvent, signal}), `api.getMemory()`,
   `api.generateBranches()`, `api.generateOpening()`, `api.getConfig()`
-- store.js: 极简响应式 store（subscribe/setState），localStorage 持久化 UI 偏好（theme, lastSessionId）
+- v2 新增：`api.getTurns()`, `api.searchSession()`, `api.getNotes/addNote/updateNote/deleteNote()`,
+  `api.updateEntity/deleteEntity()`, `api.addFact/updateFact/deleteFact()`, `api.putState()`,
+  `api.updateTurn()`, `api.rollback()`, `api.rewrite(sessionId, body, handlers)`（SSE）,
+  `api.listPresets/getPreset/savePreset()`
+- store.js: 极简响应式 store（subscribe/setState），localStorage 持久化 UI 偏好
+  （`ai-roleplay.prefs.v2`：theme, readingWidth, readingSize, showReasoning, showTurnMarks, lastSessionId）
+
+### 视图模块契约
+
+每个 `web/js/views/*.js` 与 `web/js/panels/*.js` 的 default 导出：
+
+```js
+export default {
+  id, title,
+  async mount(root, params) -> { unmount() }
+}
+```
+
+`app.js` 负责：路由解析 → `closeAllOverlays()` → 卸载旧视图 → 动态 import 新视图 → 挂载 → 加 `is-active`。
+路由切换时必定关闭所有浮层（否则 sheet 会跟着页面走）。
+
+### 浮层 API (app.js)
+
+```js
+toast(message, {duration?, type?:'info'|'error'|'success', iconName?})
+showLoading(text?) / hideLoading()            // 计数式，可重入
+openSheet({title, render(body, api), confirmText?, onConfirm?, cancelText?, footer?})
+  -> {close, body, sheet, veil, confirmBtn}
+openActionSheet({title?, actions:[{label,value,icon?,desc?,destructive?}], cancelText?}) -> Promise<value|null>
+confirmDialog({title, message, confirmText?, cancelText?, destructive?}) -> Promise<boolean>
+openPopover(anchorEl, items, {align?}) -> Promise<value|null>
+closeAllOverlays()                            // 路由切换时调用
+```
+
+### 样式分层（web/styles/）
+
+```
+tokens.css   设计令牌（唯一的颜色/字号/圆角/阴影/动效来源）
+base.css     reset + 排版 + 基础组件
+shell.css    壁纸 + 浮动窗口 + 侧栏 + 导航 + 响应式
+views.css    首页 / 剧本库 / 设定编辑器 / 设置
+chat.css     对话阅读区
+panels.css   浮层 + 记忆面板
+```
+
+约定：**新增颜色/圆角/阴影一律先用 tokens 里的变量**；组件样式只出现在它所属的那一层文件里。

@@ -21,7 +21,7 @@
  */
 import { config } from '../config.js';
 import { estimateMessageTokens, estimateMessagesTokens, estimateTokens, truncateToTokens } from '../tokens.js';
-import { getEntities, getFacts, getLatestSummaries, getRecentTurns, getState, getSummaries } from './store.js';
+import { getEntities, getFacts, getLatestSummaries, getNotes, getRecentTurns, getState, getSummaries } from './store.js';
 import { MemoryRetriever } from './retriever.js';
 
 /** 摘要层目标总量（tok） */
@@ -186,7 +186,7 @@ function buildSummariesMessage(sessionId, capTokens) {
   return { role: 'user', content };
 }
 
-/** 实体 + 事实层：top 40 实体（importance 降序）+ 最近 80 条事实 */
+/** 实体 + 事实层：固定项优先，其余按 importance 降序 / 时间降序 */
 function buildEntitiesMessage(sessionId, capTokens) {
   if (capTokens <= 0) return null;
   const entities = getEntities(sessionId, { limit: 40 });
@@ -197,9 +197,11 @@ function buildEntitiesMessage(sessionId, capTokens) {
   let used = MSG_OVERHEAD + estimateTokens('【关键实体与事实档案】');
   for (const e of entities) {
     const label = ENTITY_TYPE_LABELS[e.type] || e.type || '实体';
-    const line = `【${label}】${e.name}：${e.summary || ''}`;
+    const pin = e.pinned ? '★' : '';
+    const line = `【${label}${pin}】${e.name}：${e.summary || ''}`;
     const cost = estimateTokens(line) + 1;
-    if (used + cost > capTokens) break;             // 超预算 → 丢掉 importance 更低的
+    // 固定实体永不被预算挤掉（除非自身已超上限）
+    if (used + cost > capTokens && !e.pinned) break;
     lines.push(line);
     used += cost;
   }
@@ -209,13 +211,38 @@ function buildEntitiesMessage(sessionId, capTokens) {
     for (const f of facts) {
       const line = `${f.subject} - ${f.predicate} - ${f.object}`;
       const cost = estimateTokens(line) + 1;
-      if (used + cost > capTokens) break;           // 超预算 → 丢掉更早的事实
+      if (used + cost > capTokens && !f.pinned) break;
       lines.push(line);
       used += cost;
     }
   }
   if (!lines.length) return null;
   return { role: 'user', content: `【关键实体与事实档案】\n${lines.join('\n')}` };
+}
+
+/**
+ * 作者笔记层：人工固化的确定性记忆（设定补充 / 硬规则 / 未回收伏笔 / 覆盖记忆）。
+ * 这一层永不压缩、永不丢弃，位置放在摘要之前，保证模型的最高注意力落在它身上。
+ *
+ * 用 role:'user' 而非 'system'：与 state / summaries / entities / retrieval 各层
+ * 保持一致。把额外的 system 消息插进对话中段，部分模型（实测 step-5-preview）
+ * 会把正文全写进 reasoning 通道，content 为空。
+ */
+const NOTE_KIND_LABEL = {
+  note: '补充设定',
+  rule: '硬性规则',
+  foreshadow: '待回收伏笔',
+  retcon: '覆盖既有记忆',
+};
+
+function buildNotesMessage(sessionId) {
+  const notes = getNotes(sessionId, { activeOnly: true });
+  if (!notes.length) return null;
+  const lines = notes.map(n => `【${NOTE_KIND_LABEL[n.kind] || '笔记'}】${n.content}`);
+  return {
+    role: 'user',
+    content: `【作者笔记】（以下为作者钦定的事实与规则，优先级高于自动记忆与即兴创作，必须严格遵守）\n${lines.join('\n')}`,
+  };
 }
 
 /** 检索层：用本轮玩家输入（+ 分支描述）召回历史细节 */
@@ -389,6 +416,7 @@ function enforceHardLimit(ctx) {
     () => shrinkLayer('entities'),
     shrinkRecent,
     () => dropLayer('state'),
+    () => dropLayer('notes'),        // 笔记层：仅在最极端超限时才舍弃
     () => shrinkLayer('bible'),
     truncateOldestRecent,
     () => truncateMessage(ctx.layers.find(l => l.key === 'system')?.msg, 80),
@@ -452,6 +480,9 @@ export async function assembleContext({ session, turnNo, playerText, images, bra
   /* ---- 2. world bible ---- */
   const bibleMsg = buildBibleMessage(session);
 
+  /* ---- 2.5 作者笔记（人工固化记忆，优先级极高） ---- */
+  const notesMsg = buildNotesMessage(session.id);
+
   /* ---- 3. state ---- */
   const stateRec = getState(session.id);
   const state = stateRec?.state ?? null;
@@ -462,6 +493,7 @@ export async function assembleContext({ session, turnNo, playerText, images, bra
   /* ---- 4. summaries ---- */
   const usedBeforeSummaries =
     estimateMessageTokens(systemMsg) + estimateMessageTokens(bibleMsg) +
+    (notesMsg ? estimateMessageTokens(notesMsg) : 0) +
     (stateMsg ? estimateMessageTokens(stateMsg) : 0);
   const summaryCap = Math.min(SUMMARY_TARGET_TOKENS, Math.max(0, softMax - usedBeforeSummaries));
   const summariesMsg = buildSummariesMessage(session.id, summaryCap);
@@ -497,6 +529,7 @@ export async function assembleContext({ session, turnNo, playerText, images, bra
     layers: [
       { key: 'system', msg: systemMsg },
       { key: 'bible', msg: bibleMsg },
+      { key: 'notes', msg: notesMsg },
       { key: 'state', msg: stateMsg },
       { key: 'summaries', msg: summariesMsg },
       { key: 'entities', msg: entitiesMsg },
@@ -522,14 +555,14 @@ export async function assembleContext({ session, turnNo, playerText, images, bra
     ...(ctx.current ? [ctx.current] : []),
   ];
   const budget = {
-    system: 0, bible: 0, state: 0, summaries: 0, entities: 0,
+    system: 0, bible: 0, notes: 0, state: 0, summaries: 0, entities: 0,
     retrieval: 0, recent: 0, current: 0, total: 0,
   };
   for (const l of ctx.layers) if (l.msg) budget[l.key] = estimateMessageTokens(l.msg);
   budget.recent = ctx.recent.reduce((s, m) => s + estimateMessageTokens(m), 0);
   if (ctx.current) budget.current = estimateMessageTokens(ctx.current);
-  budget.total = budget.system + budget.bible + budget.state + budget.summaries +
-    budget.entities + budget.retrieval + budget.recent + budget.current;
+  budget.total = budget.system + budget.bible + budget.notes + budget.state +
+    budget.summaries + budget.entities + budget.retrieval + budget.recent + budget.current;
 
   return {
     messages,

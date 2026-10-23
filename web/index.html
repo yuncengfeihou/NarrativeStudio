@@ -1,59 +1,58 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="zh-CN" data-theme="light">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="color-scheme" content="light dark" />
   <meta name="theme-color" content="#F2F2F7" />
   <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-title" content="角色剧场" />
   <meta name="apple-mobile-web-app-status-bar-style" content="default" />
   <meta name="format-detection" content="telephone=no" />
-  <title>AI 角色剧场</title>
-  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%2300A9FF'/%3E%3Cstop offset='1' stop-color='%23AF52DE'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='100' height='100' rx='24' fill='url(%23g)'/%3E%3Ctext x='50' y='68' font-size='52' font-family='-apple-system,PingFang SC,sans-serif' font-weight='700' text-anchor='middle' fill='white'%3E剧%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="/styles/ios.css" />
-  <link rel="stylesheet" href="/styles/app.css" />
+  <meta name="description" content="AI 角色扮演剧场：多 Agent 协同的分层记忆系统，上千轮剧情不失忆。" />
+  <title>角色剧场</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='0' x2='1' y2='1'%3E%3Cstop offset='0' stop-color='%232FA8FF'/%3E%3Cstop offset='.55' stop-color='%237A5CFF'/%3E%3Cstop offset='1' stop-color='%23C15CF5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='15' fill='url(%23g)'/%3E%3Cpath d='M22 18h20v5H27v7h12v5H27v11h-5z' fill='white'/%3E%3C/svg%3E" />
+  <link rel="stylesheet" href="/styles/tokens.css" />
+  <link rel="stylesheet" href="/styles/base.css" />
   <link rel="stylesheet" href="/styles/shell.css" />
-  <!-- 内联脚本：在首屏渲染前应用主题，避免深色模式闪白 -->
+  <link rel="stylesheet" href="/styles/views.css" />
+  <link rel="stylesheet" href="/styles/chat.css" />
+  <link rel="stylesheet" href="/styles/panels.css" />
   <script>
+    /* 首屏前解析主题，避免深色模式闪白 */
     (function () {
       try {
-        var raw = localStorage.getItem('ai-roleplay.prefs.v1');
+        var raw = localStorage.getItem('ai-roleplay.prefs.v2');
         var theme = raw ? (JSON.parse(raw).theme || 'system') : 'system';
-        var dark = theme === 'dark' ||
-          (theme === 'system' && window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        if (dark) {
-          document.documentElement.setAttribute('data-theme', 'dark');
-          var m = document.querySelector('meta[name="theme-color"]');
-          if (m) m.setAttribute('content', '#000000');
-        }
+        var dark = theme === 'dark' || (theme === 'system' &&
+          window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        var m = document.querySelector('meta[name="theme-color"]');
+        if (m) m.setAttribute('content', dark ? '#0E0E12' : '#F2F2F7');
       } catch (e) { /* 忽略 */ }
     })();
   </script>
 </head>
 <body>
-  <!-- iOS 风动态渐变壁纸 -->
   <div id="wallpaper" aria-hidden="true"></div>
 
-  <!-- 应用窗口：侧栏 + 主区（桌面双栏 / 移动单栏） -->
   <div id="app" class="app-window">
-    <!-- 侧栏：会话库（桌面常驻，移动端为抽屉） -->
-    <aside id="sidebar" class="sidebar"></aside>
-    <div id="sidebar-scrim" class="sidebar-scrim" hidden></div>
+    <aside id="sidebar" class="sidebar" aria-label="会话库"></aside>
+    <div id="sidebar-scrim" class="sb-scrim" hidden></div>
 
-    <!-- 主区：视图挂载点 -->
     <main id="main" class="main">
-      <!-- 启动占位 -->
-      <div class="view is-active" id="boot-view">
-        <div class="view-scroll" style="display:flex;align-items:center;justify-content:center;min-height:100%;">
-          <div style="display:flex;flex-direction:column;align-items:center;gap:16px;color:var(--label-secondary);">
-            <span class="spinner" style="width:32px;height:32px;border-width:3px;border-color:var(--fill);border-top-color:var(--sys-blue);"></span>
-            <span style="font-size:15px;">正在进入剧场…</span>
+      <div class="view is-active" id="boot">
+        <div class="scroll" style="display:flex;align-items:center;justify-content:center;">
+          <div class="col" style="align-items:center;gap:14px;color:var(--label-tertiary);">
+            <span class="spinner" style="width:26px;height:26px;"></span>
+            <span style="font-size:var(--fs-footnote);">正在进入剧场</span>
           </div>
         </div>
       </div>
     </main>
   </div>
 
-  <!-- 全局浮层容器：toast / action sheet / sheet / loading 都挂在这里 -->
   <div id="overlay-root"></div>
 
   <script type="module" src="/js/app.js"></script>

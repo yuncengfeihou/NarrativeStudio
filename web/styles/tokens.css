@@ -1,0 +1,177 @@
+/* =========================================================================
+ * tokens.css — 设计令牌
+ *
+ * 单一事实来源：所有颜色 / 字号 / 圆角 / 阴影 / 动效都由这里定义。
+ * 主题切换由 <html data-theme="light|dark"> 驱动（JS 解析 system 后写成确定值），
+ * 因此不再需要 prefers-color-scheme 的三份重复定义。
+ * ========================================================================= */
+
+:root {
+  color-scheme: light;
+
+  /* ---- 字体 ---- */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display",
+    "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", "Microsoft YaHei", sans-serif;
+  --font-read: "SF Pro Text", -apple-system, BlinkMacSystemFont, "PingFang SC",
+    "Hiragino Sans GB", "Songti SC", "Microsoft YaHei", serif;
+  --font-serif: "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia, serif;
+  --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+
+  /* ---- 字号阶梯（iOS Type Scale 的 Web 化） ---- */
+  --fs-large-title: 32px;
+  --fs-title1: 26px;
+  --fs-title2: 21px;
+  --fs-title3: 19px;
+  --fs-headline: 16.5px;
+  --fs-body: 16px;
+  --fs-read: 17.5px;
+  --fs-callout: 15px;
+  --fs-subhead: 14px;
+  --fs-footnote: 13px;
+  --fs-caption: 11.5px;
+
+  /* ---- 系统色（浅色） ---- */
+  --blue: #007AFF;
+  --blue-strong: #0062CC;
+  --red: #FF3B30;
+  --orange: #FF9500;
+  --green: #34C759;
+  --teal: #30B0C7;
+  --indigo: #5856D6;
+  --purple: #AF52DE;
+  --pink: #FF2D55;
+  --yellow: #FFCC00;
+  --gray: #8E8E93;
+
+  /* 语义色 */
+  --tint: var(--blue);
+  --tint-soft: color-mix(in srgb, var(--tint) 13%, transparent);
+  --tint-softer: color-mix(in srgb, var(--tint) 7%, transparent);
+  --danger: var(--red);
+
+  /* ---- 文本 ---- */
+  --label: #14161A;
+  --label-secondary: rgba(60, 60, 67, 0.62);
+  --label-tertiary: rgba(60, 60, 67, 0.36);
+  --label-quaternary: rgba(60, 60, 67, 0.16);
+  --label-on-tint: #FFFFFF;
+
+  /* ---- 表面 ---- */
+  --bg: #EFEFF3;                 /* 窗口外的壁纸底色 */
+  --bg-grouped: #F2F2F7;         /* 主区底色 */
+  --surface: #FFFFFF;            /* 卡片 / 列表 */
+  --surface-raised: #FFFFFF;
+  --surface-sunken: #F7F7FA;     /* 输入框、内嵌区 */
+  --surface-paper: #FBFBFD;      /* 阅读区（略偏纸感） */
+  --fill: rgba(120, 120, 128, 0.16);
+  --fill-strong: rgba(120, 120, 128, 0.26);
+
+  /* ---- 分隔 ---- */
+  --sep: rgba(60, 60, 67, 0.13);
+  --sep-strong: rgba(60, 60, 67, 0.26);
+
+  /* ---- 毛玻璃 ---- */
+  --glass: rgba(248, 248, 250, 0.72);
+  --glass-strong: rgba(250, 250, 252, 0.9);
+  --glass-menu: rgba(252, 252, 254, 0.86);
+  --glass-border: rgba(255, 255, 255, 0.6);
+  --blur: saturate(180%) blur(22px);
+  --blur-light: saturate(160%) blur(14px);
+
+  /* ---- 圆角（连续曲率的近似） ---- */
+  --r-xs: 8px;
+  --r-sm: 10px;
+  --r-md: 13px;
+  --r-lg: 17px;
+  --r-xl: 22px;
+  --r-2xl: 28px;
+  --r-pill: 999px;
+
+  /* ---- 阴影 ---- */
+  --sh-xs: 0 1px 2px rgba(16, 18, 27, 0.05);
+  --sh-sm: 0 1px 3px rgba(16, 18, 27, 0.06), 0 4px 12px rgba(16, 18, 27, 0.05);
+  --sh-md: 0 2px 6px rgba(16, 18, 27, 0.06), 0 12px 28px rgba(16, 18, 27, 0.09);
+  --sh-lg: 0 4px 14px rgba(16, 18, 27, 0.08), 0 24px 64px rgba(16, 18, 27, 0.14);
+  --sh-window: 0 1px 2px rgba(16, 18, 27, 0.04), 0 12px 32px rgba(16, 18, 27, 0.09),
+    0 48px 96px -24px rgba(16, 18, 27, 0.2);
+
+  /* ---- 动效 ---- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  --ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  --dur-fast: 0.16s;
+  --dur: 0.26s;
+  --dur-slow: 0.42s;
+
+  /* ---- 布局 ---- */
+  --nav-h: 52px;
+  --sidebar-w: 296px;
+  --read-max: 40em;
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+
+  /* ---- 壁纸 ---- */
+  --wallpaper:
+    radial-gradient(60% 50% at 12% 0%, rgba(0, 122, 255, 0.10), transparent 70%),
+    radial-gradient(50% 45% at 92% 6%, rgba(175, 82, 222, 0.09), transparent 70%),
+    radial-gradient(55% 50% at 78% 100%, rgba(48, 176, 199, 0.08), transparent 70%),
+    linear-gradient(180deg, #F6F6FA 0%, #ECECF1 100%);
+}
+
+/* =========================================================================
+ * 深色
+ * ========================================================================= */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --blue: #0A84FF;
+  --blue-strong: #409CFF;
+  --red: #FF453A;
+  --orange: #FF9F0A;
+  --green: #30D158;
+  --teal: #40C8E0;
+  --indigo: #5E5CE6;
+  --purple: #BF5AF2;
+  --pink: #FF375F;
+  --yellow: #FFD60A;
+  --gray: #98989D;
+
+  --tint-soft: color-mix(in srgb, var(--tint) 20%, transparent);
+  --tint-softer: color-mix(in srgb, var(--tint) 11%, transparent);
+
+  --label: #F2F2F7;
+  --label-secondary: rgba(235, 235, 245, 0.62);
+  --label-tertiary: rgba(235, 235, 245, 0.34);
+  --label-quaternary: rgba(235, 235, 245, 0.15);
+
+  --bg: #08080B;
+  --bg-grouped: #0E0E12;
+  --surface: #1B1B20;
+  --surface-raised: #232329;
+  --surface-sunken: #141419;
+  --surface-paper: #15151A;
+  --fill: rgba(118, 118, 128, 0.26);
+  --fill-strong: rgba(118, 118, 128, 0.4);
+
+  --sep: rgba(255, 255, 255, 0.09);
+  --sep-strong: rgba(255, 255, 255, 0.18);
+
+  --glass: rgba(18, 18, 22, 0.72);
+  --glass-strong: rgba(24, 24, 29, 0.9);
+  --glass-menu: rgba(32, 32, 38, 0.88);
+  --glass-border: rgba(255, 255, 255, 0.1);
+
+  --sh-xs: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --sh-sm: 0 1px 3px rgba(0, 0, 0, 0.4), 0 4px 12px rgba(0, 0, 0, 0.3);
+  --sh-md: 0 2px 8px rgba(0, 0, 0, 0.45), 0 12px 28px rgba(0, 0, 0, 0.4);
+  --sh-lg: 0 6px 18px rgba(0, 0, 0, 0.5), 0 28px 72px rgba(0, 0, 0, 0.6);
+  --sh-window: 0 0 0 0.5px rgba(255, 255, 255, 0.07), 0 32px 96px rgba(0, 0, 0, 0.7);
+
+  --wallpaper:
+    radial-gradient(60% 50% at 12% 0%, rgba(10, 132, 255, 0.16), transparent 70%),
+    radial-gradient(50% 45% at 92% 6%, rgba(191, 90, 242, 0.13), transparent 70%),
+    radial-gradient(55% 50% at 78% 100%, rgba(64, 200, 224, 0.09), transparent 70%),
+    linear-gradient(180deg, #0B0B10 0%, #040406 100%);
+}

@@ -39,6 +39,109 @@ const CHARACTER_NAME_DENY = new Set([
   'content', 'first_turn', 'last_turn', 'weather', 'time', 'location', 'last_hook',
 ]);
 
+/** 线索与任务的上限（防止状态机无界膨胀，挤占上下文预算）。 */
+const MAX_THREADS = 14;
+const MAX_QUESTS = 8;
+
+/**
+ * 线索去重阈值：两条线索的字符 bigram Jaccard 相似度超过该值即视为同一线索。
+ * 0.62 是经验值——能合并「七年前东街往事与伍卿真实身份」与
+ * 「七年前东街往事与伍卿身世（无纹玉佩…）」，但不会误合并「凌玥的旧伤」与「凌璇的旧识」。
+ */
+const THREAD_SIMILARITY = 0.62;
+
+/** 把字符串切成字符 bigram 集合（中文短句相似度用）。 */
+function bigrams(s) {
+  const t = String(s || '').replace(/[\s，。、；：""''（）()《》【】]/g, '');
+  const set = new Set();
+  for (let i = 0; i < t.length - 1; i++) set.add(t.slice(i, i + 2));
+  if (!set.size && t.length) set.add(t);
+  return set;
+}
+
+/** 归一化：去标点、空白、括号内容，用于比对 */
+function normalize(s) {
+  return String(s || '')
+    .replace(/[（(][^）)]*[）)]/g, '')          // 去掉括号补充说明
+    .replace(/[\s，。、；：""''「」『』（）()《》【】…—\-]/g, '');
+}
+
+/** 最长公共子串长度（O(n·m)，中文短句可接受） */
+function lcsLength(a, b) {
+  if (!a || !b) return 0;
+  const n = a.length;
+  const m = b.length;
+  let prev = new Uint16Array(m + 1);
+  let cur = new Uint16Array(m + 1);
+  let best = 0;
+  for (let i = 1; i <= n; i++) {
+    for (let j = 1; j <= m; j++) {
+      if (a[i - 1] === b[j - 1]) {
+        cur[j] = prev[j - 1] + 1;
+        if (cur[j] > best) best = cur[j];
+      } else {
+        cur[j] = 0;
+      }
+    }
+    const tmp = prev; prev = cur; cur = tmp;
+    cur.fill(0);
+  }
+  return best;
+}
+
+/**
+ * 线索/目标相似度（0-1）：取「bigram Jaccard」与「最长公共子串占比」的较大值。
+ *
+ * 为什么两个指标都要：LLM 每次重写同一条线索时会**追加**限定语
+ * （「七年前东街往事」→「七年前东街往事与伍卿真实身份」），
+ * 这时 Jaccard 被长度差异拉低，但公共子串占比仍然很高。
+ * 反过来，两条不同线索常常共享一两个常用词，Jaccard 更稳定。
+ *
+ * @returns {number} 0-1
+ */
+export function similarity(a, b) {
+  if (!a || !b) return 0;
+  const na = normalize(a);
+  const nb = normalize(b);
+  if (!na || !nb) return 0;
+  if (na === nb) return 1;
+
+  const A = bigrams(na);
+  const B = bigrams(nb);
+  let inter = 0;
+  for (const x of A) if (B.has(x)) inter++;
+  const jaccard = (A.size + B.size - inter) > 0 ? inter / (A.size + B.size - inter) : 0;
+
+  const lcs = lcsLength(na, nb) / Math.min(na.length, nb.length);
+  return Math.max(jaccard, lcs);
+}
+
+/**
+ * 合并字符串列表并去重：新项与既有项高度相似时，保留**更长**的那条（信息更全）。
+ * @param {string[]} base
+ * @param {string[]} incoming
+ * @param {number} max
+ */
+function mergeDedup(base, incoming, max) {
+  const out = base.slice();
+  for (const raw of incoming) {
+    const item = String(raw || '').trim();
+    if (!item) continue;
+    let merged = false;
+    for (let i = 0; i < out.length; i++) {
+      if (similarity(out[i], item) >= THREAD_SIMILARITY) {
+        // 保留信息量更大的一条；等长时保留旧的（稳定）
+        if (item.length > out[i].length + 2) out[i] = item;
+        merged = true;
+        break;
+      }
+    }
+    if (!merged) out.push(item);
+  }
+  // 超额时丢最旧（数组前部），保留最新状态
+  return out.length > max ? out.slice(out.length - max) : out;
+}
+
 function isPlainObject(v) {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -101,20 +204,20 @@ export function mergeState(oldState, delta) {
     }
   }
 
-  // 2) inventory：先加后删（remove 优先）
+  // 2) inventory：先加后删（remove 优先），并对近义物品去重
   const inventory = Array.isArray(next.inventory) ? next.inventory.slice() : [];
-  for (const item of asStringArray(d.inventory_add)) {
-    if (!inventory.includes(item)) inventory.push(item);
-  }
+  const grew = mergeDedup(inventory, asStringArray(d.inventory_add), 60);
   const removeSet = new Set(asStringArray(d.inventory_remove));
-  next.inventory = inventory.filter(item => !removeSet.has(item));
+  next.inventory = grew.filter(item => !removeSet.has(item));
 
-  // 3) quests：按 goal 匹配更新，未命中则追加
+  // 3) quests：按 goal 匹配更新，未命中则追加；相同目标做模糊归一
   const quests = Array.isArray(next.quests) ? next.quests.map(q => deepClone(q)) : [];
   for (const upd of asArray(d.quests_update)) {
     const goal = typeof upd === 'string' ? upd : upd?.goal;
     if (!goal || typeof goal !== 'string') continue;
-    const hit = quests.find(q => q && q.goal === goal);
+    // 精确匹配优先，其次模糊匹配（避免「查明七年前身份」与「查明七年前身份与往事」重复立项）
+    const hit = quests.find(q => q && q.goal === goal)
+      || quests.find(q => q && q.goal && similarity(q.goal, goal) >= THREAD_SIMILARITY);
     if (hit) {
       if (isPlainObject(upd)) {
         for (const [k, v] of Object.entries(upd)) {
@@ -126,15 +229,17 @@ export function mergeState(oldState, delta) {
       quests.push(isPlainObject(upd) ? deepClone(upd) : { goal, status: 'active' });
     }
   }
-  next.quests = quests;
+  next.quests = quests.length > MAX_QUESTS
+    // 保留未完成的（active）在前，超额时优先丢弃已完成/失败的旧任务
+    ? [...quests.filter(q => q && q.status === 'active'), ...quests.filter(q => !q || q.status !== 'active')]
+      .slice(0, MAX_QUESTS)
+    : quests;
 
-  // 4) threads：先加后回收
+  // 4) threads：先加后回收，并做相似度去重（防止近义线索无限堆积）
   const threads = Array.isArray(next.threads) ? next.threads.slice() : [];
-  for (const t of asStringArray(d.threads_add)) {
-    if (!threads.includes(t)) threads.push(t);
-  }
   const resolvedSet = new Set(asStringArray(d.threads_resolve));
-  next.threads = threads.filter(t => !resolvedSet.has(t));
+  const alive = threads.filter(t => !resolvedSet.has(t));
+  next.threads = mergeDedup(alive, asStringArray(d.threads_add), MAX_THREADS);
 
   // 5) 规范化容器字段，保证 assembler 拿到完整结构
   next.characters = isPlainObject(next.characters) ? next.characters : {};
