@@ -742,13 +742,22 @@ export async function assembleContext({
   const card = world?.card || {};
   const lore = world ? getLore(world.id) : [];
 
-  /* ---- 扫描文本：本轮输入 + 最近原文 + 场景账本 ---- */
-  const stateRec = getState(sessionId);
+  /* ---- 扫描文本：本轮输入 + 最近原文 + 场景账本 + 开场种子 ---- */
+  // 开场种子必须参与扫描：它本身就是「这一轮正在发生的事」，
+  // 否则第一轮会找不到在场人物（凌玥明明就在雨里，却不在卡司里）。
+  // 首轮没有场景快照时，用世界卡的 opening_state 顶替。
+  // 否则引擎会自己猜季节与地点——实测会猜成「A 市夏天」，而这场戏是初冬的湘曲。
+  const rawState = getState(sessionId);
+  const openingState = isOpening && !rawState && card.opening_state
+    ? { turn_no: 0, state: card.opening_state }
+    : null;
+  const stateRec = rawState || openingState;
   const recentText = getRecentText(sessionId, config.context.loreScanDepth);
   const sceneText = stateRec?.state
     ? `${stateRec.state.location || ''} ${Object.keys(stateRec.state.characters || {}).join(' ')} ${(stateRec.state.inventory || []).join(' ')}`
     : '';
-  const scanText = [playerText || '', branchChoice?.description || '', sceneText, recentText].join('\n');
+  const openingSeed = isOpening ? buildOpeningSeed(world) : '';
+  const scanText = [playerText || '', branchChoice?.description || '', sceneText, recentText, openingSeed].join('\n');
 
   /* ---- 1. system：契约（唯一允许的 system 消息） ---- */
   const systemMsg = { role: 'system', content: buildContract(session, world) };
@@ -759,7 +768,7 @@ export async function assembleContext({
   const worldText = [charterText, protagonistText].filter(Boolean).join('\n\n');
 
   const castResult = buildCast(card, {
-    playerText: playerText || '',
+    playerText: [playerText || '', openingSeed, recentText].filter(Boolean).join('\n'),
     recentText,
     state: stateRec?.state || null,
     capTokens: budgetCfg.world * 0.36,

@@ -17,8 +17,10 @@
   /* ---- 字体 ---- */
   --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-  --font-read: "Songti SC", "Source Han Serif SC", "Noto Serif SC", Georgia,
-    "PingFang SC", serif;
+  /* 阅读正文沿用 UI 字体：中文衬线在 Windows 上会回退成很重的宋体，
+     长时间阅读反而更累。行高与行宽才是阅读舒适度的主要来源。 */
+  --font-read: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+    "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* ---- 字号 ---- */

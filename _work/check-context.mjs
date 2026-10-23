@@ -8,13 +8,42 @@
 import '../server/load-env.js';
 
 const { getDb, createSession, addTurn, addSummary, upsertEntity, addFact, setState, addNote,
-  getWorld, getMaxTurnNo } = await import('../server/memory/store.js');
+  upsertRelation, upsertThread, addReflection, getWorld, getMaxTurnNo,
+  archiveSummaries, getSummaries } = await import('../server/memory/store.js');
 const { assembleContext } = await import('../server/memory/context-engine.js');
 
 const world = getWorld('nvzun-jianpolan');
 if (!world) { console.error('先运行 node _work/seed-worlds.mjs'); process.exit(1); }
 
-const { checkCompression } = await import('../server/memory/compressor.js');
+/**
+ * 本地版的层级压缩（不调用 LLM，只验证「随轮数变化的体积」这一不变量）。
+ * 真实压缩会调用模型生成更凝练的摘要；这里用截断模拟同样的结构变化：
+ *   每 6 条 L1 → 1 条 L2，每 4 条 L2 → 1 条 L3，每 4 条 L3 → 1 条 L4
+ */
+function localCompress(sessionId) {
+  const roll = (srcLevel, dstLevel, every) => {
+    const rows = getSummaries(sessionId, { level: srcLevel, archived: 0 });
+    while (rows.length >= every) {
+      const batch = rows.splice(0, every);
+      let contiguous = true;
+      for (let i = 1; i < batch.length; i++) {
+        if (batch[i].turn_from !== batch[i - 1].turn_to + 1) { contiguous = false; break; }
+      }
+      if (!contiguous) break;
+      const text = batch.map((r) => r.content).join(' ').slice(0, 500);
+      addSummary(sessionId, {
+        level: dstLevel,
+        turnFrom: batch[0].turn_from,
+        turnTo: batch[batch.length - 1].turn_to,
+        content: text,
+      });
+      archiveSummaries(batch.map((r) => r.id));
+    }
+  };
+  roll(1, 2, 6);
+  roll(2, 3, 4);
+  roll(3, 4, 4);
+}
 
 const MAX_TURNS = Number(process.argv[2]) || 400;
 
@@ -42,10 +71,29 @@ for (let i = 1; i <= MAX_TURNS; i++) {
     last_hook: '她说出「以前认识」四个字',
   });
   if (i === 40) addNote(sid, { content: '伍卿左腿有旧疾，跑不快。', kind: 'note', turn_no: 40 });
+  if (i % 5 === 0) {
+    upsertRelation(sid, {
+      from: '凌玥', to: '伍卿', kind: '旧识·执念',
+      sentiment: Math.min(1, 0.4 + i / 400), note: `第 ${i} 轮的试探`, turn_no: i,
+    });
+    if (i % 10 === 0) {
+      upsertThread(sid, {
+        title: `线索 ${i}：雨里那把没撑开的伞`,
+        status: i % 40 === 0 ? 'resolved' : 'open',
+        weight: 0.4, planted_turn: i,
+      });
+    }
+  }
+  if (i % 5 === 0) {
+    addReflection(sid, {
+      turn_from: Math.max(1, i - 4), turn_to: i, kind: 'insight',
+      content: `她每次示好都像在下套——第 ${i} 轮时，这一点更清楚了。`,
+    });
+  }
 
-  if (i % 12 === 0) await checkCompression(sid, i);
+  if (i % 6 === 0) localCompress(sid);
 
-  if (i % 40 === 0) {
+  if (i % 20 === 0) {
     const ctx = await assembleContext({
       session: { id: sid, settings: {}, title: '测试' }, world, turnNo: i + 1,
       playerText: '我把牛绳往手里一收，问她：「你到底是谁？」',

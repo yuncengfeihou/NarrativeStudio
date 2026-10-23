@@ -149,18 +149,6 @@ function buildWorldSubbar(worldId) {
 
   listEl = el('div.subbar-list');
   subbarEl.appendChild(listEl);
-
-  listEl.appendChild(el('button.sb-item.is-new', {
-    type: 'button',
-    onclick: () => startNewSession(worldId),
-  },
-    el('span.sb-glyph', { style: 'background:var(--paper-sunken);border:1px solid var(--line);color:var(--ink-3);' },
-      icon('plus', { size: 13 })),
-    el('div.sb-item-body', {},
-      el('div.sb-item-title', { style: 'color:var(--ink-2);' }, '开一段新剧情'),
-    ),
-  ));
-
   paintSessions();
 }
 
@@ -208,13 +196,22 @@ function paintWorlds() {
 
 function paintSessions() {
   if (!listEl) return;
-  // 保留「开一段新剧情」按钮
-  const newBtn = listEl.querySelector('.sb-item.is-new');
   clear(listEl);
-  if (newBtn) listEl.appendChild(newBtn);
+
+  // 「开一段新剧情」永远是列表第一项
+  listEl.appendChild(el('button.sb-item', {
+    type: 'button',
+    onclick: () => startNewSession(activeWorldId),
+  },
+    el('span.sb-glyph', { style: 'background:var(--paper-sunken);border:1px solid var(--line);color:var(--ink-3);' },
+      icon('plus', { size: 13 })),
+    el('div.sb-item-body', {},
+      el('div.sb-item-title', { style: 'color:var(--ink-2);' }, '开一段新剧情'),
+    ),
+  ));
 
   if (!sessions.length) {
-    listEl.appendChild(el('div.sb-empty', {}, '还没有剧情', el('br'), '点上面开始第一段'));
+    listEl.appendChild(el('div.sb-empty', {}, '还没有剧情'));
     return;
   }
 
@@ -363,6 +360,15 @@ export function setContext({ worldId, sessionId } = {}) {
   }
   renderRail();
   renderSubbar();
+  // 切到某段剧情时，目录栏要显示它所在世界卡的会话列表
+  if (activeWorldId) {
+    api.listSessions({ world_id: activeWorldId })
+      .then((list) => {
+        sessions = list || [];
+        if (listEl) paintSessions();
+      })
+      .catch(() => {});
+  }
 }
 
 /* =========================================================================

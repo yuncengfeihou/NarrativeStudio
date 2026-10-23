@@ -66,7 +66,9 @@ export const config = {
 
     // 词条触发扫描
     loreScanDepth: int(env.LORE_SCAN_DEPTH, 8),        // 扫描最近几轮对话
-    loreRecursion: int(env.LORE_RECURSION, 1),         // 触发词条能否再触发词条
+    // 递归 0 = 关闭（推荐）。开启后，被触发词条的内容会再次参与扫描，
+    // 容易让「称呼礼法」这类词条顺带把整张卡司都拉进上下文。
+    loreRecursion: int(env.LORE_RECURSION, 0),
 
     // 压缩节奏
     arcEvery: int(env.ARC_EVERY, 6),

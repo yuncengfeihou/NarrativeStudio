@@ -30,6 +30,8 @@ staticRouter.use((req, res, next) => {
   const filePath = path.join(WEB_DIR, rel);
   // prevent path traversal
   if (!filePath.startsWith(WEB_DIR)) return next();
+  // 前端无构建、直接改源码即生效，所以不缓存（否则改了 CSS/JS 还要手动强刷）
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   fs.stat(filePath, (err, stat) => {
     if (!err && stat.isFile()) {
       const ext = path.extname(filePath).toLowerCase();

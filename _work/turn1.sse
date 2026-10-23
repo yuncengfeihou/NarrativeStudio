@@ -1,0 +1,8112 @@
+data: {"type":"turn_start","turn_no":1,"is_opening":false}
+
+data: {"type":"context","turn_no":1,"budget":{"contract":994,"world":1436,"cast":770,"lore":177,"scene":6,"director":283,"memory":0,"retrieval":0,"recent":0,"current":19,"total":3685,"setting":2672},"meta":{"cast_present":[{"name":"黎婆","role":"伍卿的奶奶（非血亲）"},{"name":"大黑牛","role":"全家唯一值钱的资产 · 牛车动力"}],"cast_absent":[{"name":"凌玥","role":"帝都凌家家主 · 伍卿的「妻主」"},{"name":"陆可","role":"村长之女 · 村里唯一的大学生 · 暗恋者 / 后来的暗子"},{"name":"姬淮澄","role":"当朝太女（皇女）"},{"name":"凌璇","role":"凌家老家主 · 凌玥的母亲"},{"name":"谢沐","role":"帝都谢家二小姐 · 凌玥的表妹"},{"name":"南荣兰冰","role":"帝都南荣家掌舵人 · 凌玥的发小"},{"name":"姬延","role":"当朝皇帝"},{"name":"许映","role":"凌玥的秘书 / 助理"}],"lore_entries":[{"id":1,"title":"世界的基本骨架","category":"setting","constant":true}],"lore_matched":[],"director":{"index":0,"title":"雨街·先预定","progress":0.125},"memory_split":{"reflections":1400,"summaries":5600,"relations":1600,"threads":900,"entities":2600,"notes":1900,"scale":1},"soft_max":52000,"hard_max":200000}}
+
+data: {"type":"reasoning","delta":"用户"}
+
+data: {"type":"reasoning","delta":"要求我作为"}
+
+data: {"type":"reasoning","delta":"剧情演绎"}
+
+data: {"type":"reasoning","delta":"引擎，继续"}
+
+data: {"type":"reasoning","delta":"演绎"}
+
+data: {"type":"reasoning","delta":"《我在"}
+
+data: {"type":"reasoning","delta":"女尊"}
+
+data: {"type":"reasoning","delta":"世界捡破烂》"}
+
+data: {"type":"reasoning","delta":"第1/"}
+
+data: {"type":"reasoning","delta":"10幕「"}
+
+data: {"type":"reasoning","delta":"雨街·先"}
+
+data: {"type":"reasoning","delta":"预定」。\n"}
+
+data: {"type":"reasoning","delta":"\n首先"}
+
+data: {"type":"reasoning","delta":"分析"}
+
+data: {"type":"reasoning","delta":"所有"}
+
+data: {"type":"reasoning","delta":"约束条件"}
+
+data: {"type":"reasoning","delta":"：\n1. "}
+
+data: {"type":"reasoning","delta":"第三人"}
+
+data: {"type":"reasoning","delta":"称限"}
+
+data: {"type":"reasoning","delta":"知视角"}
+
+data: {"type":"reasoning","delta":"，全程贴在伍"}
+
+data: {"type":"reasoning","delta":"卿身上，"}
+
+data: {"type":"reasoning","delta":"只能写"}
+
+data: {"type":"reasoning","delta":"他的内心"}
+
+data: {"type":"reasoning","delta":"独白和"}
+
+data: {"type":"reasoning","delta":"观察到的他人"}
+
+data: {"type":"reasoning","delta":"表情动作"}
+
+data: {"type":"reasoning","delta":"语气"}
+
+data: {"type":"reasoning","delta":"\n2. 短"}
+
+data: {"type":"reasoning","delta":"句为主"}
+
+data: {"type":"reasoning","delta":"，一段一到"}
+
+data: {"type":"reasoning","delta":"三句，用"}
+
+data: {"type":"reasoning","delta":"「……」"}
+
+data: {"type":"reasoning","delta":"和「——"}
+
+data: {"type":"reasoning","delta":"」做"}
+
+data: {"type":"reasoning","delta":"情绪断点，"}
+
+data: {"type":"reasoning","delta":"拟声词可"}
+
+data: {"type":"reasoning","delta":"独立成段"}
+
+data: {"type":"reasoning","delta":"\n3. 篇幅"}
+
+data: {"type":"reasoning","delta":"1600-260"}
+
+data: {"type":"reasoning","delta":"0字\n4"}
+
+data: {"type":"reasoning","delta":". 过去时"}
+
+data: {"type":"reasoning","delta":"叙述，时间"}
+
+data: {"type":"reasoning","delta":"推进要写"}
+
+data: {"type":"reasoning","delta":"清楚\n5."}
+
+data: {"type":"reasoning","delta":" 结尾必须留"}
+
+data: {"type":"reasoning","delta":"钩子，禁止"}
+
+data: {"type":"reasoning","delta":"平稳收尾"}
+
+data: {"type":"reasoning","delta":"\n6. 不得"}
+
+data: {"type":"reasoning","delta":"出现元叙述"}
+
+data: {"type":"reasoning","delta":"\n7. "}
+
+data: {"type":"reasoning","delta":"不得替主角做"}
+
+data: {"type":"reasoning","delta":"决定、不代"}
+
+data: {"type":"reasoning","delta":"写主角的"}
+
+data: {"type":"reasoning","delta":"台词与内心"}
+
+data: {"type":"reasoning","delta":"\n8. 不得"}
+
+data: {"type":"reasoning","delta":"让角色说出不可能"}
+
+data: {"type":"reasoning","delta":"知道"}
+
+data: {"type":"reasoning","delta":"的信息\n9."}
+
+data: {"type":"reasoning","delta":" 专有名词"}
+
+data: {"type":"reasoning","delta":"一次定义、"}
+
+data: {"type":"reasoning","delta":"终身一致\n10"}
+
+data: {"type":"reasoning","delta":". 只"}
+
+data: {"type":"reasoning","delta":"输出剧情"}
+
+data: {"type":"reasoning","delta":"正文\n\n绝对"}
+
+data: {"type":"reasoning","delta":"禁止："}
+
+data: {"type":"reasoning","delta":"\n1. 伍"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"不能突然变强"}
+
+data: {"type":"reasoning","delta":"、会武"}
+
+data: {"type":"reasoning","delta":"、有金手指"}
+
+data: {"type":"reasoning","delta":"\n2. "}
+
+data: {"type":"reasoning","delta":"不能滔滔不绝讲"}
+
+data: {"type":"reasoning","delta":"段子"}
+
+data: {"type":"reasoning","delta":"，幽默只在"}
+
+data: {"type":"reasoning","delta":"内心，"}
+
+data: {"type":"reasoning","delta":"外在是"}
+
+data: {"type":"reasoning","delta":"沉默、省略号"}
+
+data: {"type":"reasoning","delta":"、小声嘀咕"}
+
+data: {"type":"reasoning","delta":"\n3. 凌"}
+
+data: {"type":"reasoning","delta":"玥在外"}
+
+data: {"type":"reasoning","delta":"人面前"}
+
+data: {"type":"reasoning","delta":"不能温柔，"}
+
+data: {"type":"reasoning","delta":"有第三人在"}
+
+data: {"type":"reasoning","delta":"场"}
+
+data: {"type":"reasoning","delta":"必须立刻"}
+
+data: {"type":"reasoning","delta":"收束\n4"}
+
+data: {"type":"reasoning","delta":". 清水"}
+
+data: {"type":"reasoning","delta":"尺度"}
+
+data: {"type":"reasoning","delta":"\n5. 不改"}
+
+data: {"type":"reasoning","delta":"写专"}
+
+data: {"type":"reasoning","delta":"有名词，不给"}
+
+data: {"type":"reasoning","delta":"无名山村"}
+
+data: {"type":"reasoning","delta":"安"}
+
+data: {"type":"reasoning","delta":"名字\n6."}
+
+data: {"type":"reasoning","delta":" 不让"}
+
+data: {"type":"reasoning","delta":"角色替"}
+
+data: {"type":"reasoning","delta":"玩家说出"}
+
+data: {"type":"reasoning","delta":"七年前真相"}
+
+data: {"type":"reasoning","delta":"\n7. 司"}
+
+data: {"type":"reasoning","delta":"楼是真实威胁"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"不能随口"}
+
+data: {"type":"reasoning","delta":"一提\n\n必"}
+
+data: {"type":"reasoning","delta":"达节拍（按序"}
+
+data: {"type":"reasoning","delta":"推进"}
+
+data: {"type":"reasoning","delta":"，不必一轮"}
+
+data: {"type":"reasoning","delta":"走完）："}
+
+data: {"type":"reasoning","delta":"\n- 雨落"}
+
+data: {"type":"reasoning","delta":"下来\n- "}
+
+data: {"type":"reasoning","delta":"张兰把伍"}
+
+data: {"type":"reasoning","delta":"卿当小叫"}
+
+data: {"type":"reasoning","delta":"花子赶走"}
+
+data: {"type":"reasoning","delta":"\n- 凌"}
+
+data: {"type":"reasoning","delta":"玥在雨里"}
+
+data: {"type":"reasoning","delta":"认出他"}
+
+data: {"type":"reasoning","delta":"\n- 凌玥"}
+
+data: {"type":"reasoning","delta":"喊出「卿"}
+
+data: {"type":"reasoning","delta":"儿」，伍卿"}
+
+data: {"type":"reasoning","delta":"以为是在"}
+
+data: {"type":"reasoning","delta":"骂他\n-"}
+
+data: {"type":"reasoning","delta":" 凌玥强行"}
+
+data: {"type":"reasoning","delta":"替他买衣、"}
+
+data: {"type":"reasoning","delta":"买菜、跟回"}
+
+data: {"type":"reasoning","delta":"村\n- "}
+
+data: {"type":"reasoning","delta":"黎婆当面痛"}
+
+data: {"type":"reasoning","delta":"骂「混洞"}
+
+data: {"type":"reasoning","delta":"女娃」，逐"}
+
+data: {"type":"reasoning","delta":"客令"}
+
+data: {"type":"reasoning","delta":"\n- 凌"}
+
+data: {"type":"reasoning","delta":"玥说「卿"}
+
+data: {"type":"reasoning","delta":"儿就当姐姐去"}
+
+data: {"type":"reasoning","delta":"提亲不就好了"}
+
+data: {"type":"reasoning","delta":"」——先把名"}
+
+data: {"type":"reasoning","delta":"分预定下来\n"}
+
+data: {"type":"reasoning","delta":"\n世界"}
+
+data: {"type":"reasoning","delta":"宪章要点"}
+
+data: {"type":"reasoning","delta":"：\n- 现代"}
+
+data: {"type":"reasoning","delta":"皮囊"}
+
+data: {"type":"reasoning","delta":"封建骨架"}
+
+data: {"type":"reasoning","delta":"\n- 女子"}
+
+data: {"type":"reasoning","delta":"主外"}
+
+data: {"type":"reasoning","delta":"掌"}
+
+data: {"type":"reasoning","delta":"权娶"}
+
+data: {"type":"reasoning","delta":"夫，男子"}
+
+data: {"type":"reasoning","delta":"主内"}
+
+data: {"type":"reasoning","delta":"\n- 司"}
+
+data: {"type":"reasoning","delta":"楼是合法"}
+
+data: {"type":"reasoning","delta":"官营"}
+
+data: {"type":"reasoning","delta":"青楼，悬"}
+
+data: {"type":"reasoning","delta":"在每个"}
+
+data: {"type":"reasoning","delta":"男人头上的"}
+
+data: {"type":"reasoning","delta":"刀\n- "}
+
+data: {"type":"reasoning","delta":"凌家"}
+
+data: {"type":"reasoning","delta":"是听"}
+
+data: {"type":"reasoning","delta":"封不听"}
+
+data: {"type":"reasoning","delta":"调的诸侯王"}
+
+data: {"type":"reasoning","delta":"\n- 性别"}
+
+data: {"type":"reasoning","delta":"比约"}
+
+data: {"type":"reasoning","delta":"七"}
+
+data: {"type":"reasoning","delta":"比三"}
+
+data: {"type":"reasoning","delta":"\n- 钱"}
+
+data: {"type":"reasoning","delta":"是块"}
+
+data: {"type":"reasoning","delta":"、毛、万"}
+
+data: {"type":"reasoning","delta":"\n- 玉佩"}
+
+data: {"type":"reasoning","delta":"暗"}
+
+data: {"type":"reasoning","delta":"处"}
+
+data: {"type":"reasoning","delta":"发绿光"}
+
+data: {"type":"reasoning","delta":"投出「"}
+
+data: {"type":"reasoning","delta":"凌」字（"}
+
+data: {"type":"reasoning","delta":"只能"}
+
+data: {"type":"reasoning","delta":"暗示，不能"}
+
+data: {"type":"reasoning","delta":"揭底"}
+
+data: {"type":"reasoning","delta":"）\n- 左"}
+
+data: {"type":"reasoning","delta":"腿脚"}
+
+data: {"type":"reasoning","delta":"腕旧伤是"}
+
+data: {"type":"reasoning","delta":"后天砸出来的"}
+
+data: {"type":"reasoning","delta":"，想不起来（"}
+
+data: {"type":"reasoning","delta":"只能暗示）\n-"}
+
+data: {"type":"reasoning","delta":" 动物都"}
+
+data: {"type":"reasoning","delta":"往他身上"}
+
+data: {"type":"reasoning","delta":"贴（只能"}
+
+data: {"type":"reasoning","delta":"暗示）"}
+
+data: {"type":"reasoning","delta":"\n- 不得"}
+
+data: {"type":"reasoning","delta":"给"}
+
+data: {"type":"reasoning","delta":"无名山村安"}
+
+data: {"type":"reasoning","delta":"名字\n\n当前"}
+
+data: {"type":"reasoning","delta":"场景："}
+
+data: {"type":"reasoning","delta":"雨街"}
+
+data: {"type":"reasoning","delta":"，应该是"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿在城里"}
+
+data: {"type":"reasoning","delta":"卖"}
+
+data: {"type":"reasoning","delta":"破烂"}
+
+data: {"type":"reasoning","delta":"或者"}
+
+data: {"type":"reasoning","delta":"被赶"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"张兰是谁"}
+
+data: {"type":"reasoning","delta":"？可能是店主"}
+
+data: {"type":"reasoning","delta":"/摊"}
+
+data: {"type":"reasoning","delta":"贩"}
+
+data: {"type":"reasoning","delta":"。凌"}
+
+data: {"type":"reasoning","delta":"玥是帝都"}
+
+data: {"type":"reasoning","delta":"最有权势"}
+
+data: {"type":"reasoning","delta":"的女人，"}
+
+data: {"type":"reasoning","delta":"凌家人"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆是伍"}
+
+data: {"type":"reasoning","delta":"卿的奶奶。\n"}
+
+data: {"type":"reasoning","delta":"\n时间"}
+
+data: {"type":"reasoning","delta":"线"}
+
+data: {"type":"reasoning","delta":"：伍"}
+
+data: {"type":"reasoning","delta":"卿十"}
+
+data: {"type":"reasoning","delta":"岁被"}
+
+data: {"type":"reasoning","delta":"凌璇"}
+
+data: {"type":"reasoning","delta":"骗上车"}
+
+data: {"type":"reasoning","delta":"，丢"}
+
+data: {"type":"reasoning","delta":"在东街十五"}
+
+data: {"type":"reasoning","delta":"路，记忆"}
+
+data: {"type":"reasoning","delta":"被封存。现在"}
+
+data: {"type":"reasoning","delta":"十七"}
+
+data: {"type":"reasoning","delta":"岁。\n"}
+
+data: {"type":"reasoning","delta":"\n开始构建"}
+
+data: {"type":"reasoning","delta":"场景"}
+
+data: {"type":"reasoning","delta":"：\n\n时间"}
+
+data: {"type":"reasoning","delta":"：应该是"}
+
+data: {"type":"reasoning","delta":"傍晚"}
+
+data: {"type":"reasoning","delta":"或者"}
+
+data: {"type":"reasoning","delta":"午后"}
+
+data: {"type":"reasoning","delta":"下雨"}
+
+data: {"type":"reasoning","delta":"，天光"}
+
+data: {"type":"reasoning","delta":"要"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n先"}
+
+data: {"type":"reasoning","delta":"写雨"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿在城里"}
+
+data: {"type":"reasoning","delta":"，可能"}
+
+data: {"type":"reasoning","delta":"刚"}
+
+data: {"type":"reasoning","delta":"卖"}
+
+data: {"type":"reasoning","delta":"完破烂"}
+
+data: {"type":"reasoning","delta":"或者被雨困"}
+
+data: {"type":"reasoning","delta":"住"}
+
+data: {"type":"reasoning","delta":"。他"}
+
+data: {"type":"reasoning","delta":"拖着"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"车或者牛"}
+
+data: {"type":"reasoning","delta":"车在附近"}
+
+data: {"type":"reasoning","delta":"。张兰可能是"}
+
+data: {"type":"reasoning","delta":"杂"}
+
+data: {"type":"reasoning","delta":"货铺"}
+
+data: {"type":"reasoning","delta":"老板娘"}
+
+data: {"type":"reasoning","delta":"，嫌"}
+
+data: {"type":"reasoning","delta":"他挡"}
+
+data: {"type":"reasoning","delta":"道"}
+
+data: {"type":"reasoning","delta":"或者晦"}
+
+data: {"type":"reasoning","delta":"气。\n\n注意"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"：伍卿体力"}
+
+data: {"type":"reasoning","delta":"弱，抬"}
+
+data: {"type":"reasoning","delta":"不动三十"}
+
+data: {"type":"reasoning","delta":"斤，左腿"}
+
+data: {"type":"reasoning","delta":"有"}
+
+data: {"type":"reasoning","delta":"伤"}
+
+data: {"type":"reasoning","delta":"。今天"}
+
+data: {"type":"reasoning","delta":"挣"}
+
+data: {"type":"reasoning","delta":"了七十几"}
+
+data: {"type":"reasoning","delta":"块。\n"}
+
+data: {"type":"reasoning","delta":"\n先"}
+
+data: {"type":"reasoning","delta":"写环境"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"落"}
+
+data: {"type":"reasoning","delta":"下来。"}
+
+data: {"type":"reasoning","delta":"伍卿在躲"}
+
+data: {"type":"reasoning","delta":"雨或者"}
+
+data: {"type":"reasoning","delta":"被赶。"}
+
+data: {"type":"reasoning","delta":"张"}
+
+data: {"type":"reasoning","delta":"兰出现"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"赶"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"走"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"凌玥出现"}
+
+data: {"type":"reasoning","delta":"（"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"坐着"}
+
+data: {"type":"reasoning","delta":"防"}
+
+data: {"type":"reasoning","delta":"弹商务"}
+
+data: {"type":"reasoning","delta":"车，或者带"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从），在"}
+
+data: {"type":"reasoning","delta":"雨里认出"}
+
+data: {"type":"reasoning","delta":"他。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥认出"}
+
+data: {"type":"reasoning","delta":"他时的"}
+
+data: {"type":"reasoning","delta":"反应"}
+
+data: {"type":"reasoning","delta":"：不能失"}
+
+data: {"type":"reasoning","delta":"态到"}
+
+data: {"type":"reasoning","delta":"哭，只是"}
+
+data: {"type":"reasoning","delta":"眼眶红了"}
+
+data: {"type":"reasoning","delta":"。她"}
+
+data: {"type":"reasoning","delta":"喊"}
+
+data: {"type":"reasoning","delta":"「卿儿」。"}
+
+data: {"type":"reasoning","delta":"伍卿以为"}
+
+data: {"type":"reasoning","delta":"在骂他"}
+
+data: {"type":"reasoning","delta":"（因为「"}
+
+data: {"type":"reasoning","delta":"卿」"}
+
+data: {"type":"reasoning","delta":"在古代是爱"}
+
+data: {"type":"reasoning","delta":"称，"}
+
+data: {"type":"reasoning","delta":"但伍"}
+
+data: {"type":"reasoning","delta":"卿作为"}
+
+data: {"type":"reasoning","delta":"现代灵魂"}
+
+data: {"type":"reasoning","delta":"+"}
+
+data: {"type":"reasoning","delta":"山村"}
+
+data: {"type":"reasoning","delta":"少年，可能觉得"}
+
+data: {"type":"reasoning","delta":"是在"}
+
+data: {"type":"reasoning","delta":"骂他「"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"」"}
+
+data: {"type":"reasoning","delta":"谐"}
+
+data: {"type":"reasoning","delta":"音或者"}
+
+data: {"type":"reasoning","delta":"不知道"}
+
+data: {"type":"reasoning","delta":"什么意思"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"或者以为"}
+
+data: {"type":"reasoning","delta":"叫"}
+
+data: {"type":"reasoning","delta":"的是"}
+
+data: {"type":"reasoning","delta":"别人）。"}
+
+data: {"type":"reasoning","delta":"内心"}
+
+data: {"type":"reasoning","delta":"吐槽"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n然后"}
+
+data: {"type":"reasoning","delta":"凌玥强行"}
+
+data: {"type":"reasoning","delta":"买衣买菜"}
+
+data: {"type":"reasoning","delta":"。这里"}
+
+data: {"type":"reasoning","delta":"要注意"}
+
+data: {"type":"reasoning","delta":"凌玥的性格"}
+
+data: {"type":"reasoning","delta":"：在外"}
+
+data: {"type":"reasoning","delta":"人面前"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"温柔。"}
+
+data: {"type":"reasoning","delta":"张"}
+
+data: {"type":"reasoning","delta":"兰还在"}
+
+data: {"type":"reasoning","delta":"场"}
+
+data: {"type":"reasoning","delta":"时，凌"}
+
+data: {"type":"reasoning","delta":"玥应该很"}
+
+data: {"type":"reasoning","delta":"冷"}
+
+data: {"type":"reasoning","delta":"厉"}
+
+data: {"type":"reasoning","delta":"/威严"}
+
+data: {"type":"reasoning","delta":"。但认出"}
+
+data: {"type":"reasoning","delta":"伍卿时可能"}
+
+data: {"type":"reasoning","delta":"瞬间失"}
+
+data: {"type":"reasoning","delta":"态，"}
+
+data: {"type":"reasoning","delta":"然后"}
+
+data: {"type":"reasoning","delta":"立刻收"}
+
+data: {"type":"reasoning","delta":"束。\n\n跟"}
+
+data: {"type":"reasoning","delta":"回村："}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥跟着"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿回"}
+
+data: {"type":"reasoning","delta":"村。黎"}
+
+data: {"type":"reasoning","delta":"婆在村"}
+
+data: {"type":"reasoning","delta":"口或者"}
+
+data: {"type":"reasoning","delta":"家门口"}
+
+data: {"type":"reasoning","delta":"。黎"}
+
+data: {"type":"reasoning","delta":"婆恨"}
+
+data: {"type":"reasoning","delta":"凌家"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"当面"}
+
+data: {"type":"reasoning","delta":"痛骂「"}
+
+data: {"type":"reasoning","delta":"混洞女娃"}
+
+data: {"type":"reasoning","delta":"」。凌"}
+
+data: {"type":"reasoning","delta":"玥说"}
+
+data: {"type":"reasoning","delta":"提"}
+
+data: {"type":"reasoning","delta":"亲"}
+
+data: {"type":"reasoning","delta":"。\n\n结尾"}
+
+data: {"type":"reasoning","delta":"钩子：停在"}
+
+data: {"type":"reasoning","delta":"提亲"}
+
+data: {"type":"reasoning","delta":"名"}
+
+data: {"type":"reasoning","delta":"分预定"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆的反应"}
+
+data: {"type":"reasoning","delta":"，或者伍卿"}
+
+data: {"type":"reasoning","delta":"的反应，"}
+
+data: {"type":"reasoning","delta":"或者玉佩/"}
+
+data: {"type":"reasoning","delta":"旧"}
+
+data: {"type":"reasoning","delta":"伤/动物的"}
+
+data: {"type":"reasoning","delta":"某个"}
+
+data: {"type":"reasoning","delta":"暗示即将"}
+
+data: {"type":"reasoning","delta":"爆发"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n具体"}
+
+data: {"type":"reasoning","delta":"节奏"}
+
+data: {"type":"reasoning","delta":"：\n1"}
+
+data: {"type":"reasoning","delta":". 雨"}
+
+data: {"type":"reasoning","delta":"落下来"}
+
+data: {"type":"reasoning","delta":"（"}
+
+data: {"type":"reasoning","delta":"天"}
+
+data: {"type":"reasoning","delta":"光，"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿在城里，"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"车，"}
+
+data: {"type":"reasoning","delta":"破"}
+
+data: {"type":"reasoning","delta":"瓶"}
+
+data: {"type":"reasoning","delta":"罐，"}
+
+data: {"type":"reasoning","delta":"被"}
+
+data: {"type":"reasoning","delta":"雨困"}
+
+data: {"type":"reasoning","delta":"）\n2. "}
+
+data: {"type":"reasoning","delta":"张兰赶"}
+
+data: {"type":"reasoning","delta":"人"}
+
+data: {"type":"reasoning","delta":"（杂"}
+
+data: {"type":"reasoning","delta":"货铺/"}
+
+data: {"type":"reasoning","delta":"面"}
+
+data: {"type":"reasoning","delta":"馆门口"}
+
+data: {"type":"reasoning","delta":"，嫌"}
+
+data: {"type":"reasoning","delta":"他湿"}
+
+data: {"type":"reasoning","delta":"漉"}
+
+data: {"type":"reasoning","delta":"漉的"}
+
+data: {"type":"reasoning","delta":"晦气，挡"}
+
+data: {"type":"reasoning","delta":"生意"}
+
+data: {"type":"reasoning","delta":"）\n3. "}
+
+data: {"type":"reasoning","delta":"凌玥的车"}
+
+data: {"type":"reasoning","delta":"/"}
+
+data: {"type":"reasoning","delta":"人出现，凌"}
+
+data: {"type":"reasoning","delta":"玥认出"}
+
+data: {"type":"reasoning","delta":"他（雨"}
+
+data: {"type":"reasoning","delta":"里，喊"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"儿）"}
+
+data: {"type":"reasoning","delta":"\n4. 伍"}
+
+data: {"type":"reasoning","delta":"卿懵逼"}
+
+data: {"type":"reasoning","delta":"，以为"}
+
+data: {"type":"reasoning","delta":"挨"}
+
+data: {"type":"reasoning","delta":"骂（"}
+
+data: {"type":"reasoning","delta":"内心吐槽"}
+
+data: {"type":"reasoning","delta":"：卿"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"什么"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"？骂"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"轻"}
+
+data: {"type":"reasoning","delta":"浮"}
+
+data: {"type":"reasoning","delta":"？）"}
+
+data: {"type":"reasoning","delta":"\n5. 凌"}
+
+data: {"type":"reasoning","delta":"玥买衣买菜"}
+
+data: {"type":"reasoning","delta":"（命令"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从，不容"}
+
+data: {"type":"reasoning","delta":"拒绝"}
+
+data: {"type":"reasoning","delta":"）"}
+
+data: {"type":"reasoning","delta":"\n6. 回"}
+
+data: {"type":"reasoning","delta":"村路上"}
+
+data: {"type":"reasoning","delta":"（牛车，"}
+
+data: {"type":"reasoning","delta":"大"}
+
+data: {"type":"reasoning","delta":"黑牛"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿的警惕"}
+
+data: {"type":"reasoning","delta":"，玉佩"}
+
+data: {"type":"reasoning","delta":"微"}
+
+data: {"type":"reasoning","delta":"闪"}
+
+data: {"type":"reasoning","delta":"绿光？左"}
+
+data: {"type":"reasoning","delta":"腿旧"}
+
+data: {"type":"reasoning","delta":"伤隐"}
+
+data: {"type":"reasoning","delta":"痛？）\n7"}
+
+data: {"type":"reasoning","delta":". 到"}
+
+data: {"type":"reasoning","delta":"村，"}
+
+data: {"type":"reasoning","delta":"黎婆出场"}
+
+data: {"type":"reasoning","delta":"，痛"}
+
+data: {"type":"reasoning","delta":"骂混"}
+
+data: {"type":"reasoning","delta":"洞女娃，"}
+
+data: {"type":"reasoning","delta":"旱"}
+
+data: {"type":"reasoning","delta":"烟杆"}
+
+data: {"type":"reasoning","delta":"子"}
+
+data: {"type":"reasoning","delta":"/"}
+
+data: {"type":"reasoning","delta":"放"}
+
+data: {"type":"reasoning","delta":"东西\n8."}
+
+data: {"type":"reasoning","delta":" 凌玥说"}
+
+data: {"type":"reasoning","delta":"提亲"}
+
+data: {"type":"reasoning","delta":"，预定"}
+
+data: {"type":"reasoning","delta":"名分\n9"}
+
+data: {"type":"reasoning","delta":". 钩"}
+
+data: {"type":"reasoning","delta":"子：黎"}
+
+data: {"type":"reasoning","delta":"婆的回应/"}
+
+data: {"type":"reasoning","delta":"玉佩的"}
+
+data: {"type":"reasoning","delta":"绿光/伍"}
+
+data: {"type":"reasoning","delta":"卿的旧"}
+
+data: {"type":"reasoning","delta":"伤/大"}
+
+data: {"type":"reasoning","delta":"黑牛的反应"}
+
+data: {"type":"reasoning","delta":"——停在"}
+
+data: {"type":"reasoning","delta":"危机"}
+
+data: {"type":"reasoning","delta":"或"}
+
+data: {"type":"reasoning","delta":"选择前夜\n"}
+
+data: {"type":"reasoning","delta":"\n字数"}
+
+data: {"type":"reasoning","delta":"控制：160"}
+
+data: {"type":"reasoning","delta":"0-260"}
+
+data: {"type":"reasoning","delta":"0字。需要"}
+
+data: {"type":"reasoning","delta":"比较充实"}
+
+data: {"type":"reasoning","delta":"。\n\n细节"}
+
+data: {"type":"reasoning","delta":"填充"}
+
+data: {"type":"reasoning","delta":"：\n- 伍"}
+
+data: {"type":"reasoning","delta":"卿今天"}
+
+data: {"type":"reasoning","delta":"卖了"}
+
+data: {"type":"reasoning","delta":"七十几"}
+
+data: {"type":"reasoning","delta":"块，可能"}
+
+data: {"type":"reasoning","delta":"刚在"}
+
+data: {"type":"reasoning","delta":"城里"}
+
+data: {"type":"reasoning","delta":"卖掉"}
+
+data: {"type":"reasoning","delta":"破烂"}
+
+data: {"type":"reasoning","delta":"。\n- 雨"}
+
+data: {"type":"reasoning","delta":"是突然"}
+
+data: {"type":"reasoning","delta":"落"}
+
+data: {"type":"reasoning","delta":"下来的，"}
+
+data: {"type":"reasoning","delta":"A"}
+
+data: {"type":"reasoning","delta":"市（"}
+
+data: {"type":"reasoning","delta":"帝都"}
+
+data: {"type":"reasoning","delta":"）的雨。"}
+
+data: {"type":"reasoning","delta":"\n- 张兰"}
+
+data: {"type":"reasoning","delta":"：东"}
+
+data: {"type":"reasoning","delta":"街某个"}
+
+data: {"type":"reasoning","delta":"铺"}
+
+data: {"type":"reasoning","delta":"子老板娘"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"经营"}
+
+data: {"type":"reasoning","delta":"布料"}
+
+data: {"type":"reasoning","delta":"店"}
+
+data: {"type":"reasoning","delta":"或者"}
+
+data: {"type":"reasoning","delta":"杂货。"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"伍卿「"}
+
+data: {"type":"reasoning","delta":"小叫"}
+
+data: {"type":"reasoning","delta":"花子"}
+
+data: {"type":"reasoning","delta":"」「晦"}
+
+data: {"type":"reasoning","delta":"气」"}
+
+data: {"type":"reasoning","delta":"。\n- 凌"}
+
+data: {"type":"reasoning","delta":"玥：排"}
+
+data: {"type":"reasoning","delta":"场大"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"防弹"}
+
+data: {"type":"reasoning","delta":"商务车？"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从？"}
+
+data: {"type":"reasoning","delta":"但她"}
+
+data: {"type":"reasoning","delta":"亲自"}
+
+data: {"type":"reasoning","delta":"下车"}
+
+data: {"type":"reasoning","delta":"走进"}
+
+data: {"type":"reasoning","delta":"雨里。她"}
+
+data: {"type":"reasoning","delta":"穿"}
+
+data: {"type":"reasoning","delta":"什么"}
+
+data: {"type":"reasoning","delta":"？可能深"}
+
+data: {"type":"reasoning","delta":"色大衣"}
+
+data: {"type":"reasoning","delta":"/"}
+
+data: {"type":"reasoning","delta":"正"}
+
+data: {"type":"reasoning","delta":"装，剪"}
+
+data: {"type":"reasoning","delta":"裁锋利"}
+
+data: {"type":"reasoning","delta":"。她"}
+
+data: {"type":"reasoning","delta":"身上"}
+
+data: {"type":"reasoning","delta":"有「"}
+
+data: {"type":"reasoning","delta":"长"}
+
+data: {"type":"reasoning","delta":"柳点"}
+
+data: {"type":"reasoning","delta":"云图"}
+
+data: {"type":"reasoning","delta":"」的徽记"}
+
+data: {"type":"reasoning","delta":"？不能"}
+
+data: {"type":"reasoning","delta":"太明显"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"先"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"气场。\n- "}
+
+data: {"type":"reasoning","delta":"凌玥的口"}
+
+data: {"type":"reasoning","delta":"吻"}
+
+data: {"type":"reasoning","delta":"：冷"}
+
+data: {"type":"reasoning","delta":"、命令"}
+
+data: {"type":"reasoning","delta":"式"}
+
+data: {"type":"reasoning","delta":"、短"}
+
+data: {"type":"reasoning","delta":"句"}
+
+data: {"type":"reasoning","delta":"。认出"}
+
+data: {"type":"reasoning","delta":"伍卿时声音"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"抖"}
+
+data: {"type":"reasoning","delta":"，但不能"}
+
+data: {"type":"reasoning","delta":"在外"}
+
+data: {"type":"reasoning","delta":"人面前温柔"}
+
+data: {"type":"reasoning","delta":"太久"}
+
+data: {"type":"reasoning","delta":"。张"}
+
+data: {"type":"reasoning","delta":"兰在时"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"冷"}
+
+data: {"type":"reasoning","delta":"厉"}
+
+data: {"type":"reasoning","delta":"；"}
+
+data: {"type":"reasoning","delta":"张兰被"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从驱"}
+
+data: {"type":"reasoning","delta":"散"}
+
+data: {"type":"reasoning","delta":"或"}
+
+data: {"type":"reasoning","delta":"吓"}
+
+data: {"type":"reasoning","delta":"走后，她"}
+
+data: {"type":"reasoning","delta":"面对"}
+
+data: {"type":"reasoning","delta":"伍卿时"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"可能稍微软"}
+
+data: {"type":"reasoning","delta":"一点但"}
+
+data: {"type":"reasoning","delta":"立刻收"}
+
+data: {"type":"reasoning","delta":"住"}
+
+data: {"type":"reasoning","delta":"。\n- 大"}
+
+data: {"type":"reasoning","delta":"黑牛：在"}
+
+data: {"type":"reasoning","delta":"村"}
+
+data: {"type":"reasoning","delta":"口等"}
+
+data: {"type":"reasoning","delta":"或者"}
+
+data: {"type":"reasoning","delta":"拉着"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"。凌"}
+
+data: {"type":"reasoning","delta":"玥看到"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"想到曾经"}
+
+data: {"type":"reasoning","delta":"说要"}
+
+data: {"type":"reasoning","delta":"卖掉"}
+
+data: {"type":"reasoning","delta":"它？"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"，那是"}
+
+data: {"type":"reasoning","delta":"曾经"}
+
+data: {"type":"reasoning","delta":"扬"}
+
+data: {"type":"reasoning","delta":"言"}
+
+data: {"type":"reasoning","delta":"，现在可能"}
+
+data: {"type":"reasoning","delta":"还没发生"}
+
+data: {"type":"reasoning","delta":"。先"}
+
+data: {"type":"reasoning","delta":"写牛"}
+
+data: {"type":"reasoning","delta":"通"}
+
+data: {"type":"reasoning","delta":"人性"}
+
+data: {"type":"reasoning","delta":"，往"}
+
+data: {"type":"reasoning","delta":"凌玥那边"}
+
+data: {"type":"reasoning","delta":"看"}
+
+data: {"type":"reasoning","delta":"？不，动物"}
+
+data: {"type":"reasoning","delta":"往"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿身上贴"}
+
+data: {"type":"reasoning","delta":"。可以写牛"}
+
+data: {"type":"reasoning","delta":"烦躁"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"被凌"}
+
+data: {"type":"reasoning","delta":"玥的"}
+
+data: {"type":"reasoning","delta":"随从吓得"}
+
+data: {"type":"reasoning","delta":"要"}
+
+data: {"type":"reasoning","delta":"踢人"}
+
+data: {"type":"reasoning","delta":"，伍"}
+
+data: {"type":"reasoning","delta":"卿一"}
+
+data: {"type":"reasoning","delta":"摸"}
+
+data: {"type":"reasoning","delta":"就乖"}
+
+data: {"type":"reasoning","delta":"。\n- 玉佩"}
+
+data: {"type":"reasoning","delta":"：伍"}
+
+data: {"type":"reasoning","delta":"卿身上"}
+
+data: {"type":"reasoning","delta":"有块"}
+
+data: {"type":"reasoning","delta":"玉佩？"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"暗"}
+
+data: {"type":"reasoning","delta":"处发"}
+
+data: {"type":"reasoning","delta":"绿光投"}
+
+data: {"type":"reasoning","delta":"出「凌"}
+
+data: {"type":"reasoning","delta":"」字。可以"}
+
+data: {"type":"reasoning","delta":"写在"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥靠近"}
+
+data: {"type":"reasoning","delta":"时，他"}
+
+data: {"type":"reasoning","delta":"怀"}
+
+data: {"type":"reasoning","delta":"里的玉佩突然"}
+
+data: {"type":"reasoning","delta":"烫/"}
+
+data: {"type":"reasoning","delta":"绿光"}
+
+data: {"type":"reasoning","delta":"一闪，但他"}
+
+data: {"type":"reasoning","delta":"以为"}
+
+data: {"type":"reasoning","delta":"眼花"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"\n- 左"}
+
+data: {"type":"reasoning","delta":"腿旧伤："}
+
+data: {"type":"reasoning","delta":"走慢"}
+
+data: {"type":"reasoning","delta":"看不"}
+
+data: {"type":"reasoning","delta":"出来，凌"}
+
+data: {"type":"reasoning","delta":"玥出现"}
+
+data: {"type":"reasoning","delta":"时他想"}
+
+data: {"type":"reasoning","delta":"跑或"}
+
+data: {"type":"reasoning","delta":"后退"}
+
+data: {"type":"reasoning","delta":"，左"}
+
+data: {"type":"reasoning","delta":"腿脚"}
+
+data: {"type":"reasoning","delta":"腕刺痛"}
+
+data: {"type":"reasoning","delta":"，差点"}
+
+data: {"type":"reasoning","delta":"跪"}
+
+data: {"type":"reasoning","delta":"倒"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"\n- 黎"}
+
+data: {"type":"reasoning","delta":"婆："}
+
+data: {"type":"reasoning","delta":"黑色粗"}
+
+data: {"type":"reasoning","delta":"布衣"}
+
+data: {"type":"reasoning","delta":"，头"}
+
+data: {"type":"reasoning","delta":"裹灰巾，"}
+
+data: {"type":"reasoning","delta":"抽旱烟。"}
+
+data: {"type":"reasoning","delta":"看到凌"}
+
+data: {"type":"reasoning","delta":"玥就"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"。混"}
+
+data: {"type":"reasoning","delta":"洞女娃——"}
+
+data: {"type":"reasoning","delta":"方言骂"}
+
+data: {"type":"reasoning","delta":"人话"}
+
+data: {"type":"reasoning","delta":"。\n- 提"}
+
+data: {"type":"reasoning","delta":"亲：凌"}
+
+data: {"type":"reasoning","delta":"玥说「卿"}
+
+data: {"type":"reasoning","delta":"儿就当"}
+
+data: {"type":"reasoning","delta":"姐姐去提"}
+
+data: {"type":"reasoning","delta":"亲不"}
+
+data: {"type":"reasoning","delta":"就好了」。伍"}
+
+data: {"type":"reasoning","delta":"卿的反应"}
+
+data: {"type":"reasoning","delta":"：CPU"}
+
+data: {"type":"reasoning","delta":"烧"}
+
+data: {"type":"reasoning","delta":"了"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆的反应"}
+
+data: {"type":"reasoning","delta":"：旱"}
+
+data: {"type":"reasoning","delta":"烟杆"}
+
+data: {"type":"reasoning","delta":"往"}
+
+data: {"type":"reasoning","delta":"地上"}
+
+data: {"type":"reasoning","delta":"磕。\n\n开始"}
+
+data: {"type":"reasoning","delta":"写。注意短"}
+
+data: {"type":"reasoning","delta":"句，内心"}
+
+data: {"type":"reasoning","delta":"吐槽"}
+
+data: {"type":"reasoning","delta":"，省略"}
+
+data: {"type":"reasoning","delta":"号，"}
+
+data: {"type":"reasoning","delta":"破"}
+
+data: {"type":"reasoning","delta":"折号。\n\n检查"}
+
+data: {"type":"reasoning","delta":"是否有"}
+
+data: {"type":"reasoning","delta":"元"}
+
+data: {"type":"reasoning","delta":"叙述："}
+
+data: {"type":"reasoning","delta":"不能"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"「本章」「"}
+
+data: {"type":"reasoning","delta":"作者」。\n"}
+
+data: {"type":"reasoning","delta":"\n时间"}
+
+data: {"type":"reasoning","delta":"：应该是"}
+
+data: {"type":"reasoning","delta":"日"}
+
+data: {"type":"reasoning","delta":"暮"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"忽"}
+
+data: {"type":"reasoning","delta":"至"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"清楚"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n试"}
+
+data: {"type":"reasoning","delta":"写片段"}
+
+data: {"type":"reasoning","delta":"：\n\n雨"}
+
+data: {"type":"reasoning","delta":"是砸"}
+
+data: {"type":"reasoning","delta":"下来的。\n\n不是"}
+
+data: {"type":"reasoning","delta":"落"}
+
+data: {"type":"reasoning","delta":"，是砸"}
+
+data: {"type":"reasoning","delta":"。伍"}
+
+data: {"type":"reasoning","delta":"卿蹲"}
+
+data: {"type":"reasoning","delta":"在东"}
+
+data: {"type":"reasoning","delta":"街中心"}
+
+data: {"type":"reasoning","delta":"九"}
+
+data: {"type":"reasoning","delta":"十五号对面的"}
+
+data: {"type":"reasoning","delta":"墙"}
+
+data: {"type":"reasoning","delta":"根底下"}
+
+data: {"type":"reasoning","delta":"，把最后一"}
+
+data: {"type":"reasoning","delta":"麻袋空"}
+
+data: {"type":"reasoning","delta":"瓶罐"}
+
+data: {"type":"reasoning","delta":"往牛"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"边"}
+
+data: {"type":"reasoning","delta":"拢"}
+
+data: {"type":"reasoning","delta":"了拢"}
+
+data: {"type":"reasoning","delta":"，抬头"}
+
+data: {"type":"reasoning","delta":"看"}
+
+data: {"type":"reasoning","delta":"天——\n"}
+
+data: {"type":"reasoning","delta":"\n乌云"}
+
+data: {"type":"reasoning","delta":"压"}
+
+data: {"type":"reasoning","delta":"得很低。\n"}
+
+data: {"type":"reasoning","delta":"\nA市的"}
+
+data: {"type":"reasoning","delta":"夏天"}
+
+data: {"type":"reasoning","delta":"就这样"}
+
+data: {"type":"reasoning","delta":"，说"}
+
+data: {"type":"reasoning","delta":"翻"}
+
+data: {"type":"reasoning","delta":"脸就"}
+
+data: {"type":"reasoning","delta":"翻脸"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"他今天跑了"}
+
+data: {"type":"reasoning","delta":"三条"}
+
+data: {"type":"reasoning","delta":"街，卖了"}
+
+data: {"type":"reasoning","delta":"七"}
+
+data: {"type":"reasoning","delta":"十几"}
+
+data: {"type":"reasoning","delta":"块，兜"}
+
+data: {"type":"reasoning","delta":"里"}
+
+data: {"type":"reasoning","delta":"刚"}
+
+data: {"type":"reasoning","delta":"暖和"}
+
+data: {"type":"reasoning","delta":"起来"}
+
+data: {"type":"reasoning","delta":"，雨"}
+
+data: {"type":"reasoning","delta":"点"}
+
+data: {"type":"reasoning","delta":"砸"}
+
+data: {"type":"reasoning","delta":"在脸上"}
+
+data: {"type":"reasoning","delta":"，生"}
+
+data: {"type":"reasoning","delta":"疼。\n\n「"}
+
+data: {"type":"reasoning","delta":"去"}
+
+data: {"type":"reasoning","delta":"去去"}
+
+data: {"type":"reasoning","delta":"！」杂"}
+
+data: {"type":"reasoning","delta":"货铺的门"}
+
+data: {"type":"reasoning","delta":"猛地"}
+
+data: {"type":"reasoning","delta":"被"}
+
+data: {"type":"reasoning","delta":"推开，"}
+
+data: {"type":"reasoning","delta":"张兰"}
+
+data: {"type":"reasoning","delta":"挎着"}
+
+data: {"type":"reasoning","delta":"个"}
+
+data: {"type":"reasoning","delta":"竹"}
+
+data: {"type":"reasoning","delta":"篮站在"}
+
+data: {"type":"reasoning","delta":"台阶"}
+
+data: {"type":"reasoning","delta":"上，眉头"}
+
+data: {"type":"reasoning","delta":"拧成疙瘩"}
+
+data: {"type":"reasoning","delta":"，「小"}
+
+data: {"type":"reasoning","delta":"叫花"}
+
+data: {"type":"reasoning","delta":"子，"}
+
+data: {"type":"reasoning","delta":"堵"}
+
+data: {"type":"reasoning","delta":"我家"}
+
+data: {"type":"reasoning","delta":"门口干嘛"}
+
+data: {"type":"reasoning","delta":"？湿"}
+
+data: {"type":"reasoning","delta":"漉"}
+
+data: {"type":"reasoning","delta":"漉的"}
+
+data: {"type":"reasoning","delta":"晦"}
+
+data: {"type":"reasoning","delta":"气！」\n"}
+
+data: {"type":"reasoning","delta":"\n伍"}
+
+data: {"type":"reasoning","delta":"卿张"}
+
+data: {"type":"reasoning","delta":"了张嘴"}
+
+data: {"type":"reasoning","delta":"。\n\n…………"}
+
+data: {"type":"reasoning","delta":"哦。\n"}
+
+data: {"type":"reasoning","delta":"\n他确实"}
+
+data: {"type":"reasoning","delta":"挡"}
+
+data: {"type":"reasoning","delta":"着"}
+
+data: {"type":"reasoning","delta":"人家门口"}
+
+data: {"type":"reasoning","delta":"了。"}
+
+data: {"type":"reasoning","delta":"他撑着"}
+
+data: {"type":"reasoning","delta":"地"}
+
+data: {"type":"reasoning","delta":"站起来，左"}
+
+data: {"type":"reasoning","delta":"腿脚"}
+
+data: {"type":"reasoning","delta":"腕那儿"}
+
+data: {"type":"reasoning","delta":"这几天"}
+
+data: {"type":"reasoning","delta":"一直"}
+
+data: {"type":"reasoning","delta":"犯"}
+
+data: {"type":"reasoning","delta":"懒"}
+
+data: {"type":"reasoning","delta":"，站"}
+
+data: {"type":"reasoning","delta":"猛"}
+
+data: {"type":"reasoning","delta":"了就像"}
+
+data: {"type":"reasoning","delta":"有条"}
+
+data: {"type":"reasoning","delta":"筋"}
+
+data: {"type":"reasoning","delta":"被"}
+
+data: {"type":"reasoning","delta":"谁"}
+
+data: {"type":"reasoning","delta":"偷偷"}
+
+data: {"type":"reasoning","delta":"揪"}
+
+data: {"type":"reasoning","delta":"了一下。"}
+
+data: {"type":"reasoning","delta":"他牵"}
+
+data: {"type":"reasoning","delta":"起牛"}
+
+data: {"type":"reasoning","delta":"绳"}
+
+data: {"type":"reasoning","delta":"，往"}
+
+data: {"type":"reasoning","delta":"边上"}
+
+data: {"type":"reasoning","delta":"让"}
+
+data: {"type":"reasoning","delta":"。\n\n大"}
+
+data: {"type":"reasoning","delta":"黑牛不耐烦"}
+
+data: {"type":"reasoning","delta":"地打了个"}
+
+data: {"type":"reasoning","delta":"响鼻"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"它今天"}
+
+data: {"type":"reasoning","delta":"驮了四"}
+
+data: {"type":"reasoning","delta":"麻袋，累"}
+
+data: {"type":"reasoning","delta":"得够"}
+
+data: {"type":"reasoning","delta":"呛"}
+
+data: {"type":"reasoning","delta":"，脾气"}
+
+data: {"type":"reasoning","delta":"烂"}
+
+data: {"type":"reasoning","delta":"得很"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"蹄子"}
+
+data: {"type":"reasoning","delta":"不耐烦地刨"}
+
+data: {"type":"reasoning","delta":"着水"}
+
+data: {"type":"reasoning","delta":"洼"}
+
+data: {"type":"reasoning","delta":"。可"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿手"}
+
+data: {"type":"reasoning","delta":"刚"}
+
+data: {"type":"reasoning","delta":"搭"}
+
+data: {"type":"reasoning","delta":"上它的"}
+
+data: {"type":"reasoning","delta":"脖子"}
+
+data: {"type":"reasoning","delta":"，它就把"}
+
+data: {"type":"reasoning","delta":"大"}
+
+data: {"type":"reasoning","delta":"脑袋低"}
+
+data: {"type":"reasoning","delta":"下来"}
+
+data: {"type":"reasoning","delta":"，舌头"}
+
+data: {"type":"reasoning","delta":"舔"}
+
+data: {"type":"reasoning","delta":"了舔"}
+
+data: {"type":"reasoning","delta":"他湿"}
+
+data: {"type":"reasoning","delta":"透"}
+
+data: {"type":"reasoning","delta":"的袖"}
+
+data: {"type":"reasoning","delta":"口。\n\n「啧"}
+
+data: {"type":"reasoning","delta":"。」"}
+
+data: {"type":"reasoning","delta":"张兰又"}
+
+data: {"type":"reasoning","delta":"啐"}
+
+data: {"type":"reasoning","delta":"了一口，「"}
+
+data: {"type":"reasoning","delta":"人"}
+
+data: {"type":"reasoning","delta":"晦"}
+
+data: {"type":"reasoning","delta":"气，牛"}
+
+data: {"type":"reasoning","delta":"也晦"}
+
+data: {"type":"reasoning","delta":"气。"}
+
+data: {"type":"reasoning","delta":"赶紧滚"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"别耽误"}
+
+data: {"type":"reasoning","delta":"我做"}
+
+data: {"type":"reasoning","delta":"生意"}
+
+data: {"type":"reasoning","delta":"！」\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿低着头"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"牵着"}
+
+data: {"type":"reasoning","delta":"牛往"}
+
+data: {"type":"reasoning","delta":"街"}
+
+data: {"type":"reasoning","delta":"沿挪"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n然后"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"听见了车声"}
+
+data: {"type":"reasoning","delta":"。\n\n不是"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"车，"}
+
+data: {"type":"reasoning","delta":"不是三轮"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"是那种碾"}
+
+data: {"type":"reasoning","delta":"过积水"}
+
+data: {"type":"reasoning","delta":"都不"}
+
+data: {"type":"reasoning","delta":"怎么"}
+
+data: {"type":"reasoning","delta":"溅"}
+
+data: {"type":"reasoning","delta":"水"}
+
+data: {"type":"reasoning","delta":"花的、"}
+
+data: {"type":"reasoning","delta":"沉"}
+
+data: {"type":"reasoning","delta":"得"}
+
+data: {"type":"reasoning","delta":"发"}
+
+data: {"type":"reasoning","delta":"闷"}
+
+data: {"type":"reasoning","delta":"的"}
+
+data: {"type":"reasoning","delta":"动静。一辆通"}
+
+data: {"type":"reasoning","delta":"体漆黑的"}
+
+data: {"type":"reasoning","delta":"商务车停在"}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"里"}
+
+data: {"type":"reasoning","delta":"，车牌"}
+
+data: {"type":"reasoning","delta":"号"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"看不懂"}
+
+data: {"type":"reasoning","delta":"，但车"}
+
+data: {"type":"reasoning","delta":"玻璃"}
+
+data: {"type":"reasoning","delta":"一看"}
+
+data: {"type":"reasoning","delta":"就不是"}
+
+data: {"type":"reasoning","delta":"便宜"}
+
+data: {"type":"reasoning","delta":"货——"}
+
+data: {"type":"reasoning","delta":"防"}
+
+data: {"type":"reasoning","delta":"弹的"}
+
+data: {"type":"reasoning","delta":"。\n\n车门"}
+
+data: {"type":"reasoning","delta":"打开"}
+
+data: {"type":"reasoning","delta":"。\n\n先"}
+
+data: {"type":"reasoning","delta":"下来两个"}
+
+data: {"type":"reasoning","delta":"穿"}
+
+data: {"type":"reasoning","delta":"黑西"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"装的女子"}
+
+data: {"type":"reasoning","delta":"，撑"}
+
+data: {"type":"reasoning","delta":"开"}
+
+data: {"type":"reasoning","delta":"伞，退"}
+
+data: {"type":"reasoning","delta":"到两侧"}
+
+data: {"type":"reasoning","delta":"。然后车里"}
+
+data: {"type":"reasoning","delta":"的人才下来"}
+
+data: {"type":"reasoning","delta":"。\n\n深"}
+
+data: {"type":"reasoning","delta":"灰色"}
+
+data: {"type":"reasoning","delta":"的大"}
+
+data: {"type":"reasoning","delta":"衣，裤"}
+
+data: {"type":"reasoning","delta":"线"}
+
+data: {"type":"reasoning","delta":"笔直。"}
+
+data: {"type":"reasoning","delta":"她没"}
+
+data: {"type":"reasoning","delta":"打"}
+
+data: {"type":"reasoning","delta":"伞，走进"}
+
+data: {"type":"reasoning","delta":"雨里，步子"}
+
+data: {"type":"reasoning","delta":"不快"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"却"}
+
+data: {"type":"reasoning","delta":"每一步都像踩"}
+
+data: {"type":"reasoning","delta":"在什么"}
+
+data: {"type":"reasoning","delta":"节点"}
+
+data: {"type":"reasoning","delta":"上。街上"}
+
+data: {"type":"reasoning","delta":"本来"}
+
+data: {"type":"reasoning","delta":"就没"}
+
+data: {"type":"reasoning","delta":"几个男人，这会儿"}
+
+data: {"type":"reasoning","delta":"更是"}
+
+data: {"type":"reasoning","delta":"静"}
+
+data: {"type":"reasoning","delta":"得"}
+
+data: {"type":"reasoning","delta":"只剩"}
+
+data: {"type":"reasoning","delta":"雨声。"}
+
+data: {"type":"reasoning","delta":"所有目光都"}
+
+data: {"type":"reasoning","delta":"黏"}
+
+data: {"type":"reasoning","delta":"在她身上——"}
+
+data: {"type":"reasoning","delta":"她太"}
+
+data: {"type":"reasoning","delta":"打"}
+
+data: {"type":"reasoning","delta":"眼了"}
+
+data: {"type":"reasoning","delta":"，像"}
+
+data: {"type":"reasoning","delta":"一"}
+
+data: {"type":"reasoning","delta":"柄收"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"鞘里的"}
+
+data: {"type":"reasoning","delta":"刀，忽然"}
+
+data: {"type":"reasoning","delta":"出了鞘。\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿牵"}
+
+data: {"type":"reasoning","delta":"着他的"}
+
+data: {"type":"reasoning","delta":"牛，本来"}
+
+data: {"type":"reasoning","delta":"已经"}
+
+data: {"type":"reasoning","delta":"准备"}
+
+data: {"type":"reasoning","delta":"绕"}
+
+data: {"type":"reasoning","delta":"到"}
+
+data: {"type":"reasoning","delta":"巷子里"}
+
+data: {"type":"reasoning","delta":"去"}
+
+data: {"type":"reasoning","delta":"。\n\n他"}
+
+data: {"type":"reasoning","delta":"听见"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"开口"}
+
+data: {"type":"reasoning","delta":"了。\n\n声音"}
+
+data: {"type":"reasoning","delta":"不高"}
+
+data: {"type":"reasoning","delta":"，却"}
+
+data: {"type":"reasoning","delta":"像"}
+
+data: {"type":"reasoning","delta":"一根"}
+
+data: {"type":"reasoning","delta":"针穿过"}
+
+data: {"type":"reasoning","delta":"雨幕，直"}
+
+data: {"type":"reasoning","delta":"直扎进他"}
+
+data: {"type":"reasoning","delta":"耳"}
+
+data: {"type":"reasoning","delta":"膜。\n\n「卿"}
+
+data: {"type":"reasoning","delta":"儿。」\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿一愣"}
+
+data: {"type":"reasoning","delta":"。\n\n他"}
+
+data: {"type":"reasoning","delta":"左右"}
+
+data: {"type":"reasoning","delta":"看了看"}
+
+data: {"type":"reasoning","delta":"。巷"}
+
+data: {"type":"reasoning","delta":"口"}
+
+data: {"type":"reasoning","delta":"没人"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"墙根底下"}
+
+data: {"type":"reasoning","delta":"没人，"}
+
+data: {"type":"reasoning","delta":"只有"}
+
+data: {"type":"reasoning","delta":"张"}
+
+data: {"type":"reasoning","delta":"兰"}
+
+data: {"type":"reasoning","delta":"挎着篮子站在"}
+
+data: {"type":"reasoning","delta":"门口"}
+
+data: {"type":"reasoning","delta":"，脸色"}
+
+data: {"type":"reasoning","delta":"发"}
+
+data: {"type":"reasoning","delta":"白。\n\n……"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"？什么"}
+
+data: {"type":"reasoning","delta":"卿？\n\n是在"}
+
+data: {"type":"reasoning","delta":"骂他？\n"}
+
+data: {"type":"reasoning","delta":"\n伍卿心里"}
+
+data: {"type":"reasoning","delta":"那"}
+
+data: {"type":"reasoning","delta":"池"}
+
+data: {"type":"reasoning","delta":"弹幕轰"}
+
+data: {"type":"reasoning","delta":"地炸"}
+
+data: {"type":"reasoning","delta":"开"}
+
+data: {"type":"reasoning","delta":"。他天天"}
+
+data: {"type":"reasoning","delta":"挨"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"，卖"}
+
+data: {"type":"reasoning","delta":"破烂"}
+
+data: {"type":"reasoning","delta":"时"}
+
+data: {"type":"reasoning","delta":"被摊"}
+
+data: {"type":"reasoning","delta":"主"}
+
+data: {"type":"reasoning","delta":"骂「"}
+
+data: {"type":"reasoning","delta":"傻"}
+
+data: {"type":"reasoning","delta":"小子"}
+
+data: {"type":"reasoning","delta":"」，被"}
+
+data: {"type":"reasoning","delta":"同行"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"「抢"}
+
+data: {"type":"reasoning","delta":"生意"}
+
+data: {"type":"reasoning","delta":"」，被房东"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"「欠"}
+
+data: {"type":"reasoning","delta":"租"}
+
+data: {"type":"reasoning","delta":"」。可"}
+
+data: {"type":"reasoning","delta":"「卿儿"}
+
+data: {"type":"reasoning","delta":"」这两个"}
+
+data: {"type":"reasoning","delta":"字……他怎么"}
+
+data: {"type":"reasoning","delta":"听怎么"}
+
+data: {"type":"reasoning","delta":"像"}
+
+data: {"type":"reasoning","delta":"那种"}
+
+data: {"type":"reasoning","delta":"拐"}
+
+data: {"type":"reasoning","delta":"着"}
+
+data: {"type":"reasoning","delta":"弯的损"}
+
+data: {"type":"reasoning","delta":"人话"}
+
+data: {"type":"reasoning","delta":"。轻"}
+
+data: {"type":"reasoning","delta":"浮"}
+
+data: {"type":"reasoning","delta":"？亲"}
+
+data: {"type":"reasoning","delta":"热"}
+
+data: {"type":"reasoning","delta":"？还是"}
+
+data: {"type":"reasoning","delta":"嫌"}
+
+data: {"type":"reasoning","delta":"他刚才"}
+
+data: {"type":"reasoning","delta":"挡"}
+
+data: {"type":"reasoning","delta":"路"}
+
+data: {"type":"reasoning","delta":"？\n"}
+
+data: {"type":"reasoning","delta":"\n他"}
+
+data: {"type":"reasoning","delta":"小声嘀咕：「"}
+
+data: {"type":"reasoning","delta":"……认"}
+
+data: {"type":"reasoning","delta":"错人"}
+
+data: {"type":"reasoning","delta":"了吧。」\n\n可"}
+
+data: {"type":"reasoning","delta":"那女人"}
+
+data: {"type":"reasoning","delta":"已经走到"}
+
+data: {"type":"reasoning","delta":"他面前了"}
+
+data: {"type":"reasoning","delta":"。\n\n伞"}
+
+data: {"type":"reasoning","delta":"罩"}
+
+data: {"type":"reasoning","delta":"下来"}
+
+data: {"type":"reasoning","delta":"，在他"}
+
+data: {"type":"reasoning","delta":"头顶撑"}
+
+data: {"type":"reasoning","delta":"开"}
+
+data: {"type":"reasoning","delta":"一小片没"}
+
+data: {"type":"reasoning","delta":"雨的天空"}
+
+data: {"type":"reasoning","delta":"。伍卿这才"}
+
+data: {"type":"reasoning","delta":"看清"}
+
+data: {"type":"reasoning","delta":"她的脸。"}
+
+data: {"type":"reasoning","delta":"很"}
+
+data: {"type":"reasoning","delta":"白，不是"}
+
+data: {"type":"reasoning","delta":"养"}
+
+data: {"type":"reasoning","delta":"尊"}
+
+data: {"type":"reasoning","delta":"处"}
+
+data: {"type":"reasoning","delta":"优的那种"}
+
+data: {"type":"reasoning","delta":"白，是那种"}
+
+data: {"type":"reasoning","delta":"常年"}
+
+data: {"type":"reasoning","delta":"不见笑"}
+
+data: {"type":"reasoning","delta":"色的"}
+
+data: {"type":"reasoning","delta":"冷"}
+
+data: {"type":"reasoning","delta":"白"}
+
+data: {"type":"reasoning","delta":"。眉眼"}
+
+data: {"type":"reasoning","delta":"深"}
+
+data: {"type":"reasoning","delta":"，鼻"}
+
+data: {"type":"reasoning","delta":"梁高"}
+
+data: {"type":"reasoning","delta":"，看"}
+
+data: {"type":"reasoning","delta":"人的"}
+
+data: {"type":"reasoning","delta":"时候像"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"掂"}
+
+data: {"type":"reasoning","delta":"量一件"}
+
+data: {"type":"reasoning","delta":"东西的"}
+
+data: {"type":"reasoning","delta":"斤两"}
+
+data: {"type":"reasoning","delta":"。\n\n可"}
+
+data: {"type":"reasoning","delta":"她的眼眶"}
+
+data: {"type":"reasoning","delta":"——\n"}
+
+data: {"type":"reasoning","delta":"\n红了"}
+
+data: {"type":"reasoning","delta":"。\n\n不是"}
+
+data: {"type":"reasoning","delta":"要"}
+
+data: {"type":"reasoning","delta":"哭。就是"}
+
+data: {"type":"reasoning","delta":"眼眶边缘"}
+
+data: {"type":"reasoning","delta":"泛"}
+
+data: {"type":"reasoning","delta":"着一"}
+
+data: {"type":"reasoning","delta":"层极"}
+
+data: {"type":"reasoning","delta":"淡"}
+
+data: {"type":"reasoning","delta":"的红，像"}
+
+data: {"type":"reasoning","delta":"被雨淋"}
+
+data: {"type":"reasoning","delta":"的，"}
+
+data: {"type":"reasoning","delta":"又不像"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n伍"}
+
+data: {"type":"reasoning","delta":"卿往后"}
+
+data: {"type":"reasoning","delta":"缩"}
+
+data: {"type":"reasoning","delta":"了缩"}
+
+data: {"type":"reasoning","delta":"。左"}
+
+data: {"type":"reasoning","delta":"腿脚"}
+
+data: {"type":"reasoning","delta":"腕突然"}
+
+data: {"type":"reasoning","delta":"一"}
+
+data: {"type":"reasoning","delta":"抽，他差点"}
+
+data: {"type":"reasoning","delta":"跪"}
+
+data: {"type":"reasoning","delta":"在水"}
+
+data: {"type":"reasoning","delta":"洼里。\n"}
+
+data: {"type":"reasoning","delta":"\n「当"}
+
+data: {"type":"reasoning","delta":"心"}
+
+data: {"type":"reasoning","delta":"。」"}
+
+data: {"type":"reasoning","delta":"她伸手"}
+
+data: {"type":"reasoning","delta":"，扶"}
+
+data: {"type":"reasoning","delta":"住了"}
+
+data: {"type":"reasoning","delta":"他的"}
+
+data: {"type":"reasoning","delta":"胳膊。\n\n隔"}
+
+data: {"type":"reasoning","delta":"着一"}
+
+data: {"type":"reasoning","delta":"层湿"}
+
+data: {"type":"reasoning","delta":"透的粗"}
+
+data: {"type":"reasoning","delta":"布衣衫"}
+
+data: {"type":"reasoning","delta":"，她的手"}
+
+data: {"type":"reasoning","delta":"很"}
+
+data: {"type":"reasoning","delta":"烫"}
+
+data: {"type":"reasoning","delta":"。伍"}
+
+data: {"type":"reasoning","delta":"卿浑身"}
+
+data: {"type":"reasoning","delta":"一僵，"}
+
+data: {"type":"reasoning","delta":"像被火"}
+
+data: {"type":"reasoning","delta":"钳"}
+
+data: {"type":"reasoning","delta":"碰"}
+
+data: {"type":"reasoning","delta":"了"}
+
+data: {"type":"reasoning","delta":"似的"}
+
+data: {"type":"reasoning","delta":"弹"}
+
+data: {"type":"reasoning","delta":"开"}
+
+data: {"type":"reasoning","delta":"半步"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"怀"}
+
+data: {"type":"reasoning","delta":"里的玉佩"}
+
+data: {"type":"reasoning","delta":"隔着"}
+
+data: {"type":"reasoning","delta":"衣服"}
+
+data: {"type":"reasoning","delta":"贴着他的"}
+
+data: {"type":"reasoning","delta":"胸口，莫名其妙"}
+
+data: {"type":"reasoning","delta":"地烫"}
+
+data: {"type":"reasoning","delta":"了一下。"}
+
+data: {"type":"reasoning","delta":"他疑"}
+
+data: {"type":"reasoning","delta":"心是自己"}
+
+data: {"type":"reasoning","delta":"体温"}
+
+data: {"type":"reasoning","delta":"太高"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"没敢去"}
+
+data: {"type":"reasoning","delta":"摸。\n\n「你"}
+
+data: {"type":"reasoning","delta":"……」"}
+
+data: {"type":"reasoning","delta":"她盯着"}
+
+data: {"type":"reasoning","delta":"他，声音低"}
+
+data: {"type":"reasoning","delta":"了下去"}
+
+data: {"type":"reasoning","delta":"，「不"}
+
+data: {"type":"reasoning","delta":"记得"}
+
+data: {"type":"reasoning","delta":"了？」\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿：「"}
+
+data: {"type":"reasoning","delta":"…………"}
+
+data: {"type":"reasoning","delta":"啊"}
+
+data: {"type":"reasoning","delta":"？」\n\n他"}
+
+data: {"type":"reasoning","delta":"该"}
+
+data: {"type":"reasoning","delta":"记得什么？他"}
+
+data: {"type":"reasoning","delta":"记得今天卖了"}
+
+data: {"type":"reasoning","delta":"七"}
+
+data: {"type":"reasoning","delta":"十几块，记得"}
+
+data: {"type":"reasoning","delta":"奶奶还"}
+
+data: {"type":"reasoning","delta":"等他"}
+
+data: {"type":"reasoning","delta":"回去"}
+
+data: {"type":"reasoning","delta":"吃饭"}
+
+data: {"type":"reasoning","delta":"，记得"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"该上"}
+
+data: {"type":"reasoning","delta":"油了"}
+
+data: {"type":"reasoning","delta":"。剩下的"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"CPU都快"}
+
+data: {"type":"reasoning","delta":"烧了"}
+
+data: {"type":"reasoning","delta":"，他"}
+
+data: {"type":"reasoning","delta":"真"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"记得认识"}
+
+data: {"type":"reasoning","delta":"这"}
+
+data: {"type":"reasoning","delta":"号人物"}
+
+data: {"type":"reasoning","delta":"。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥收回"}
+
+data: {"type":"reasoning","delta":"手，"}
+
+data: {"type":"reasoning","delta":"转身"}
+
+data: {"type":"reasoning","delta":"。\n\n她"}
+
+data: {"type":"reasoning","delta":"看向"}
+
+data: {"type":"reasoning","delta":"那两个随"}
+
+data: {"type":"reasoning","delta":"从，"}
+
+data: {"type":"reasoning","delta":"语气平"}
+
+data: {"type":"reasoning","delta":"得"}
+
+data: {"type":"reasoning","delta":"没有一丝"}
+
+data: {"type":"reasoning","delta":"波纹：「去买"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"男"}
+
+data: {"type":"reasoning","delta":"装，"}
+
+data: {"type":"reasoning","delta":"从头"}
+
+data: {"type":"reasoning","delta":"到脚"}
+
+data: {"type":"reasoning","delta":"。鞋"}
+
+data: {"type":"reasoning","delta":"码"}
+
+data: {"type":"reasoning","delta":"问"}
+
+data: {"type":"reasoning","delta":"他自己"}
+
+data: {"type":"reasoning","delta":"。」\n"}
+
+data: {"type":"reasoning","delta":"\n「是"}
+
+data: {"type":"reasoning","delta":"。」\n"}
+
+data: {"type":"reasoning","delta":"\n「再去"}
+
+data: {"type":"reasoning","delta":"最近的"}
+
+data: {"type":"reasoning","delta":"菜"}
+
+data: {"type":"reasoning","delta":"市。"}
+
+data: {"type":"reasoning","delta":"肉，"}
+
+data: {"type":"reasoning","delta":"菜，米"}
+
+data: {"type":"reasoning","delta":"。要"}
+
+data: {"type":"reasoning","delta":"最好的"}
+
+data: {"type":"reasoning","delta":"。」\n\n随"}
+
+data: {"type":"reasoning","delta":"从没"}
+
+data: {"type":"reasoning","delta":"动"}
+
+data: {"type":"reasoning","delta":"。其中一个"}
+
+data: {"type":"reasoning","delta":"迟疑道"}
+
+data: {"type":"reasoning","delta":"：「凌"}
+
+data: {"type":"reasoning","delta":"总"}
+
+data: {"type":"reasoning","delta":"，这"}
+
+data: {"type":"reasoning","delta":"不合"}
+
+data: {"type":"reasoning","delta":"规矩……」\n"}
+
+data: {"type":"reasoning","delta":"\n「我"}
+
+data: {"type":"reasoning","delta":"让你"}
+
+data: {"type":"reasoning","delta":"去"}
+
+data: {"type":"reasoning","delta":"。」"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥侧"}
+
+data: {"type":"reasoning","delta":"过"}
+
+data: {"type":"reasoning","delta":"脸，「"}
+
+data: {"type":"reasoning","delta":"需要"}
+
+data: {"type":"reasoning","delta":"我重复"}
+
+data: {"type":"reasoning","delta":"？」\n\n那"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从猛地"}
+
+data: {"type":"reasoning","delta":"低头，快步"}
+
+data: {"type":"reasoning","delta":"走进雨"}
+
+data: {"type":"reasoning","delta":"里。\n\n张"}
+
+data: {"type":"reasoning","delta":"兰在门口站着"}
+
+data: {"type":"reasoning","delta":"，进"}
+
+data: {"type":"reasoning","delta":"也不是，退"}
+
+data: {"type":"reasoning","delta":"也不是，"}
+
+data: {"type":"reasoning","delta":"脸色"}
+
+data: {"type":"reasoning","delta":"由"}
+
+data: {"type":"reasoning","delta":"白转"}
+
+data: {"type":"reasoning","delta":"青。\n"}
+
+data: {"type":"reasoning","delta":"\n凌玥这时"}
+
+data: {"type":"reasoning","delta":"才瞥"}
+
+data: {"type":"reasoning","delta":"向她"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n只"}
+
+data: {"type":"reasoning","delta":"一眼。\n"}
+
+data: {"type":"reasoning","delta":"\n「"}
+
+data: {"type":"reasoning","delta":"你的"}
+
+data: {"type":"reasoning","delta":"铺"}
+
+data: {"type":"reasoning","delta":"子"}
+
+data: {"type":"reasoning","delta":"，」"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥说，「明天"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"开始"}
+
+data: {"type":"reasoning","delta":"，不用"}
+
+data: {"type":"reasoning","delta":"开了"}
+
+data: {"type":"reasoning","delta":"。」\n\n张"}
+
+data: {"type":"reasoning","delta":"兰腿"}
+
+data: {"type":"reasoning","delta":"一软"}
+
+data: {"type":"reasoning","delta":"，差点跌"}
+
+data: {"type":"reasoning","delta":"坐在门槛"}
+
+data: {"type":"reasoning","delta":"上。\n"}
+
+data: {"type":"reasoning","delta":"\n伍卿在旁边"}
+
+data: {"type":"reasoning","delta":"听着"}
+
+data: {"type":"reasoning","delta":"，手心"}
+
+data: {"type":"reasoning","delta":"开始冒"}
+
+data: {"type":"reasoning","delta":"汗。他扯"}
+
+data: {"type":"reasoning","delta":"了"}
+
+data: {"type":"reasoning","delta":"扯凌"}
+
+data: {"type":"reasoning","delta":"玥的袖子——"}
+
+data: {"type":"reasoning","delta":"他没"}
+
+data: {"type":"reasoning","delta":"意识到"}
+
+data: {"type":"reasoning","delta":"自己"}
+
+data: {"type":"reasoning","delta":"胆子"}
+
+data: {"type":"reasoning","delta":"这么大，等他"}
+
+data: {"type":"reasoning","delta":"反应过来时"}
+
+data: {"type":"reasoning","delta":"，手"}
+
+data: {"type":"reasoning","delta":"已经扯"}
+
+data: {"type":"reasoning","delta":"上了"}
+
+data: {"type":"reasoning","delta":"。\n\n「那个"}
+
+data: {"type":"reasoning","delta":"……」"}
+
+data: {"type":"reasoning","delta":"他挤出"}
+
+data: {"type":"reasoning","delta":"声音"}
+
+data: {"type":"reasoning","delta":"，「不用"}
+
+data: {"type":"reasoning","delta":"这样"}
+
+data: {"type":"reasoning","delta":"。我就是"}
+
+data: {"type":"reasoning","delta":"个"}
+
+data: {"type":"reasoning","delta":"捡"}
+
+data: {"type":"reasoning","delta":"破烂的。」\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥低头"}
+
+data: {"type":"reasoning","delta":"看他"}
+
+data: {"type":"reasoning","delta":"扯着自己的"}
+
+data: {"type":"reasoning","delta":"手"}
+
+data: {"type":"reasoning","delta":"。\n\n然后"}
+
+data: {"type":"reasoning","delta":"她做"}
+
+data: {"type":"reasoning","delta":"了一件让"}
+
+data: {"type":"reasoning","delta":"伍卿想"}
+
+data: {"type":"reasoning","delta":"当场"}
+
+data: {"type":"reasoning","delta":"挖"}
+
+data: {"type":"reasoning","delta":"个坑"}
+
+data: {"type":"reasoning","delta":"把自己埋了"}
+
+data: {"type":"reasoning","delta":"的事。\n\n她把"}
+
+data: {"type":"reasoning","delta":"他的手"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"握住了"}
+
+data: {"type":"reasoning","delta":"。\n\n不是"}
+
+data: {"type":"reasoning","delta":"抓"}
+
+data: {"type":"reasoning","delta":"，是包"}
+
+data: {"type":"reasoning","delta":"住。她的手"}
+
+data: {"type":"reasoning","delta":"很大"}
+
+data: {"type":"reasoning","delta":"，指"}
+
+data: {"type":"reasoning","delta":"节有力"}
+
+data: {"type":"reasoning","delta":"，掌心"}
+
+data: {"type":"reasoning","delta":"烫"}
+
+data: {"type":"reasoning","delta":"得吓"}
+
+data: {"type":"reasoning","delta":"人。伍卿"}
+
+data: {"type":"reasoning","delta":"像"}
+
+data: {"type":"reasoning","delta":"被雷"}
+
+data: {"type":"reasoning","delta":"劈"}
+
+data: {"type":"reasoning","delta":"了，脑子里"}
+
+data: {"type":"reasoning","delta":"只剩"}
+
+data: {"type":"reasoning","delta":"一个"}
+
+data: {"type":"reasoning","delta":"念头在"}
+
+data: {"type":"reasoning","delta":"刷"}
+
+data: {"type":"reasoning","delta":"屏：社"}
+
+data: {"type":"reasoning","delta":"死。社"}
+
+data: {"type":"reasoning","delta":"死感"}
+
+data: {"type":"reasoning","delta":"拉满。这条"}
+
+data: {"type":"reasoning","delta":"街虽然"}
+
+data: {"type":"reasoning","delta":"人"}
+
+data: {"type":"reasoning","delta":"不多，可"}
+
+data: {"type":"reasoning","delta":"背后"}
+
+data: {"type":"reasoning","delta":"那些"}
+
+data: {"type":"reasoning","delta":"窗户后面"}
+
+data: {"type":"reasoning","delta":"指"}
+
+data: {"type":"reasoning","delta":"不定多少"}
+
+data: {"type":"reasoning","delta":"双眼睛在看"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n「"}
+
+data: {"type":"reasoning","delta":"你就是"}
+
+data: {"type":"reasoning","delta":"。」"}
+
+data: {"type":"reasoning","delta":"凌玥说"}
+
+data: {"type":"reasoning","delta":"，「跟我"}
+
+data: {"type":"reasoning","delta":"有关"}
+
+data: {"type":"reasoning","delta":"。」\n\n…………"}
+
+data: {"type":"reasoning","delta":"啊"}
+
+data: {"type":"reasoning","delta":"？\n\n伍卿没"}
+
+data: {"type":"reasoning","delta":"来得及问"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"怎么"}
+
+data: {"type":"reasoning","delta":"有关"}
+
+data: {"type":"reasoning","delta":"」，凌"}
+
+data: {"type":"reasoning","delta":"玥已经放"}
+
+data: {"type":"reasoning","delta":"开了他，对"}
+
+data: {"type":"reasoning","delta":"另一个"}
+
+data: {"type":"reasoning","delta":"随从道"}
+
+data: {"type":"reasoning","delta":"：「牛"}
+
+data: {"type":"reasoning","delta":"车，"}
+
+data: {"type":"reasoning","delta":"牵"}
+
+data: {"type":"reasoning","delta":"走"}
+
+data: {"type":"reasoning","delta":"。牛，"}
+
+data: {"type":"reasoning","delta":"照顾好。」\n\n「我不"}
+
+data: {"type":"reasoning","delta":"……」"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿急了"}
+
+data: {"type":"reasoning","delta":"，「"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"给人"}
+
+data: {"type":"reasoning","delta":"！」\n\n大"}
+
+data: {"type":"reasoning","delta":"黑牛"}
+
+data: {"type":"reasoning","delta":"也"}
+
+data: {"type":"reasoning","delta":"像是"}
+
+data: {"type":"reasoning","delta":"听"}
+
+data: {"type":"reasoning","delta":"懂了，前"}
+
+data: {"type":"reasoning","delta":"蹄猛地"}
+
+data: {"type":"reasoning","delta":"一蹬"}
+
+data: {"type":"reasoning","delta":"，水"}
+
+data: {"type":"reasoning","delta":"花"}
+
+data: {"type":"reasoning","delta":"溅起半"}
+
+data: {"type":"reasoning","delta":"尺"}
+
+data: {"type":"reasoning","delta":"高，吓得"}
+
+data: {"type":"reasoning","delta":"那"}
+
+data: {"type":"reasoning","delta":"随从连"}
+
+data: {"type":"reasoning","delta":"退三步"}
+
+data: {"type":"reasoning","delta":"。可"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿手"}
+
+data: {"type":"reasoning","delta":"一按"}
+
+data: {"type":"reasoning","delta":"上"}
+
+data: {"type":"reasoning","delta":"它的角"}
+
+data: {"type":"reasoning","delta":"，它立刻就"}
+
+data: {"type":"reasoning","delta":"老实"}
+
+data: {"type":"reasoning","delta":"了，还把"}
+
+data: {"type":"reasoning","delta":"脑袋拱"}
+
+data: {"type":"reasoning","delta":"进他怀里"}
+
+data: {"type":"reasoning","delta":"，蹭"}
+
+data: {"type":"reasoning","delta":"得他满"}
+
+data: {"type":"reasoning","delta":"身雨水"}
+
+data: {"type":"reasoning","delta":"混"}
+
+data: {"type":"reasoning","delta":"着牛"}
+
+data: {"type":"reasoning","delta":"毛。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥看着这一幕"}
+
+data: {"type":"reasoning","delta":"，眼神"}
+
+data: {"type":"reasoning","delta":"暗"}
+
+data: {"type":"reasoning","delta":"了暗"}
+
+data: {"type":"reasoning","delta":"。\n\n「它"}
+
+data: {"type":"reasoning","delta":"认"}
+
+data: {"type":"reasoning","delta":"你。」她说"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n「……"}
+
+data: {"type":"reasoning","delta":"它"}
+
+data: {"type":"reasoning","delta":"当然认"}
+
+data: {"type":"reasoning","delta":"我。」伍卿"}
+
+data: {"type":"reasoning","delta":"小声"}
+
+data: {"type":"reasoning","delta":"逼"}
+
+data: {"type":"reasoning","delta":"逼，「"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"养"}
+
+data: {"type":"reasoning","delta":"了它"}
+
+data: {"type":"reasoning","delta":"四年。」\n\n雨"}
+
+data: {"type":"reasoning","delta":"越"}
+
+data: {"type":"reasoning","delta":"下越大"}
+
+data: {"type":"reasoning","delta":"。\n\n新"}
+
+data: {"type":"reasoning","delta":"衣服"}
+
+data: {"type":"reasoning","delta":"买回来"}
+
+data: {"type":"reasoning","delta":"的时候，伍"}
+
+data: {"type":"reasoning","delta":"卿觉得自己"}
+
+data: {"type":"reasoning","delta":"像被套"}
+
+data: {"type":"reasoning","delta":"进"}
+
+data: {"type":"reasoning","delta":"了一个塑料袋"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"面料"}
+
+data: {"type":"reasoning","delta":"太"}
+
+data: {"type":"reasoning","delta":"滑，"}
+
+data: {"type":"reasoning","delta":"太挺"}
+
+data: {"type":"reasoning","delta":"括"}
+
+data: {"type":"reasoning","delta":"，碰"}
+
+data: {"type":"reasoning","delta":"得"}
+
+data: {"type":"reasoning","delta":"皮肤"}
+
+data: {"type":"reasoning","delta":"发痒。他"}
+
+data: {"type":"reasoning","delta":"别扭"}
+
+data: {"type":"reasoning","delta":"地扯"}
+
+data: {"type":"reasoning","delta":"着"}
+
+data: {"type":"reasoning","delta":"领"}
+
+data: {"type":"reasoning","delta":"口"}
+
+data: {"type":"reasoning","delta":"，左脚"}
+
+data: {"type":"reasoning","delta":"右脚"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"自觉地"}
+
+data: {"type":"reasoning","delta":"并"}
+
+data: {"type":"reasoning","delta":"了"}
+
+data: {"type":"reasoning","delta":"并"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"裙子。"}
+
+data: {"type":"reasoning","delta":"虽然是最"}
+
+data: {"type":"reasoning","delta":"简单的"}
+
+data: {"type":"reasoning","delta":"男"}
+
+data: {"type":"reasoning","delta":"装"}
+
+data: {"type":"reasoning","delta":"长"}
+
+data: {"type":"reasoning","delta":"裤"}
+
+data: {"type":"reasoning","delta":"和"}
+
+data: {"type":"reasoning","delta":"上衣"}
+
+data: {"type":"reasoning","delta":"，可"}
+
+data: {"type":"reasoning","delta":"这"}
+
+data: {"type":"reasoning","delta":"料"}
+
+data: {"type":"reasoning","delta":"子他"}
+
+data: {"type":"reasoning","delta":"连"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"电视"}
+
+data: {"type":"reasoning","delta":"里都没"}
+
+data: {"type":"reasoning","delta":"见过。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥就"}
+
+data: {"type":"reasoning","delta":"站在雨"}
+
+data: {"type":"reasoning","delta":"里看着"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"换。\n"}
+
+data: {"type":"reasoning","delta":"\n不是"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"逼"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"当场"}
+
+data: {"type":"reasoning","delta":"换。是"}
+
+data: {"type":"reasoning","delta":"随从买"}
+
+data: {"type":"reasoning","delta":"回来"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"她在"}
+
+data: {"type":"reasoning","delta":"旁边看着"}
+
+data: {"type":"reasoning","delta":"，他总不能"}
+
+data: {"type":"reasoning","delta":"穿着"}
+
+data: {"type":"reasoning","delta":"湿衣服"}
+
+data: {"type":"reasoning","delta":"发"}
+
+data: {"type":"reasoning","delta":"霉。他躲"}
+
+data: {"type":"reasoning","delta":"到牛"}
+
+data: {"type":"reasoning","delta":"车后面换"}
+
+data: {"type":"reasoning","delta":"的"}
+
+data: {"type":"reasoning","delta":"，探"}
+
+data: {"type":"reasoning","delta":"出头时"}
+
+data: {"type":"reasoning","delta":"，凌"}
+
+data: {"type":"reasoning","delta":"玥还"}
+
+data: {"type":"reasoning","delta":"站在原地"}
+
+data: {"type":"reasoning","delta":"，背"}
+
+data: {"type":"reasoning","delta":"对着"}
+
+data: {"type":"reasoning","delta":"他，肩膀"}
+
+data: {"type":"reasoning","delta":"绷"}
+
+data: {"type":"reasoning","delta":"得很直"}
+
+data: {"type":"reasoning","delta":"。\n\n「上车"}
+
+data: {"type":"reasoning","delta":"。」"}
+
+data: {"type":"reasoning","delta":"她说。\n"}
+
+data: {"type":"reasoning","delta":"\n「我"}
+
+data: {"type":"reasoning","delta":"奶奶"}
+
+data: {"type":"reasoning","delta":"还在"}
+
+data: {"type":"reasoning","delta":"等我。」\n"}
+
+data: {"type":"reasoning","delta":"\n「我知道"}
+
+data: {"type":"reasoning","delta":"。」凌"}
+
+data: {"type":"reasoning","delta":"玥转过身"}
+
+data: {"type":"reasoning","delta":"，「"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"跟你"}
+
+data: {"type":"reasoning","delta":"回去"}
+
+data: {"type":"reasoning","delta":"。」\n\n伍卿：「"}
+
+data: {"type":"reasoning","delta":"…………"}
+
+data: {"type":"reasoning","delta":"」\n\n他知道"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"他知道什么"}
+
+data: {"type":"reasoning","delta":"？他知道"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"奶奶姓"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"？他知道我家"}
+
+data: {"type":"reasoning","delta":"住"}
+
+data: {"type":"reasoning","delta":"哪个"}
+
+data: {"type":"reasoning","delta":"疙瘩"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"他知道"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"——\n"}
+
+data: {"type":"reasoning","delta":"\n他"}
+
+data: {"type":"reasoning","delta":"不敢想"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n商务"}
+
+data: {"type":"reasoning","delta":"车太大"}
+
+data: {"type":"reasoning","delta":"，进"}
+
+data: {"type":"reasoning","delta":"不了"}
+
+data: {"type":"reasoning","delta":"山"}
+
+data: {"type":"reasoning","delta":"道。最后"}
+
+data: {"type":"reasoning","delta":"是"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥上了一"}
+
+data: {"type":"reasoning","delta":"辆小的"}
+
+data: {"type":"reasoning","delta":"、"}
+
+data: {"type":"reasoning","delta":"底盘"}
+
+data: {"type":"reasoning","delta":"高的"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"，跟着"}
+
+data: {"type":"reasoning","delta":"他的"}
+
+data: {"type":"reasoning","delta":"牛车后面"}
+
+data: {"type":"reasoning","delta":"走。雨"}
+
+data: {"type":"reasoning","delta":"刷"}
+
+data: {"type":"reasoning","delta":"器疯狂"}
+
+data: {"type":"reasoning","delta":"地摆动"}
+
+data: {"type":"reasoning","delta":"，车"}
+
+data: {"type":"reasoning","delta":"灯在"}
+
+data: {"type":"reasoning","delta":"雨幕"}
+
+data: {"type":"reasoning","delta":"里切开"}
+
+data: {"type":"reasoning","delta":"两道"}
+
+data: {"type":"reasoning","delta":"昏黄的光"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n伍卿牵着"}
+
+data: {"type":"reasoning","delta":"牛，"}
+
+data: {"type":"reasoning","delta":"走在车灯前面"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n他"}
+
+data: {"type":"reasoning","delta":"左腿又开始"}
+
+data: {"type":"reasoning","delta":"痛"}
+
+data: {"type":"reasoning","delta":"。走"}
+
+data: {"type":"reasoning","delta":"慢看不"}
+
+data: {"type":"reasoning","delta":"出来，可"}
+
+data: {"type":"reasoning","delta":"这会儿"}
+
+data: {"type":"reasoning","delta":"山"}
+
+data: {"type":"reasoning","delta":"道滑"}
+
+data: {"type":"reasoning","delta":"，他"}
+
+data: {"type":"reasoning","delta":"每一步"}
+
+data: {"type":"reasoning","delta":"都得踩"}
+
+data: {"type":"reasoning","delta":"实，"}
+
+data: {"type":"reasoning","delta":"脚"}
+
+data: {"type":"reasoning","delta":"腕"}
+
+data: {"type":"reasoning","delta":"就像"}
+
+data: {"type":"reasoning","delta":"有"}
+
+data: {"type":"reasoning","delta":"根锈"}
+
+data: {"type":"reasoning","delta":"钉子"}
+
+data: {"type":"reasoning","delta":"在里面慢慢"}
+
+data: {"type":"reasoning","delta":"拧"}
+
+data: {"type":"reasoning","delta":"。他咬着"}
+
+data: {"type":"reasoning","delta":"牙没"}
+
+data: {"type":"reasoning","delta":"吭"}
+
+data: {"type":"reasoning","delta":"声，"}
+
+data: {"type":"reasoning","delta":"后背"}
+
+data: {"type":"reasoning","delta":"却能"}
+
+data: {"type":"reasoning","delta":"感觉到车"}
+
+data: {"type":"reasoning","delta":"子里"}
+
+data: {"type":"reasoning","delta":"那道"}
+
+data: {"type":"reasoning","delta":"视线，"}
+
+data: {"type":"reasoning","delta":"沉"}
+
+data: {"type":"reasoning","delta":"甸"}
+
+data: {"type":"reasoning","delta":"甸地"}
+
+data: {"type":"reasoning","delta":"压在他"}
+
+data: {"type":"reasoning","delta":"肩"}
+
+data: {"type":"reasoning","delta":"胛骨"}
+
+data: {"type":"reasoning","delta":"上。\n\n玉佩"}
+
+data: {"type":"reasoning","delta":"又"}
+
+data: {"type":"reasoning","delta":"烫了。\n"}
+
+data: {"type":"reasoning","delta":"\n这次"}
+
+data: {"type":"reasoning","delta":"烫"}
+
+data: {"type":"reasoning","delta":"得他"}
+
+data: {"type":"reasoning","delta":"差点"}
+
+data: {"type":"reasoning","delta":"叫"}
+
+data: {"type":"reasoning","delta":"出来"}
+
+data: {"type":"reasoning","delta":"。他偷偷"}
+
+data: {"type":"reasoning","delta":"低头"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"从领"}
+
+data: {"type":"reasoning","delta":"口扯"}
+
+data: {"type":"reasoning","delta":"出那根红"}
+
+data: {"type":"reasoning","delta":"绳——玉佩"}
+
+data: {"type":"reasoning","delta":"乌"}
+
+data: {"type":"reasoning","delta":"漆"}
+
+data: {"type":"reasoning","delta":"嘛"}
+
+data: {"type":"reasoning","delta":"黑的"}
+
+data: {"type":"reasoning","delta":"，半点"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"绿"}
+
+data: {"type":"reasoning","delta":"光也没有"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n……"}
+
+data: {"type":"reasoning","delta":"眼"}
+
+data: {"type":"reasoning","delta":"花了。\n\n他"}
+
+data: {"type":"reasoning","delta":"刚"}
+
+data: {"type":"reasoning","delta":"想把"}
+
+data: {"type":"reasoning","delta":"玉佩塞"}
+
+data: {"type":"reasoning","delta":"回去，前面"}
+
+data: {"type":"reasoning","delta":"村"}
+
+data: {"type":"reasoning","delta":"口的"}
+
+data: {"type":"reasoning","delta":"茅"}
+
+data: {"type":"reasoning","delta":"草屋子"}
+
+data: {"type":"reasoning","delta":"露出了"}
+
+data: {"type":"reasoning","delta":"轮廓"}
+
+data: {"type":"reasoning","delta":"。\n\n烟"}
+
+data: {"type":"reasoning","delta":"囱在"}
+
+data: {"type":"reasoning","delta":"冒烟。\n\n黎"}
+
+data: {"type":"reasoning","delta":"婆站在"}
+
+data: {"type":"reasoning","delta":"门口。\n\n她"}
+
+data: {"type":"reasoning","delta":"穿"}
+
+data: {"type":"reasoning","delta":"那"}
+
+data: {"type":"reasoning","delta":"身黑色"}
+
+data: {"type":"reasoning","delta":"粗布衣"}
+
+data: {"type":"reasoning","delta":"，头裹"}
+
+data: {"type":"reasoning","delta":"灰巾"}
+
+data: {"type":"reasoning","delta":"，手里攥着"}
+
+data: {"type":"reasoning","delta":"个"}
+
+data: {"type":"reasoning","delta":"旱烟杆"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"她没看"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"，没"}
+
+data: {"type":"reasoning","delta":"看车"}
+
+data: {"type":"reasoning","delta":"灯，她"}
+
+data: {"type":"reasoning","delta":"直直"}
+
+data: {"type":"reasoning","delta":"地盯着"}
+
+data: {"type":"reasoning","delta":"从"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"上下来的那个人"}
+
+data: {"type":"reasoning","delta":"。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥站在"}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"里，"}
+
+data: {"type":"reasoning","delta":"车门"}
+
+data: {"type":"reasoning","delta":"都没"}
+
+data: {"type":"reasoning","delta":"让"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从"}
+
+data: {"type":"reasoning","delta":"关。\n"}
+
+data: {"type":"reasoning","delta":"\n两个"}
+
+data: {"type":"reasoning","delta":"女人"}
+
+data: {"type":"reasoning","delta":"隔"}
+
+data: {"type":"reasoning","delta":"着一"}
+
+data: {"type":"reasoning","delta":"片雨"}
+
+data: {"type":"reasoning","delta":"幕对视。\n\n黎"}
+
+data: {"type":"reasoning","delta":"婆忽然"}
+
+data: {"type":"reasoning","delta":"把手"}
+
+data: {"type":"reasoning","delta":"里的旱"}
+
+data: {"type":"reasoning","delta":"烟杆"}
+
+data: {"type":"reasoning","delta":"往地"}
+
+data: {"type":"reasoning","delta":"上一放"}
+
+data: {"type":"reasoning","delta":"。\n\n砰"}
+
+data: {"type":"reasoning","delta":"——\n"}
+
+data: {"type":"reasoning","delta":"\n不"}
+
+data: {"type":"reasoning","delta":"响。"}
+
+data: {"type":"reasoning","delta":"是"}
+
+data: {"type":"reasoning","delta":"闷"}
+
+data: {"type":"reasoning","delta":"闷"}
+
+data: {"type":"reasoning","delta":"的一声"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"砸"}
+
+data: {"type":"reasoning","delta":"在泥水里"}
+
+data: {"type":"reasoning","delta":"。\n\n「混"}
+
+data: {"type":"reasoning","delta":"洞女"}
+
+data: {"type":"reasoning","delta":"娃。」"}
+
+data: {"type":"reasoning","delta":"黎婆开口"}
+
+data: {"type":"reasoning","delta":"了"}
+
+data: {"type":"reasoning","delta":"，山"}
+
+data: {"type":"reasoning","delta":"里头"}
+
+data: {"type":"reasoning","delta":"特有的"}
+
+data: {"type":"reasoning","delta":"尾"}
+
+data: {"type":"reasoning","delta":"音，又"}
+
+data: {"type":"reasoning","delta":"硬"}
+
+data: {"type":"reasoning","delta":"又冷"}
+
+data: {"type":"reasoning","delta":"，「你还"}
+
+data: {"type":"reasoning","delta":"敢来"}
+
+data: {"type":"reasoning","delta":"？」\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥的"}
+
+data: {"type":"reasoning","delta":"背"}
+
+data: {"type":"reasoning","delta":"绷"}
+
+data: {"type":"reasoning","delta":"直"}
+
+data: {"type":"reasoning","delta":"了。她"}
+
+data: {"type":"reasoning","delta":"拱手"}
+
+data: {"type":"reasoning","delta":"，微"}
+
+data: {"type":"reasoning","delta":"躬身——"}
+
+data: {"type":"reasoning","delta":"那是平"}
+
+data: {"type":"reasoning","delta":"辈"}
+
+data: {"type":"reasoning","delta":"见长辈"}
+
+data: {"type":"reasoning","delta":"的礼"}
+
+data: {"type":"reasoning","delta":"，或者"}
+
+data: {"type":"reasoning","delta":"臣"}
+
+data: {"type":"reasoning","delta":"子"}
+
+data: {"type":"reasoning","delta":"见君"}
+
+data: {"type":"reasoning","delta":"王的礼"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"可她"}
+
+data: {"type":"reasoning","delta":"做"}
+
+data: {"type":"reasoning","delta":"出来"}
+
+data: {"type":"reasoning","delta":"，像一"}
+
+data: {"type":"reasoning","delta":"柄刀"}
+
+data: {"type":"reasoning","delta":"忽然"}
+
+data: {"type":"reasoning","delta":"入了"}
+
+data: {"type":"reasoning","delta":"鞘。\n\n「婆婆"}
+
+data: {"type":"reasoning","delta":"。」凌"}
+
+data: {"type":"reasoning","delta":"玥说，「我"}
+
+data: {"type":"reasoning","delta":"接"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"儿回去"}
+
+data: {"type":"reasoning","delta":"。」\n\n「放"}
+
+data: {"type":"reasoning","delta":"你娘的"}
+
+data: {"type":"reasoning","delta":"屁。」"}
+
+data: {"type":"reasoning","delta":"黎婆往前"}
+
+data: {"type":"reasoning","delta":"跨"}
+
+data: {"type":"reasoning","delta":"了一步，旱"}
+
+data: {"type":"reasoning","delta":"烟杆"}
+
+data: {"type":"reasoning","delta":"从"}
+
+data: {"type":"reasoning","delta":"泥"}
+
+data: {"type":"reasoning","delta":"里"}
+
+data: {"type":"reasoning","delta":"捡"}
+
+data: {"type":"reasoning","delta":"起来，指"}
+
+data: {"type":"reasoning","delta":"头"}
+
+data: {"type":"reasoning","delta":"点"}
+
+data: {"type":"reasoning","delta":"着凌"}
+
+data: {"type":"reasoning","delta":"玥，「七"}
+
+data: {"type":"reasoning","delta":"年前你"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"家怎么"}
+
+data: {"type":"reasoning","delta":"答应"}
+
+data: {"type":"reasoning","delta":"我的？"}
+
+data: {"type":"reasoning","delta":"啊？"}
+
+data: {"type":"reasoning","delta":"把我"}
+
+data: {"type":"reasoning","delta":"娃"}
+
+data: {"type":"reasoning","delta":"丢在"}
+
+data: {"type":"reasoning","delta":"十五"}
+
+data: {"type":"reasoning","delta":"路"}
+
+data: {"type":"reasoning","delta":"，丢"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"里，你们"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"家的"}
+
+data: {"type":"reasoning","delta":"女"}
+
+data: {"type":"reasoning","delta":"娃都是"}
+
+data: {"type":"reasoning","delta":"这么疼"}
+
+data: {"type":"reasoning","delta":"人的？」\n"}
+
+data: {"type":"reasoning","delta":"\n伍"}
+
+data: {"type":"reasoning","delta":"卿站在"}
+
+data: {"type":"reasoning","delta":"旁边"}
+
+data: {"type":"reasoning","delta":"，牵"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"的手紧了"}
+
+data: {"type":"reasoning","delta":"紧"}
+
+data: {"type":"reasoning","delta":"。\n\n七"}
+
+data: {"type":"reasoning","delta":"年前。"}
+
+data: {"type":"reasoning","delta":"十五路"}
+
+data: {"type":"reasoning","delta":"。\n\n他"}
+
+data: {"type":"reasoning","delta":"脑子里「"}
+
+data: {"type":"reasoning","delta":"嗡」的一声"}
+
+data: {"type":"reasoning","delta":"。有些"}
+
+data: {"type":"reasoning","delta":"影子"}
+
+data: {"type":"reasoning","delta":"晃"}
+
+data: {"type":"reasoning","delta":"过去"}
+
+data: {"type":"reasoning","delta":"，快"}
+
+data: {"type":"reasoning","delta":"得抓"}
+
+data: {"type":"reasoning","delta":"不住。他只"}
+
+data: {"type":"reasoning","delta":"记得自己"}
+
+data: {"type":"reasoning","delta":"十岁那年发"}
+
+data: {"type":"reasoning","delta":"过一场"}
+
+data: {"type":"reasoning","delta":"大"}
+
+data: {"type":"reasoning","delta":"烧，烧"}
+
+data: {"type":"reasoning","delta":"退了"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"以前"}
+
+data: {"type":"reasoning","delta":"的事就模糊"}
+
+data: {"type":"reasoning","delta":"了大半。黎"}
+
+data: {"type":"reasoning","delta":"婆从"}
+
+data: {"type":"reasoning","delta":"没细"}
+
+data: {"type":"reasoning","delta":"说过"}
+
+data: {"type":"reasoning","delta":"，只"}
+
+data: {"type":"reasoning","delta":"讲"}
+
+data: {"type":"reasoning","delta":"她是"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"捡」"}
+
+data: {"type":"reasoning","delta":"到他的"}
+
+data: {"type":"reasoning","delta":"。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥的声音"}
+
+data: {"type":"reasoning","delta":"低下去"}
+
+data: {"type":"reasoning","delta":"：「是我"}
+
+data: {"type":"reasoning","delta":"家"}
+
+data: {"type":"reasoning","delta":"对不起"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"。」\n\n「知道"}
+
+data: {"type":"reasoning","delta":"对不起"}
+
+data: {"type":"reasoning","delta":"就好"}
+
+data: {"type":"reasoning","delta":"。」"}
+
+data: {"type":"reasoning","delta":"黎婆冷笑"}
+
+data: {"type":"reasoning","delta":"，「那就"}
+
+data: {"type":"reasoning","delta":"滚"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"我这"}
+
+data: {"type":"reasoning","delta":"庙"}
+
+data: {"type":"reasoning","delta":"小，养"}
+
+data: {"type":"reasoning","delta":"不起你这"}
+
+data: {"type":"reasoning","delta":"尊"}
+
+data: {"type":"reasoning","delta":"大佛"}
+
+data: {"type":"reasoning","delta":"。卿"}
+
+data: {"type":"reasoning","delta":"儿是我"}
+
+data: {"type":"reasoning","delta":"捡回来的，"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"姓"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"，不姓"}
+
+data: {"type":"reasoning","delta":"凌。」\n\n「婆婆"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"」凌玥抬起"}
+
+data: {"type":"reasoning","delta":"眼，"}
+
+data: {"type":"reasoning","delta":"那双"}
+
+data: {"type":"reasoning","delta":"冷"}
+
+data: {"type":"reasoning","delta":"白的"}
+
+data: {"type":"reasoning","delta":"眼睛里，那"}
+
+data: {"type":"reasoning","delta":"层淡"}
+
+data: {"type":"reasoning","delta":"红又"}
+
+data: {"type":"reasoning","delta":"泛"}
+
+data: {"type":"reasoning","delta":"上"}
+
+data: {"type":"reasoning","delta":"来了，「我不是"}
+
+data: {"type":"reasoning","delta":"来"}
+
+data: {"type":"reasoning","delta":"抢"}
+
+data: {"type":"reasoning","delta":"他的"}
+
+data: {"type":"reasoning","delta":"。」\n\n她"}
+
+data: {"type":"reasoning","delta":"顿了顿。\n"}
+
+data: {"type":"reasoning","delta":"\n「我是来"}
+
+data: {"type":"reasoning","delta":"提亲"}
+
+data: {"type":"reasoning","delta":"的。」\n\n雨"}
+
+data: {"type":"reasoning","delta":"声"}
+
+data: {"type":"reasoning","delta":"哗"}
+
+data: {"type":"reasoning","delta":"啦啦"}
+
+data: {"type":"reasoning","delta":"地"}
+
+data: {"type":"reasoning","delta":"响。\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿牵"}
+
+data: {"type":"reasoning","delta":"着他的"}
+
+data: {"type":"reasoning","delta":"牛，站在"}
+
+data: {"type":"reasoning","delta":"自己"}
+
+data: {"type":"reasoning","delta":"家"}
+
+data: {"type":"reasoning","delta":"破烂"}
+
+data: {"type":"reasoning","delta":"的篱笆"}
+
+data: {"type":"reasoning","delta":"门外"}
+
+data: {"type":"reasoning","delta":"，穿着"}
+
+data: {"type":"reasoning","delta":"那"}
+
+data: {"type":"reasoning","delta":"身滑得"}
+
+data: {"type":"reasoning","delta":"难受"}
+
+data: {"type":"reasoning","delta":"的新"}
+
+data: {"type":"reasoning","delta":"衣服"}
+
+data: {"type":"reasoning","delta":"，兜"}
+
+data: {"type":"reasoning","delta":"里还"}
+
+data: {"type":"reasoning","delta":"揣"}
+
+data: {"type":"reasoning","delta":"着今天卖"}
+
+data: {"type":"reasoning","delta":"破烂"}
+
+data: {"type":"reasoning","delta":"挣的"}
+
+data: {"type":"reasoning","delta":"七十几"}
+
+data: {"type":"reasoning","delta":"块。他听见"}
+
+data: {"type":"reasoning","delta":"凌玥一字"}
+
+data: {"type":"reasoning","delta":"一字"}
+
+data: {"type":"reasoning","delta":"地说：\n\n「卿"}
+
+data: {"type":"reasoning","delta":"儿就当"}
+
+data: {"type":"reasoning","delta":"姐姐"}
+
+data: {"type":"reasoning","delta":"去提"}
+
+data: {"type":"reasoning","delta":"亲不"}
+
+data: {"type":"reasoning","delta":"就好了。」\n"}
+
+data: {"type":"reasoning","delta":"\n「名"}
+
+data: {"type":"reasoning","delta":"分先"}
+
+data: {"type":"reasoning","delta":"定下来。」\n"}
+
+data: {"type":"reasoning","delta":"\n「其余的"}
+
+data: {"type":"reasoning","delta":"，慢慢"}
+
+data: {"type":"reasoning","delta":"还"}
+
+data: {"type":"reasoning","delta":"。」\n\n黎"}
+
+data: {"type":"reasoning","delta":"婆的旱"}
+
+data: {"type":"reasoning","delta":"烟杆抬"}
+
+data: {"type":"reasoning","delta":"了起来，"}
+
+data: {"type":"reasoning","delta":"指着凌"}
+
+data: {"type":"reasoning","delta":"玥的鼻"}
+
+data: {"type":"reasoning","delta":"尖，"}
+
+data: {"type":"reasoning","delta":"又慢慢"}
+
+data: {"type":"reasoning","delta":"放下，"}
+
+data: {"type":"reasoning","delta":"往"}
+
+data: {"type":"reasoning","delta":"地上"}
+
+data: {"type":"reasoning","delta":"重重"}
+
+data: {"type":"reasoning","delta":"一磕"}
+
+data: {"type":"reasoning","delta":"。\n\n「你凌"}
+
+data: {"type":"reasoning","delta":"家欠"}
+
+data: {"type":"reasoning","delta":"的，」"}
+
+data: {"type":"reasoning","delta":"黎婆说，「"}
+
+data: {"type":"reasoning","delta":"拿什么"}
+
+data: {"type":"reasoning","delta":"还"}
+
+data: {"type":"reasoning","delta":"？」\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥没"}
+
+data: {"type":"reasoning","delta":"答。\n"}
+
+data: {"type":"reasoning","delta":"\n她转过头"}
+
+data: {"type":"reasoning","delta":"，看向"}
+
+data: {"type":"reasoning","delta":"伍卿。\n\n那一"}
+
+data: {"type":"reasoning","delta":"瞬间"}
+
+data: {"type":"reasoning","delta":"，伍"}
+
+data: {"type":"reasoning","delta":"卿在她"}
+
+data: {"type":"reasoning","delta":"眼睛里"}
+
+data: {"type":"reasoning","delta":"看到"}
+
+data: {"type":"reasoning","delta":"了一点"}
+
+data: {"type":"reasoning","delta":"别"}
+
+data: {"type":"reasoning","delta":"的东西——不是"}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"不是冷"}
+
+data: {"type":"reasoning","delta":"，是一种"}
+
+data: {"type":"reasoning","delta":"沉"}
+
+data: {"type":"reasoning","delta":"到底"}
+
+data: {"type":"reasoning","delta":"的、"}
+
+data: {"type":"reasoning","delta":"近乎孤"}
+
+data: {"type":"reasoning","delta":"注一"}
+
+data: {"type":"reasoning","delta":"掷的东西"}
+
+data: {"type":"reasoning","delta":"。她朝他"}
+
+data: {"type":"reasoning","delta":"走近"}
+
+data: {"type":"reasoning","delta":"一步，声音"}
+
+data: {"type":"reasoning","delta":"压得"}
+
+data: {"type":"reasoning","delta":"极"}
+
+data: {"type":"reasoning","delta":"低，只有他能"}
+
+data: {"type":"reasoning","delta":"听见：\n"}
+
+data: {"type":"reasoning","delta":"\n「你的"}
+
+data: {"type":"reasoning","delta":"腿"}
+
+data: {"type":"reasoning","delta":"，是不是"}
+
+data: {"type":"reasoning","delta":"一到"}
+
+data: {"type":"reasoning","delta":"下雨"}
+
+data: {"type":"reasoning","delta":"就疼"}
+
+data: {"type":"reasoning","delta":"？」\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿浑身"}
+
+data: {"type":"reasoning","delta":"一"}
+
+data: {"type":"reasoning","delta":"僵。\n\n她"}
+
+data: {"type":"reasoning","delta":"怎么"}
+
+data: {"type":"reasoning","delta":"知道？\n"}
+
+data: {"type":"reasoning","delta":"\n他左腿"}
+
+data: {"type":"reasoning","delta":"脚腕"}
+
+data: {"type":"reasoning","delta":"的旧"}
+
+data: {"type":"reasoning","delta":"伤，连"}
+
+data: {"type":"reasoning","delta":"黎婆都"}
+
+data: {"type":"reasoning","delta":"只当"}
+
+data: {"type":"reasoning","delta":"他是"}
+
+data: {"type":"reasoning","delta":"小时候摔"}
+
+data: {"type":"reasoning","delta":"的。可"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥看着他"}
+
+data: {"type":"reasoning","delta":"，那"}
+
+data: {"type":"reasoning","delta":"目光像"}
+
+data: {"type":"reasoning","delta":"刀子"}
+
+data: {"type":"reasoning","delta":"，精准"}
+
+data: {"type":"reasoning","delta":"地剖"}
+
+data: {"type":"reasoning","delta":"开了"}
+
+data: {"type":"reasoning","delta":"他十七"}
+
+data: {"type":"reasoning","delta":"年"}
+
+data: {"type":"reasoning","delta":"的人生"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"落在"}
+
+data: {"type":"reasoning","delta":"那个"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"他自己"}
+
+data: {"type":"reasoning","delta":"都想"}
+
+data: {"type":"reasoning","delta":"不起来的"}
+
+data: {"type":"reasoning","delta":"节点"}
+
+data: {"type":"reasoning","delta":"上。\n\n「还有"}
+
+data: {"type":"reasoning","delta":"，」"}
+
+data: {"type":"reasoning","delta":"凌玥的"}
+
+data: {"type":"reasoning","delta":"视线移"}
+
+data: {"type":"reasoning","delta":"向他"}
+
+data: {"type":"reasoning","delta":"怀里"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"玉佩的位置"}
+
+data: {"type":"reasoning","delta":"，「你"}
+
+data: {"type":"reasoning","delta":"贴身"}
+
+data: {"type":"reasoning","delta":"戴"}
+
+data: {"type":"reasoning","delta":"的那块玉"}
+
+data: {"type":"reasoning","delta":"……」\n\n她"}
+
+data: {"type":"reasoning","delta":"没"}
+
+data: {"type":"reasoning","delta":"说完。\n\n怀"}
+
+data: {"type":"reasoning","delta":"里的玉佩"}
+
+data: {"type":"reasoning","delta":"骤然一"}
+
+data: {"type":"reasoning","delta":"烫。\n"}
+
+data: {"type":"reasoning","delta":"\n伍卿低头"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"眼睁睁"}
+
+data: {"type":"reasoning","delta":"看着那枚乌"}
+
+data: {"type":"reasoning","delta":"黑的"}
+
+data: {"type":"reasoning","delta":"玉佩，"}
+
+data: {"type":"reasoning","delta":"在他湿"}
+
+data: {"type":"reasoning","delta":"透的衣衫"}
+
+data: {"type":"reasoning","delta":"深处"}
+
+data: {"type":"reasoning","delta":"，透"}
+
+data: {"type":"reasoning","delta":"出了一点"}
+
+data: {"type":"reasoning","delta":"极幽"}
+
+data: {"type":"reasoning","delta":"、"}
+
+data: {"type":"reasoning","delta":"极暗"}
+
+data: {"type":"reasoning","delta":"的绿光。\n"}
+
+data: {"type":"reasoning","delta":"\n那"}
+
+data: {"type":"reasoning","delta":"光芒"}
+
+data: {"type":"reasoning","delta":"很"}
+
+data: {"type":"reasoning","delta":"弱，"}
+
+data: {"type":"reasoning","delta":"却清晰地"}
+
+data: {"type":"reasoning","delta":"在他"}
+
+data: {"type":"reasoning","delta":"胸口"}
+
+data: {"type":"reasoning","delta":"投"}
+
+data: {"type":"reasoning","delta":"下"}
+
+data: {"type":"reasoning","delta":"了一个字。\n\n——"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"。\n\n黎"}
+
+data: {"type":"reasoning","delta":"婆的旱"}
+
+data: {"type":"reasoning","delta":"烟杆掉"}
+
+data: {"type":"reasoning","delta":"在了"}
+
+data: {"type":"reasoning","delta":"泥里。\n\n大"}
+
+data: {"type":"reasoning","delta":"黑牛"}
+
+data: {"type":"reasoning","delta":"忽然发出一"}
+
+data: {"type":"reasoning","delta":"声低"}
+
+data: {"type":"reasoning","delta":"哞，巨大的"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"头"}
+
+data: {"type":"reasoning","delta":"抵住"}
+
+data: {"type":"reasoning","delta":"伍卿的后"}
+
+data: {"type":"reasoning","delta":"背"}
+
+data: {"type":"reasoning","delta":"，把他"}
+
+data: {"type":"reasoning","delta":"往凌"}
+
+data: {"type":"reasoning","delta":"玥的方向，"}
+
+data: {"type":"reasoning","delta":"轻轻推了"}
+
+data: {"type":"reasoning","delta":"半步。\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿没"}
+
+data: {"type":"reasoning","delta":"动。\n\n他"}
+
+data: {"type":"reasoning","delta":"站在雨"}
+
+data: {"type":"reasoning","delta":"里，站在"}
+
+data: {"type":"reasoning","delta":"他的"}
+
+data: {"type":"reasoning","delta":"牛和他的"}
+
+data: {"type":"reasoning","delta":"破烂"}
+
+data: {"type":"reasoning","delta":"中间"}
+
+data: {"type":"reasoning","delta":"，站在"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"好不容易"}
+
+data: {"type":"reasoning","delta":"攒"}
+
+data: {"type":"reasoning","delta":"下的"}
+
+data: {"type":"reasoning","delta":"七十几"}
+
+data: {"type":"reasoning","delta":"块钱"}
+
+data: {"type":"reasoning","delta":"和他"}
+
+data: {"type":"reasoning","delta":"完全"}
+
+data: {"type":"reasoning","delta":"想"}
+
+data: {"type":"reasoning","delta":"不起来的过去"}
+
+data: {"type":"reasoning","delta":"之间。\n"}
+
+data: {"type":"reasoning","delta":"\n凌"}
+
+data: {"type":"reasoning","delta":"玥伸出手"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n「"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"儿，」"}
+
+data: {"type":"reasoning","delta":"她说，「"}
+
+data: {"type":"reasoning","delta":"选"}
+
+data: {"type":"reasoning","delta":"一个。」\n\n选"}
+
+data: {"type":"reasoning","delta":"什么"}
+
+data: {"type":"reasoning","delta":"？\n\n伍"}
+
+data: {"type":"reasoning","delta":"卿张"}
+
+data: {"type":"reasoning","delta":"着嘴，雨"}
+
+data: {"type":"reasoning","delta":"顺着"}
+
+data: {"type":"reasoning","delta":"他的下巴"}
+
+data: {"type":"reasoning","delta":"滴"}
+
+data: {"type":"reasoning","delta":"进领"}
+
+data: {"type":"reasoning","delta":"口。"}
+
+data: {"type":"reasoning","delta":"他看看"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆铁"}
+
+data: {"type":"reasoning","delta":"青的脸，看看"}
+
+data: {"type":"reasoning","delta":"凌玥悬"}
+
+data: {"type":"reasoning","delta":"在半"}
+
+data: {"type":"reasoning","delta":"空的手，看看"}
+
+data: {"type":"reasoning","delta":"那块还在"}
+
+data: {"type":"reasoning","delta":"发"}
+
+data: {"type":"reasoning","delta":"光的"}
+
+data: {"type":"reasoning","delta":"玉佩。\n\n他的"}
+
+data: {"type":"reasoning","delta":"腿"}
+
+data: {"type":"reasoning","delta":"很"}
+
+data: {"type":"reasoning","delta":"痛。\n\n他的"}
+
+data: {"type":"reasoning","delta":"脑子"}
+
+data: {"type":"reasoning","delta":"很乱。\n\n他"}
+
+data: {"type":"reasoning","delta":"这辈子"}
+
+data: {"type":"reasoning","delta":"最大的"}
+
+data: {"type":"reasoning","delta":"理想，就是"}
+
+data: {"type":"reasoning","delta":"牵着牛车"}
+
+data: {"type":"reasoning","delta":"回山里"}
+
+data: {"type":"reasoning","delta":"，一天"}
+
+data: {"type":"reasoning","delta":"挣"}
+
+data: {"type":"reasoning","delta":"七十几"}
+
+data: {"type":"reasoning","delta":"块，吃饱"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"睡暖，"}
+
+data: {"type":"reasoning","delta":"别惹事"}
+
+data: {"type":"reasoning","delta":"。\n\n可现在"}
+
+data: {"type":"reasoning","delta":"——\n\n牛"}
+
+data: {"type":"reasoning","delta":"又"}
+
+data: {"type":"reasoning","delta":"抵"}
+
+data: {"type":"reasoning","delta":"了他一下"}
+
+data: {"type":"reasoning","delta":"。\n\n大"}
+
+data: {"type":"reasoning","delta":"黑牛温"}
+
+data: {"type":"reasoning","delta":"顺的眼睛"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"雨里望着"}
+
+data: {"type":"reasoning","delta":"他，舌头"}
+
+data: {"type":"reasoning","delta":"伸出来"}
+
+data: {"type":"reasoning","delta":"，舔了舔"}
+
+data: {"type":"reasoning","delta":"他冰凉"}
+
+data: {"type":"reasoning","delta":"的手腕"}
+
+data: {"type":"reasoning","delta":"。\n\n就像"}
+
+data: {"type":"reasoning","delta":"它"}
+
+data: {"type":"reasoning","delta":"过去"}
+
+data: {"type":"reasoning","delta":"四年"}
+
+data: {"type":"reasoning","delta":"里的"}
+
+data: {"type":"reasoning","delta":"每一天"}
+
+data: {"type":"reasoning","delta":"一样。\n\n仿佛"}
+
+data: {"type":"reasoning","delta":"在说"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"跟我"}
+
+data: {"type":"reasoning","delta":"走，"}
+
+data: {"type":"reasoning","delta":"或者，"}
+
+data: {"type":"reasoning","delta":"带"}
+
+data: {"type":"reasoning","delta":"它"}
+
+data: {"type":"reasoning","delta":"走"}
+
+data: {"type":"reasoning","delta":"。\n\n随便"}
+
+data: {"type":"reasoning","delta":"哪一个"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n只要你"}
+
+data: {"type":"reasoning","delta":"开口"}
+
+data: {"type":"reasoning","delta":"。\n\n【"}
+
+data: {"type":"reasoning","delta":"检查"}
+
+data: {"type":"reasoning","delta":"】\n"}
+
+data: {"type":"reasoning","delta":"\n1. 视角"}
+
+data: {"type":"reasoning","delta":"：全程"}
+
+data: {"type":"reasoning","delta":"伍卿，"}
+
+data: {"type":"reasoning","delta":"内心"}
+
+data: {"type":"reasoning","delta":"独白有"}
+
+data: {"type":"reasoning","delta":"，没有"}
+
+data: {"type":"reasoning","delta":"他人心理"}
+
+data: {"type":"reasoning","delta":"。凌"}
+
+data: {"type":"reasoning","delta":"玥眼眶"}
+
+data: {"type":"reasoning","delta":"红、背"}
+
+data: {"type":"reasoning","delta":"绷"}
+
+data: {"type":"reasoning","delta":"直是"}
+
+data: {"type":"reasoning","delta":"观察到的"}
+
+data: {"type":"reasoning","delta":"。黎"}
+
+data: {"type":"reasoning","delta":"婆没有心理"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"✓\n2."}
+
+data: {"type":"reasoning","delta":" 文风"}
+
+data: {"type":"reasoning","delta":"：短句，"}
+
+data: {"type":"reasoning","delta":"一段一到"}
+
+data: {"type":"reasoning","delta":"三句。"}
+
+data: {"type":"reasoning","delta":"有"}
+
+data: {"type":"reasoning","delta":"省略"}
+
+data: {"type":"reasoning","delta":"号和"}
+
+data: {"type":"reasoning","delta":"破折号。"}
+
+data: {"type":"reasoning","delta":"拟声词"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"砰——"}
+
+data: {"type":"reasoning","delta":"」。"}
+
+data: {"type":"reasoning","delta":"幽默"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"内心（"}
+
+data: {"type":"reasoning","delta":"CPU烧了"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"社死感"}
+
+data: {"type":"reasoning","delta":"拉满）。✓"}
+
+data: {"type":"reasoning","delta":"\n3. "}
+
+data: {"type":"reasoning","delta":"篇幅：估计"}
+
+data: {"type":"reasoning","delta":"200"}
+
+data: {"type":"reasoning","delta":"0字"}
+
+data: {"type":"reasoning","delta":"左右。"}
+
+data: {"type":"reasoning","delta":"符合"}
+
+data: {"type":"reasoning","delta":"160"}
+
+data: {"type":"reasoning","delta":"0-2600"}
+
+data: {"type":"reasoning","delta":"。✓\n4"}
+
+data: {"type":"reasoning","delta":". 时间推进"}
+
+data: {"type":"reasoning","delta":"：雨落"}
+
+data: {"type":"reasoning","delta":"下来（"}
+
+data: {"type":"reasoning","delta":"日"}
+
+data: {"type":"reasoning","delta":"暮）"}
+
+data: {"type":"reasoning","delta":"→买"}
+
+data: {"type":"reasoning","delta":"衣服"}
+
+data: {"type":"reasoning","delta":"→回"}
+
+data: {"type":"reasoning","delta":"村（"}
+
+data: {"type":"reasoning","delta":"车"}
+
+data: {"type":"reasoning","delta":"灯/"}
+
+data: {"type":"reasoning","delta":"山道"}
+
+data: {"type":"reasoning","delta":"）→村"}
+
+data: {"type":"reasoning","delta":"口。天"}
+
+data: {"type":"reasoning","delta":"光有"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"（乌云压"}
+
+data: {"type":"reasoning","delta":"顶"}
+
+data: {"type":"reasoning","delta":"，雨幕"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"车灯昏"}
+
+data: {"type":"reasoning","delta":"黄）。✓"}
+
+data: {"type":"reasoning","delta":"\n5. 结尾"}
+
+data: {"type":"reasoning","delta":"钩子：停在"}
+
+data: {"type":"reasoning","delta":"选一个"}
+
+data: {"type":"reasoning","delta":"/"}
+
+data: {"type":"reasoning","delta":"玉佩"}
+
+data: {"type":"reasoning","delta":"发光"}
+
+data: {"type":"reasoning","delta":"/黎"}
+
+data: {"type":"reasoning","delta":"婆反应"}
+
+data: {"type":"reasoning","delta":"/牛"}
+
+data: {"type":"reasoning","delta":"推他"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"必须"}
+
+data: {"type":"reasoning","delta":"立刻"}
+
+data: {"type":"reasoning","delta":"做出"}
+
+data: {"type":"reasoning","delta":"选择。"}
+
+data: {"type":"reasoning","delta":"✓\n6."}
+
+data: {"type":"reasoning","delta":" 无元叙述"}
+
+data: {"type":"reasoning","delta":"。✓\n7"}
+
+data: {"type":"reasoning","delta":". 没"}
+
+data: {"type":"reasoning","delta":"替主角做"}
+
+data: {"type":"reasoning","delta":"决定，没"}
+
+data: {"type":"reasoning","delta":"代写"}
+
+data: {"type":"reasoning","delta":"台词。主角"}
+
+data: {"type":"reasoning","delta":"内心"}
+
+data: {"type":"reasoning","delta":"是"}
+
+data: {"type":"reasoning","delta":"吐槽，没说"}
+
+data: {"type":"reasoning","delta":"出口"}
+
+data: {"type":"reasoning","delta":"的话"}
+
+data: {"type":"reasoning","delta":"。✓"}
+
+data: {"type":"reasoning","delta":"\n8. 角色"}
+
+data: {"type":"reasoning","delta":"不说"}
+
+data: {"type":"reasoning","delta":"不可能知道的信息"}
+
+data: {"type":"reasoning","delta":"：黎"}
+
+data: {"type":"reasoning","delta":"婆知道"}
+
+data: {"type":"reasoning","delta":"七年前"}
+
+data: {"type":"reasoning","delta":"丢"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"十五路（"}
+
+data: {"type":"reasoning","delta":"她捡"}
+
+data: {"type":"reasoning","delta":"到他"}
+
+data: {"type":"reasoning","delta":"，可能"}
+
+data: {"type":"reasoning","delta":"知道玉佩"}
+
+data: {"type":"reasoning","delta":"或"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"家"}
+
+data: {"type":"reasoning","delta":"标记"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"但她说"}
+
+data: {"type":"reasoning","delta":"「把我"}
+
+data: {"type":"reasoning","delta":"娃"}
+
+data: {"type":"reasoning","delta":"丢在十五"}
+
+data: {"type":"reasoning","delta":"路」，"}
+
+data: {"type":"reasoning","delta":"这是她见证"}
+
+data: {"type":"reasoning","delta":"过的"}
+
+data: {"type":"reasoning","delta":"，可以）。"}
+
+data: {"type":"reasoning","delta":"凌玥"}
+
+data: {"type":"reasoning","delta":"知道腿伤"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"这里"}
+
+data: {"type":"reasoning","delta":"有问题"}
+
+data: {"type":"reasoning","delta":"！她"}
+
+data: {"type":"reasoning","delta":"怎么知道腿"}
+
+data: {"type":"reasoning","delta":"伤？原作"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"见过"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"受伤，但记忆"}
+
+data: {"type":"reasoning","delta":"封"}
+
+data: {"type":"reasoning","delta":"存了"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"见过"}
+
+data: {"type":"reasoning","delta":"。可以"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"但"}
+
+data: {"type":"reasoning","delta":"她说「"}
+
+data: {"type":"reasoning","delta":"你"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"家"}
+
+data: {"type":"reasoning","delta":"欠的拿"}
+
+data: {"type":"reasoning","delta":"什么还"}
+
+data: {"type":"reasoning","delta":"」时"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥没答"}
+
+data: {"type":"reasoning","delta":"，然后"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥说腿"}
+
+data: {"type":"reasoning","delta":"的事"}
+
+data: {"type":"reasoning","delta":"——这"}
+
+data: {"type":"reasoning","delta":"可以"}
+
+data: {"type":"reasoning","delta":"解释"}
+
+data: {"type":"reasoning","delta":"为她"}
+
+data: {"type":"reasoning","delta":"以前"}
+
+data: {"type":"reasoning","delta":"见过/"}
+
+data: {"type":"reasoning","delta":"知道。玉佩"}
+
+data: {"type":"reasoning","delta":"的事"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"也没说完"}
+
+data: {"type":"reasoning","delta":"，停在"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"你"}
+
+data: {"type":"reasoning","delta":"贴身戴的那"}
+
+data: {"type":"reasoning","delta":"块玉……」"}
+
+data: {"type":"reasoning","delta":"然后"}
+
+data: {"type":"reasoning","delta":"玉佩发光"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆的"}
+
+data: {"type":"reasoning","delta":"旱烟"}
+
+data: {"type":"reasoning","delta":"杆掉了"}
+
+data: {"type":"reasoning","delta":"——她"}
+
+data: {"type":"reasoning","delta":"看到玉佩发光"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"可以。"}
+
+data: {"type":"reasoning","delta":"\n   "}
+
+data: {"type":"reasoning","delta":"等等，黎"}
+
+data: {"type":"reasoning","delta":"婆说「七"}
+
+data: {"type":"reasoning","delta":"年前你"}
+
+data: {"type":"reasoning","delta":"凌家怎么"}
+
+data: {"type":"reasoning","delta":"答应我的"}
+
+data: {"type":"reasoning","delta":"？把我"}
+
+data: {"type":"reasoning","delta":"娃丢在十五"}
+
+data: {"type":"reasoning","delta":"路」"}
+
+data: {"type":"reasoning","delta":"——这暗示"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆知道内"}
+
+data: {"type":"reasoning","delta":"情。"}
+
+data: {"type":"reasoning","delta":"可以"}
+
+data: {"type":"reasoning","delta":"，她是"}
+
+data: {"type":"reasoning","delta":"审判"}
+
+data: {"type":"reasoning","delta":"者，知道"}
+
+data: {"type":"reasoning","delta":"一些"}
+
+data: {"type":"reasoning","delta":"。\n   "}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"但「"}
+
+data: {"type":"reasoning","delta":"不得"}
+
+data: {"type":"reasoning","delta":"让任何"}
+
+data: {"type":"reasoning","delta":"角色说出"}
+
+data: {"type":"reasoning","delta":"他不可能"}
+
+data: {"type":"reasoning","delta":"知道的信息」"}
+
+data: {"type":"reasoning","delta":"——黎婆知道"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"家"}
+
+data: {"type":"reasoning","delta":"丢孩子"}
+
+data: {"type":"reasoning","delta":"，可以。"}
+
+data: {"type":"reasoning","delta":"凌玥知道腿"}
+
+data: {"type":"reasoning","delta":"伤，可以解释"}
+
+data: {"type":"reasoning","delta":"为旧"}
+
+data: {"type":"reasoning","delta":"识"}
+
+data: {"type":"reasoning","delta":"。玉佩"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"欲"}
+
+data: {"type":"reasoning","delta":"言又"}
+
+data: {"type":"reasoning","delta":"止，没有"}
+
+data: {"type":"reasoning","delta":"说答案"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"\n9. 专"}
+
+data: {"type":"reasoning","delta":"有名词：A"}
+
+data: {"type":"reasoning","delta":"市（帝都）、"}
+
+data: {"type":"reasoning","delta":"东街中心"}
+
+data: {"type":"reasoning","delta":"九十五号"}
+
+data: {"type":"reasoning","delta":"凌府（我"}
+
+data: {"type":"reasoning","delta":"写了东"}
+
+data: {"type":"reasoning","delta":"街中心九十五"}
+
+data: {"type":"reasoning","delta":"号对面"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"可以"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"凌府地址"}
+
+data: {"type":"reasoning","delta":"一次"}
+
+data: {"type":"reasoning","delta":"定义）、十五"}
+
+data: {"type":"reasoning","delta":"路、"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆、"}
+
+data: {"type":"reasoning","delta":"大黑牛、"}
+
+data: {"type":"reasoning","delta":"凌玥、"}
+
+data: {"type":"reasoning","delta":"张"}
+
+data: {"type":"reasoning","delta":"兰（"}
+
+data: {"type":"reasoning","delta":"新人物"}
+
+data: {"type":"reasoning","delta":"，杂"}
+
+data: {"type":"reasoning","delta":"货铺"}
+
+data: {"type":"reasoning","delta":"老板娘，可以"}
+
+data: {"type":"reasoning","delta":"）、"}
+
+data: {"type":"reasoning","delta":"司楼"}
+
+data: {"type":"reasoning","delta":"（"}
+
+data: {"type":"reasoning","delta":"没提，但"}
+
+data: {"type":"reasoning","delta":"威胁没"}
+
+data: {"type":"reasoning","delta":"滥用"}
+
+data: {"type":"reasoning","delta":"）、长柳"}
+
+data: {"type":"reasoning","delta":"点云"}
+
+data: {"type":"reasoning","delta":"图（没"}
+
+data: {"type":"reasoning","delta":"提，没关系"}
+
+data: {"type":"reasoning","delta":"）、"}
+
+data: {"type":"reasoning","delta":"玉佩发"}
+
+data: {"type":"reasoning","delta":"绿光"}
+
+data: {"type":"reasoning","delta":"投出"}
+
+data: {"type":"reasoning","delta":"「凌」字"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"写了绿"}
+
+data: {"type":"reasoning","delta":"光投"}
+
+data: {"type":"reasoning","delta":"出「凌」"}
+
+data: {"type":"reasoning","delta":"字，符合宪"}
+
+data: {"type":"reasoning","delta":"章"}
+
+data: {"type":"reasoning","delta":"暗示"}
+
+data: {"type":"reasoning","delta":"线"}
+
+data: {"type":"reasoning","delta":"。✓\n10"}
+
+data: {"type":"reasoning","delta":". 伍"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"没"}
+
+data: {"type":"reasoning","delta":"变强，"}
+
+data: {"type":"reasoning","delta":"没金"}
+
+data: {"type":"reasoning","delta":"手指。"}
+
+data: {"type":"reasoning","delta":"玉佩是"}
+
+data: {"type":"reasoning","delta":"既有"}
+
+data: {"type":"reasoning","delta":"设定"}
+
+data: {"type":"reasoning","delta":"，不是金"}
+
+data: {"type":"reasoning","delta":"手指，"}
+
+data: {"type":"reasoning","delta":"是悬念"}
+
+data: {"type":"reasoning","delta":"线"}
+
+data: {"type":"reasoning","delta":"。✓"}
+
+data: {"type":"reasoning","delta":"\n11. 凌"}
+
+data: {"type":"reasoning","delta":"玥在外"}
+
+data: {"type":"reasoning","delta":"人面前"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"温柔：张兰"}
+
+data: {"type":"reasoning","delta":"在时"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"冷厉"}
+
+data: {"type":"reasoning","delta":"；"}
+
+data: {"type":"reasoning","delta":"随"}
+
+data: {"type":"reasoning","delta":"从"}
+
+data: {"type":"reasoning","delta":"在时命令"}
+
+data: {"type":"reasoning","delta":"式；回"}
+
+data: {"type":"reasoning","delta":"村车上"}
+
+data: {"type":"reasoning","delta":"只有"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿时"}
+
+data: {"type":"reasoning","delta":"她低声"}
+
+data: {"type":"reasoning","delta":"说话"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"这"}
+
+data: {"type":"reasoning","delta":"算有"}
+
+data: {"type":"reasoning","delta":"第三"}
+
+data: {"type":"reasoning","delta":"人在场"}
+
+data: {"type":"reasoning","delta":"吗？随"}
+
+data: {"type":"reasoning","delta":"从在"}
+
+data: {"type":"reasoning","delta":"开车"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"算。但她"}
+
+data: {"type":"reasoning","delta":"声音"}
+
+data: {"type":"reasoning","delta":"压得"}
+
+data: {"type":"reasoning","delta":"极"}
+
+data: {"type":"reasoning","delta":"低，而且"}
+
+data: {"type":"reasoning","delta":"立刻"}
+
+data: {"type":"reasoning","delta":"是"}
+
+data: {"type":"reasoning","delta":"审"}
+
+data: {"type":"reasoning","delta":"问/"}
+
+data: {"type":"reasoning","delta":"揭秘"}
+
+data: {"type":"reasoning","delta":"语气"}
+
+data: {"type":"reasoning","delta":"，不是温柔。"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"村"}
+
+data: {"type":"reasoning","delta":"口"}
+
+data: {"type":"reasoning","delta":"黎婆在"}
+
+data: {"type":"reasoning","delta":"时她"}
+
+data: {"type":"reasoning","delta":"拱手"}
+
+data: {"type":"reasoning","delta":"弯腰"}
+
+data: {"type":"reasoning","delta":"，很守"}
+
+data: {"type":"reasoning","delta":"礼。可以"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"\n12. 清水"}
+
+data: {"type":"reasoning","delta":"尺度：无"}
+
+data: {"type":"reasoning","delta":"问题"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"\n13. 司"}
+
+data: {"type":"reasoning","delta":"楼没"}
+
+data: {"type":"reasoning","delta":"提，"}
+
+data: {"type":"reasoning","delta":"没问题"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n问题"}
+
+data: {"type":"reasoning","delta":"点"}
+
+data: {"type":"reasoning","delta":"：\n- 张"}
+
+data: {"type":"reasoning","delta":"兰是"}
+
+data: {"type":"reasoning","delta":"杂货铺"}
+
+data: {"type":"reasoning","delta":"老板娘，我"}
+
+data: {"type":"reasoning","delta":"让她"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"明天"}
+
+data: {"type":"reasoning","delta":"开始"}
+
+data: {"type":"reasoning","delta":"不用开了"}
+
+data: {"type":"reasoning","delta":"」"}
+
+data: {"type":"reasoning","delta":"——凌"}
+
+data: {"type":"reasoning","delta":"玥权势"}
+
+data: {"type":"reasoning","delta":"体现"}
+
+data: {"type":"reasoning","delta":"，合理"}
+
+data: {"type":"reasoning","delta":"。\n- 凌"}
+
+data: {"type":"reasoning","delta":"玥说"}
+
+data: {"type":"reasoning","delta":"「我知道"}
+
+data: {"type":"reasoning","delta":"」"}
+
+data: {"type":"reasoning","delta":"——她知道"}
+
+data: {"type":"reasoning","delta":"黎"}
+
+data: {"type":"reasoning","delta":"婆在等"}
+
+data: {"type":"reasoning","delta":"？还是"}
+
+data: {"type":"reasoning","delta":"知道"}
+
+data: {"type":"reasoning","delta":"家"}
+
+data: {"type":"reasoning","delta":"在哪"}
+
+data: {"type":"reasoning","delta":"？她"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"跟你回去"}
+
+data: {"type":"reasoning","delta":"」说明"}
+
+data: {"type":"reasoning","delta":"她知道"}
+
+data: {"type":"reasoning","delta":"路"}
+
+data: {"type":"reasoning","delta":"。合理"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"家查"}
+
+data: {"type":"reasoning","delta":"得到"}
+
+data: {"type":"reasoning","delta":"。\n- 黎"}
+
+data: {"type":"reasoning","delta":"婆骂"}
+
+data: {"type":"reasoning","delta":"「混"}
+
+data: {"type":"reasoning","delta":"洞女"}
+
+data: {"type":"reasoning","delta":"娃」——符合"}
+
+data: {"type":"reasoning","delta":"。\n- 凌"}
+
+data: {"type":"reasoning","delta":"玥说"}
+
+data: {"type":"reasoning","delta":"「卿儿"}
+
+data: {"type":"reasoning","delta":"就当姐姐去"}
+
+data: {"type":"reasoning","delta":"提亲"}
+
+data: {"type":"reasoning","delta":"不就好了」——"}
+
+data: {"type":"reasoning","delta":"符合节"}
+
+data: {"type":"reasoning","delta":"拍。\n- "}
+
+data: {"type":"reasoning","delta":"结尾钩"}
+
+data: {"type":"reasoning","delta":"子：选"}
+
+data: {"type":"reasoning","delta":"一个"}
+
+data: {"type":"reasoning","delta":"。选"}
+
+data: {"type":"reasoning","delta":"什么？是"}
+
+data: {"type":"reasoning","delta":"选择"}
+
+data: {"type":"reasoning","delta":"跟"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"跟凌"}
+
+data: {"type":"reasoning","delta":"玥"}
+
+data: {"type":"reasoning","delta":"走？"}
+
+data: {"type":"reasoning","delta":"还是选择"}
+
+data: {"type":"reasoning","delta":"玉佩"}
+
+data: {"type":"reasoning","delta":"/"}
+
+data: {"type":"reasoning","delta":"腿/"}
+
+data: {"type":"reasoning","delta":"过去？我"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"的是"}
+
+data: {"type":"reasoning","delta":"凌"}
+
+data: {"type":"reasoning","delta":"玥伸出手"}
+
+data: {"type":"reasoning","delta":"说"}
+
+data: {"type":"reasoning","delta":"「选"}
+
+data: {"type":"reasoning","delta":"一个」，然后"}
+
+data: {"type":"reasoning","delta":"牛推"}
+
+data: {"type":"reasoning","delta":"他。这留下了"}
+
+data: {"type":"reasoning","delta":"必须"}
+
+data: {"type":"reasoning","delta":"立刻"}
+
+data: {"type":"reasoning","delta":"做出的选择。可以"}
+
+data: {"type":"reasoning","delta":"。\n\n再"}
+
+data: {"type":"reasoning","delta":"优化一下：黎"}
+
+data: {"type":"reasoning","delta":"婆看到"}
+
+data: {"type":"reasoning","delta":"玉佩发光，旱"}
+
+data: {"type":"reasoning","delta":"烟杆"}
+
+data: {"type":"reasoning","delta":"掉了"}
+
+data: {"type":"reasoning","delta":"——这"}
+
+data: {"type":"reasoning","delta":"很好，说明"}
+
+data: {"type":"reasoning","delta":"玉佩"}
+
+data: {"type":"reasoning","delta":"发光"}
+
+data: {"type":"reasoning","delta":"是"}
+
+data: {"type":"reasoning","delta":"真实的，"}
+
+data: {"type":"reasoning","delta":"且"}
+
+data: {"type":"reasoning","delta":"黎婆知道"}
+
+data: {"type":"reasoning","delta":"这"}
+
+data: {"type":"reasoning","delta":"玉佩"}
+
+data: {"type":"reasoning","delta":"意味着什么。但"}
+
+data: {"type":"reasoning","delta":"黎婆不能"}
+
+data: {"type":"reasoning","delta":"说出"}
+
+data: {"type":"reasoning","delta":"真相。"}
+
+data: {"type":"reasoning","delta":"她掉"}
+
+data: {"type":"reasoning","delta":"烟"}
+
+data: {"type":"reasoning","delta":"杆的动作"}
+
+data: {"type":"reasoning","delta":"即可"}
+
+data: {"type":"reasoning","delta":"。\n\n凌"}
+
+data: {"type":"reasoning","delta":"玥欲"}
+
+data: {"type":"reasoning","delta":"言又止「"}
+
+data: {"type":"reasoning","delta":"你贴身"}
+
+data: {"type":"reasoning","delta":"戴的那"}
+
+data: {"type":"reasoning","delta":"块玉……」"}
+
+data: {"type":"reasoning","delta":"——她不能说"}
+
+data: {"type":"reasoning","delta":"太多"}
+
+data: {"type":"reasoning","delta":"，因为她是"}
+
+data: {"type":"reasoning","delta":"古代"}
+
+data: {"type":"reasoning","delta":"人，不知道"}
+
+data: {"type":"reasoning","delta":"伍"}
+
+data: {"type":"reasoning","delta":"卿记忆"}
+
+data: {"type":"reasoning","delta":"被封，"}
+
+data: {"type":"reasoning","delta":"她"}
+
+data: {"type":"reasoning","delta":"可能以为"}
+
+data: {"type":"reasoning","delta":"他记得玉佩来历"}
+
+data: {"type":"reasoning","delta":"。但她"}
+
+data: {"type":"reasoning","delta":"看他"}
+
+data: {"type":"reasoning","delta":"茫然"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"所以停"}
+
+data: {"type":"reasoning","delta":"住。合理"}
+
+data: {"type":"reasoning","delta":"。\n\n左"}
+
+data: {"type":"reasoning","delta":"腿伤"}
+
+data: {"type":"reasoning","delta":"：凌"}
+
+data: {"type":"reasoning","delta":"玥说「你的"}
+
+data: {"type":"reasoning","delta":"腿，是不是"}
+
+data: {"type":"reasoning","delta":"一到下雨"}
+
+data: {"type":"reasoning","delta":"就疼？」——"}
+
+data: {"type":"reasoning","delta":"伍卿浑身"}
+
+data: {"type":"reasoning","delta":"一僵"}
+
+data: {"type":"reasoning","delta":"。她"}
+
+data: {"type":"reasoning","delta":"怎么知道？"}
+
+data: {"type":"reasoning","delta":"可以是"}
+
+data: {"type":"reasoning","delta":"旧伤"}
+
+data: {"type":"reasoning","delta":"是她"}
+
+data: {"type":"reasoning","delta":"造成的"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"或者她见过"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"宪"}
+
+data: {"type":"reasoning","delta":"章说"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"左腿脚"}
+
+data: {"type":"reasoning","delta":"腕的旧伤"}
+
+data: {"type":"reasoning","delta":"是后天砸出来的"}
+
+data: {"type":"reasoning","delta":"，但他想不起来"}
+
+data: {"type":"reasoning","delta":"」。凌"}
+
+data: {"type":"reasoning","delta":"玥知道"}
+
+data: {"type":"reasoning","delta":"，可以"}
+
+data: {"type":"reasoning","delta":"。\n\n好"}
+
+data: {"type":"reasoning","delta":"，基本"}
+
+data: {"type":"reasoning","delta":"没问题。"}
+
+data: {"type":"reasoning","delta":"字数"}
+
+data: {"type":"reasoning","delta":"估计"}
+
+data: {"type":"reasoning","delta":"220"}
+
+data: {"type":"reasoning","delta":"0左右"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n再读"}
+
+data: {"type":"reasoning","delta":"一遍确保"}
+
+data: {"type":"reasoning","delta":"流畅和"}
+
+data: {"type":"reasoning","delta":"节奏"}
+
+data: {"type":"reasoning","delta":"。\n\n（"}
+
+data: {"type":"reasoning","delta":"自我"}
+
+data: {"type":"reasoning","delta":"修正）"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"\n- 「"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"儿」"}
+
+data: {"type":"reasoning","delta":"的误解"}
+
+data: {"type":"reasoning","delta":"：伍卿"}
+
+data: {"type":"reasoning","delta":"以为在"}
+
+data: {"type":"reasoning","delta":"骂他。我"}
+
+data: {"type":"reasoning","delta":"写"}
+
+data: {"type":"reasoning","delta":"了他"}
+
+data: {"type":"reasoning","delta":"左右"}
+
+data: {"type":"reasoning","delta":"看，小声"}
+
+data: {"type":"reasoning","delta":"嘀咕认"}
+
+data: {"type":"reasoning","delta":"错人"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"可以"}
+
+data: {"type":"reasoning","delta":"更明确"}
+
+data: {"type":"reasoning","delta":"一点他"}
+
+data: {"type":"reasoning","delta":"以为「"}
+
+data: {"type":"reasoning","delta":"卿」是骂"}
+
+data: {"type":"reasoning","delta":"人的"}
+
+data: {"type":"reasoning","delta":"话。比如"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"联想到"}
+
+data: {"type":"reasoning","delta":"「卿卿"}
+
+data: {"type":"reasoning","delta":"我"}
+
+data: {"type":"reasoning","delta":"我」不像"}
+
+data: {"type":"reasoning","delta":"好"}
+
+data: {"type":"reasoning","delta":"话？"}
+
+data: {"type":"reasoning","delta":"不"}
+
+data: {"type":"reasoning","delta":"，现代"}
+
+data: {"type":"reasoning","delta":"人知道"}
+
+data: {"type":"reasoning","delta":"卿"}
+
+data: {"type":"reasoning","delta":"是爱"}
+
+data: {"type":"reasoning","delta":"称，"}
+
+data: {"type":"reasoning","delta":"但伍"}
+
+data: {"type":"reasoning","delta":"卿是二十"}
+
+data: {"type":"reasoning","delta":"多"}
+
+data: {"type":"reasoning","delta":"岁的现代"}
+
+data: {"type":"reasoning","delta":"灵魂，应该"}
+
+data: {"type":"reasoning","delta":"知道「卿」"}
+
+data: {"type":"reasoning","delta":"是古代"}
+
+data: {"type":"reasoning","delta":"爱称。可他"}
+
+data: {"type":"reasoning","delta":"以为"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"骂他，需要一个"}
+
+data: {"type":"reasoning","delta":"理由："}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"以为叫"}
+
+data: {"type":"reasoning","delta":"的是"}
+
+data: {"type":"reasoning","delta":"「亲"}
+
+data: {"type":"reasoning","delta":"儿"}
+
+data: {"type":"reasoning","delta":"」"}
+
+data: {"type":"reasoning","delta":"？或者他"}
+
+data: {"type":"reasoning","delta":"以为"}
+
+data: {"type":"reasoning","delta":"对方"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"叫"}
+
+data: {"type":"reasoning","delta":"「青"}
+
+data: {"type":"reasoning","delta":"儿」「"}
+
+data: {"type":"reasoning","delta":"清"}
+
+data: {"type":"reasoning","delta":"儿」是"}
+
+data: {"type":"ping"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"青"}
+
+data: {"type":"reasoning","delta":"头"}
+
+data: {"type":"reasoning","delta":"？或者"}
+
+data: {"type":"reasoning","delta":"他单纯"}
+
+data: {"type":"reasoning","delta":"觉得这种"}
+
+data: {"type":"reasoning","delta":"称呼"}
+
+data: {"type":"reasoning","delta":"不可能"}
+
+data: {"type":"reasoning","delta":"用"}
+
+data: {"type":"reasoning","delta":"在他"}
+
+data: {"type":"reasoning","delta":"身上，所以"}
+
+data: {"type":"reasoning","delta":"觉得"}
+
+data: {"type":"reasoning","delta":"是"}
+
+data: {"type":"reasoning","delta":"讽刺"}
+
+data: {"type":"reasoning","delta":"？"}
+
+data: {"type":"reasoning","delta":"\n  可以"}
+
+data: {"type":"reasoning","delta":"这样"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"他听到"}
+
+data: {"type":"reasoning","delta":"「卿儿"}
+
+data: {"type":"reasoning","delta":"」，第一"}
+
+data: {"type":"reasoning","delta":"反应是这"}
+
+data: {"type":"reasoning","delta":"人在叫"}
+
+data: {"type":"reasoning","delta":"「亲"}
+
+data: {"type":"reasoning","delta":"儿」或者"}
+
+data: {"type":"reasoning","delta":"什么"}
+
+data: {"type":"reasoning","delta":"，"}
+
+data: {"type":"reasoning","delta":"但"}
+
+data: {"type":"reasoning","delta":"看"}
+
+data: {"type":"reasoning","delta":"四周"}
+
+data: {"type":"reasoning","delta":"没人。"}
+
+data: {"type":"reasoning","delta":"第二"}
+
+data: {"type":"reasoning","delta":"反应是"}
+
+data: {"type":"reasoning","delta":"——"}
+
+data: {"type":"reasoning","delta":"这"}
+
+data: {"type":"reasoning","delta":"词"}
+
+data: {"type":"reasoning","delta":"太"}
+
+data: {"type":"reasoning","delta":"腻"}
+
+data: {"type":"reasoning","delta":"了，像"}
+
+data: {"type":"reasoning","delta":"电视剧"}
+
+data: {"type":"reasoning","delta":"里骂"}
+
+data: {"type":"reasoning","delta":"人「"}
+
+data: {"type":"reasoning","delta":"小"}
+
+data: {"type":"reasoning","delta":"浪"}
+
+data: {"type":"reasoning","delta":"蹄子"}
+
+data: {"type":"reasoning","delta":"」那种"}
+
+data: {"type":"reasoning","delta":"反话"}
+
+data: {"type":"reasoning","delta":"？不太"}
+
+data: {"type":"reasoning","delta":"对。\n  "}
+
+data: {"type":"reasoning","delta":"其实「"}
+
+data: {"type":"reasoning","delta":"以为"}
+
+data: {"type":"reasoning","delta":"在"}
+
+data: {"type":"reasoning","delta":"骂他」可以是"}
+
+data: {"type":"reasoning","delta":"：他以为自己"}
+
+data: {"type":"reasoning","delta":"听错了，或者"}
+
+data: {"type":"reasoning","delta":"以为"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"卿」是「"}
+
+data: {"type":"reasoning","delta":"穷"}
+
+data: {"type":"reasoning","delta":"」的谐音"}
+
+data: {"type":"reasoning","delta":"？或者"}
+
+data: {"type":"reasoning","delta":"他"}
+
+data: {"type":"reasoning","delta":"联想到"}
+
+data: {"type":"reasoning","delta":"「卿」本"}
+
+data: {"type":"reasoning","delta":"义"}
+
+data: {"type":"reasoning","delta":"是「"}
+
+data: {"type":"reasoning","delta":"爱吃"}
+
+data: {"type":"reasoning","delta":"爱"}
+
+data: {"type":"reasoning","delta":"喝"}
+
+data: {"type":"reasoning","delta":"的人」？不"}
+
+data: {"type":"reasoning","delta":"，太"}
+
+data: {"type":"reasoning","delta":"生"}
+
+data: {"type":"reasoning","delta":"僻。\n  更好的"}
+
+data: {"type":"reasoning","delta":"处理：他根本"}
+
+data: {"type":"reasoning","delta":"不知道对方"}
+
+data: {"type":"reasoning","delta":"在叫他"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"他以为「卿"}
+
+data: {"type":"reasoning","delta":"儿」是某种"}
+
+data: {"type":"reasoning","delta":"方言"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"人的话"}
+
+data: {"type":"reasoning","delta":"，就像"}
+
+data: {"type":"reasoning","delta":"他们"}
+
+data: {"type":"reasoning","delta":"村"}
+
+data: {"type":"reasoning","delta":"骂「憨"}
+
+data: {"type":"reasoning","delta":"娃"}
+
+data: {"type":"reasoning","delta":"」「傻"}
+
+data: {"type":"reasoning","delta":"蛋」。"}
+
+data: {"type":"reasoning","delta":"或者"}
+
+data: {"type":"reasoning","delta":"他以为对方"}
+
+data: {"type":"reasoning","delta":"在叫"}
+
+data: {"type":"reasoning","delta":"另"}
+
+data: {"type":"reasoning","delta":"一个人，而"}
+
+data: {"type":"reasoning","delta":"这个人"}
+
+data: {"type":"reasoning","delta":"可能"}
+
+data: {"type":"reasoning","delta":"也叫"}
+
+data: {"type":"reasoning","delta":"「卿」。"}
+
+data: {"type":"reasoning","delta":"\n  我"}
+
+data: {"type":"reasoning","delta":"写："}
+
+data: {"type":"reasoning","delta":"他以为「卿"}
+
+data: {"type":"reasoning","delta":"儿"}
+
+data: {"type":"reasoning","delta":"」是那种"}
+
+data: {"type":"reasoning","delta":"拐"}
+
+data: {"type":"reasoning","delta":"着弯"}
+
+data: {"type":"reasoning","delta":"的损"}
+
+data: {"type":"reasoning","delta":"人话"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"这"}
+
+data: {"type":"reasoning","delta":"够了"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"reasoning","delta":"现代人确实"}
+
+data: {"type":"reasoning","delta":"会觉得"}
+
+data: {"type":"reasoning","delta":"大"}
+
+data: {"type":"reasoning","delta":"庭"}
+
+data: {"type":"reasoning","delta":"广众"}
+
+data: {"type":"reasoning","delta":"喊「"}
+
+data: {"type":"reasoning","delta":"卿儿」很奇怪"}
+
+data: {"type":"reasoning","delta":"，如果"}
+
+data: {"type":"reasoning","delta":"自"}
+
+data: {"type":"reasoning","delta":"嘲"}
+
+data: {"type":"reasoning","delta":"自己"}
+
+data: {"type":"reasoning","delta":"身份低"}
+
+data: {"type":"reasoning","delta":"，会觉得"}
+
+data: {"type":"reasoning","delta":"是在"}
+
+data: {"type":"reasoning","delta":"讽刺。"}
+
+data: {"type":"reasoning","delta":"\n  或者："}
+
+data: {"type":"reasoning","delta":"他脑子里"}
+
+data: {"type":"reasoning","delta":"闪过「"}
+
+data: {"type":"reasoning","delta":"卿本"}
+
+data: {"type":"reasoning","delta":"佳人"}
+
+data: {"type":"reasoning","delta":"，奈何"}
+
+data: {"type":"reasoning","delta":"做贼"}
+
+data: {"type":"reasoning","delta":"」——"}
+
+data: {"type":"reasoning","delta":"前半"}
+
+data: {"type":"reasoning","delta":"句是夸"}
+
+data: {"type":"reasoning","delta":"，后半"}
+
+data: {"type":"reasoning","delta":"句是骂，"}
+
+data: {"type":"reasoning","delta":"他自动"}
+
+data: {"type":"reasoning","delta":"补"}
+
+data: {"type":"reasoning","delta":"全为"}
+
+data: {"type":"reasoning","delta":"骂。哈哈"}
+
+data: {"type":"reasoning","delta":"，这个"}
+
+data: {"type":"reasoning","delta":"内心"}
+
+data: {"type":"reasoning","delta":"吐槽可以。"}
+
+data: {"type":"reasoning","delta":"但可能"}
+
+data: {"type":"reasoning","delta":"太文"}
+
+data: {"type":"reasoning","delta":"气"}
+
+data: {"type":"reasoning","delta":"。\n  简单"}
+
+data: {"type":"reasoning","delta":"点"}
+
+data: {"type":"reasoning","delta":"：他以为在"}
+
+data: {"type":"reasoning","delta":"叫"}
+
+data: {"type":"reasoning","delta":"「青"}
+
+data: {"type":"reasoning","delta":"儿」，"}
+
+data: {"type":"reasoning","delta":"骂"}
+
+data: {"type":"reasoning","delta":"他青"}
+
+data: {"type":"reasoning","delta":"头"}
+
+data: {"type":"reasoning","delta":"楞"}
+
+data: {"type":"reasoning","delta":"脑。可以"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n-"}
+
+data: {"type":"reasoning","delta":" 「"}
+
+data: {"type":"reasoning","delta":"CPU"}
+
+data: {"type":"reasoning","delta":"都快"}
+
+data: {"type":"reasoning","delta":"烧了」出现了"}
+
+data: {"type":"reasoning","delta":"，符合现代"}
+
+data: {"type":"reasoning","delta":"词汇。\n-"}
+
+data: {"type":"reasoning","delta":" 「社死感"}
+
+data: {"type":"reasoning","delta":"拉满」出现了"}
+
+data: {"type":"reasoning","delta":"。\n"}
+
+data: {"type":"reasoning","delta":"\n检查"}
+
+data: {"type":"reasoning","delta":"一下"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"不得"}
+
+data: {"type":"reasoning","delta":"替"}
+
+data: {"type":"reasoning","delta":"主角"}
+
+data: {"type":"reasoning","delta":"做决定。结尾"}
+
+data: {"type":"reasoning","delta":"我说"}
+
+data: {"type":"reasoning","delta":"「他"}
+
+data: {"type":"reasoning","delta":"站在"}
+
+data: {"type":"reasoning","delta":"雨"}
+
+data: {"type":"reasoning","delta":"里……」"}
+
+data: {"type":"reasoning","delta":"然后"}
+
+data: {"type":"reasoning","delta":"牛"}
+
+data: {"type":"reasoning","delta":"推他，"}
+
+data: {"type":"reasoning","delta":"凌玥让他"}
+
+data: {"type":"reasoning","delta":"选。我没有"}
+
+data: {"type":"reasoning","delta":"替他决定。好"}
+
+data: {"type":"reasoning","delta":"。\n\n最后"}
+
+data: {"type":"reasoning","delta":"一段"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"\n凌"}
+
+data: {"type":"reasoning","delta":"玥伸出手"}
+
+data: {"type":"reasoning","delta":"。\n「卿"}
+
+data: {"type":"reasoning","delta":"儿，」"}
+
+data: {"type":"reasoning","delta":"她说，「"}
+
+data: {"type":"reasoning","delta":"选一个。」\n选"}
+
+data: {"type":"reasoning","delta":"什么？"}
+
+data: {"type":"reasoning","delta":"\n..."}
+
+data: {"type":"reasoning","delta":"\n这"}
+
+data: {"type":"reasoning","delta":"留"}
+
+data: {"type":"reasoning","delta":"白"}
+
+data: {"type":"reasoning","delta":"很好。\n\n但"}
+
+data: {"type":"reasoning","delta":"「"}
+
+data: {"type":"reasoning","delta":"选一个"}
+
+data: {"type":"reasoning","delta":"」可能"}
+
+data: {"type":"reasoning","delta":"有点"}
+
+data: {"type":"reasoning","delta":"模糊。是"}
+
+data: {"type":"reasoning","delta":"选择"}
+
+data: {"type":"reasoning","delta":"「跟她"}
+
+data: {"type":"reasoning","delta":"走」还是「"}
+
+data: {"type":"reasoning","delta":"留下」？或者是"}
+
+data: {"type":"reasoning","delta":"选择「承认"}
+
+data: {"type":"reasoning","delta":"过去」还是「"}
+
+data: {"type":"reasoning","delta":"留在"}
+
+data: {"type":"reasoning","delta":"安全"}
+
+data: {"type":"reasoning","delta":"区」？结合"}
+
+data: {"type":"reasoning","delta":"上下文，应该是"}
+
+data: {"type":"reasoning","delta":"选择是否"}
+
+data: {"type":"reasoning","delta":"接受提"}
+
+data: {"type":"reasoning","delta":"亲/是否"}
+
+data: {"type":"reasoning","delta":"跟她"}
+
+data: {"type":"reasoning","delta":"去"}
+
+data: {"type":"reasoning","delta":"面对过去"}
+
+data: {"type":"reasoning","delta":"。模糊"}
+
+data: {"type":"reasoning","delta":"一点"}
+
+data: {"type":"reasoning","delta":"也可以"}
+
+data: {"type":"reasoning","delta":"，因为"}
+
+data: {"type":"reasoning","delta":"玩家需要"}
+
+data: {"type":"reasoning","delta":"选择"}
+
+data: {"type":"reasoning","delta":"。\n\n确保"}
+
+data: {"type":"reasoning","delta":"没有「"}
+
+data: {"type":"reasoning","delta":"待续"}
+
+data: {"type":"reasoning","delta":"」。\n"}
+
+data: {"type":"reasoning","delta":"\n字数"}
+
+data: {"type":"reasoning","delta":"："}
+
+data: {"type":"reasoning","delta":"我再"}
+
+data: {"type":"reasoning","delta":"稍微"}
+
+data: {"type":"reasoning","delta":"扩充一点细节"}
+
+data: {"type":"reasoning","delta":"，确保够"}
+
+data: {"type":"reasoning","delta":"1600。"}
+
+data: {"type":"reasoning","delta":"目前"}
+
+data: {"type":"reasoning","delta":"估计"}
+
+data: {"type":"reasoning","delta":"有"}
+
+data: {"type":"reasoning","delta":"220"}
+
+data: {"type":"reasoning","delta":"0+"}
+
+data: {"type":"reasoning","delta":"，够了"}
+
+data: {"type":"reasoning","delta":"。\n\n输出"}
+
+data: {"type":"reasoning","delta":"。"}
+
+data: {"type":"narrative","delta":"雨"}
+
+data: {"type":"narrative","delta":"是砸"}
+
+data: {"type":"narrative","delta":"下来的。\n\n不是"}
+
+data: {"type":"narrative","delta":"落，是"}
+
+data: {"type":"narrative","delta":"砸。伍"}
+
+data: {"type":"narrative","delta":"卿蹲"}
+
+data: {"type":"narrative","delta":"在东街"}
+
+data: {"type":"narrative","delta":"中心九十五"}
+
+data: {"type":"narrative","delta":"号对面的"}
+
+data: {"type":"narrative","delta":"墙根"}
+
+data: {"type":"narrative","delta":"底下，把"}
+
+data: {"type":"narrative","delta":"最后一麻"}
+
+data: {"type":"narrative","delta":"袋空"}
+
+data: {"type":"narrative","delta":"瓶罐"}
+
+data: {"type":"narrative","delta":"往牛"}
+
+data: {"type":"narrative","delta":"车边拢"}
+
+data: {"type":"narrative","delta":"了拢"}
+
+data: {"type":"narrative","delta":"，抬头"}
+
+data: {"type":"narrative","delta":"看天"}
+
+data: {"type":"narrative","delta":"——"}
+
+data: {"type":"narrative","delta":"乌云压"}
+
+data: {"type":"narrative","delta":"得很"}
+
+data: {"type":"narrative","delta":"低，低"}
+
+data: {"type":"narrative","delta":"得"}
+
+data: {"type":"narrative","delta":"像是要"}
+
+data: {"type":"narrative","delta":"塌"}
+
+data: {"type":"narrative","delta":"在他"}
+
+data: {"type":"narrative","delta":"脑袋"}
+
+data: {"type":"narrative","delta":"上。\n\nA"}
+
+data: {"type":"narrative","delta":"市的夏天"}
+
+data: {"type":"narrative","delta":"就这样，说"}
+
+data: {"type":"narrative","delta":"翻脸就"}
+
+data: {"type":"narrative","delta":"翻脸。他"}
+
+data: {"type":"narrative","delta":"今天跑了三条"}
+
+data: {"type":"narrative","delta":"街，收了"}
+
+data: {"type":"narrative","delta":"四"}
+
+data: {"type":"narrative","delta":"麻袋，刚"}
+
+data: {"type":"narrative","delta":"在"}
+
+data: {"type":"narrative","delta":"收购"}
+
+data: {"type":"narrative","delta":"点"}
+
+data: {"type":"narrative","delta":"过了"}
+
+data: {"type":"narrative","delta":"秤，兜"}
+
+data: {"type":"narrative","delta":"里揣"}
+
+data: {"type":"narrative","delta":"着卖"}
+
+data: {"type":"narrative","delta":"破烂"}
+
+data: {"type":"narrative","delta":"挣"}
+
+data: {"type":"narrative","delta":"的"}
+
+data: {"type":"narrative","delta":"七十几块"}
+
+data: {"type":"narrative","delta":"，还没来得及"}
+
+data: {"type":"narrative","delta":"焐热"}
+
+data: {"type":"narrative","delta":"，豆"}
+
+data: {"type":"narrative","delta":"大的雨点"}
+
+data: {"type":"narrative","delta":"就砸在他"}
+
+data: {"type":"narrative","delta":"脸上，生"}
+
+data: {"type":"narrative","delta":"疼。\n\n「去"}
+
+data: {"type":"narrative","delta":"去去"}
+
+data: {"type":"narrative","delta":"！」杂"}
+
+data: {"type":"narrative","delta":"货铺的门"}
+
+data: {"type":"narrative","delta":"猛地被"}
+
+data: {"type":"narrative","delta":"推开，张"}
+
+data: {"type":"narrative","delta":"兰"}
+
+data: {"type":"narrative","delta":"挎着"}
+
+data: {"type":"narrative","delta":"个竹"}
+
+data: {"type":"narrative","delta":"篮站在"}
+
+data: {"type":"narrative","delta":"台阶上，眉头"}
+
+data: {"type":"narrative","delta":"拧成死"}
+
+data: {"type":"narrative","delta":"疙瘩"}
+
+data: {"type":"narrative","delta":"，「小"}
+
+data: {"type":"narrative","delta":"叫花"}
+
+data: {"type":"narrative","delta":"子，堵"}
+
+data: {"type":"narrative","delta":"我家门口干嘛"}
+
+data: {"type":"narrative","delta":"？湿"}
+
+data: {"type":"narrative","delta":"漉漉的"}
+
+data: {"type":"narrative","delta":"晦"}
+
+data: {"type":"narrative","delta":"气！」\n\n"}
+
+data: {"type":"narrative","delta":"伍卿张"}
+
+data: {"type":"narrative","delta":"了张嘴。\n\n…………"}
+
+data: {"type":"narrative","delta":"哦。\n\n"}
+
+data: {"type":"narrative","delta":"他确实挡"}
+
+data: {"type":"narrative","delta":"着人家门口"}
+
+data: {"type":"narrative","delta":"了。他撑着"}
+
+data: {"type":"narrative","delta":"地站起来"}
+
+data: {"type":"narrative","delta":"，左"}
+
+data: {"type":"narrative","delta":"腿脚"}
+
+data: {"type":"narrative","delta":"腕那儿"}
+
+data: {"type":"narrative","delta":"这几天一直"}
+
+data: {"type":"narrative","delta":"犯懒，站"}
+
+data: {"type":"narrative","delta":"猛了就像"}
+
+data: {"type":"narrative","delta":"有条筋"}
+
+data: {"type":"narrative","delta":"被谁"}
+
+data: {"type":"narrative","delta":"偷偷揪"}
+
+data: {"type":"narrative","delta":"了一下。他牵"}
+
+data: {"type":"narrative","delta":"起牛绳"}
+
+data: {"type":"narrative","delta":"，往边上"}
+
+data: {"type":"narrative","delta":"让。\n\n大"}
+
+data: {"type":"narrative","delta":"黑牛"}
+
+data: {"type":"narrative","delta":"不耐烦地打了个响"}
+
+data: {"type":"narrative","delta":"鼻。"}
+
+data: {"type":"narrative","delta":"它今天驮"}
+
+data: {"type":"narrative","delta":"了四麻"}
+
+data: {"type":"narrative","delta":"袋，累"}
+
+data: {"type":"narrative","delta":"得够"}
+
+data: {"type":"narrative","delta":"呛"}
+
+data: {"type":"narrative","delta":"，脾气烂"}
+
+data: {"type":"narrative","delta":"得很"}
+
+data: {"type":"narrative","delta":"，蹄"}
+
+data: {"type":"narrative","delta":"子刨"}
+
+data: {"type":"narrative","delta":"着水洼"}
+
+data: {"type":"narrative","delta":"，泥"}
+
+data: {"type":"narrative","delta":"水溅了"}
+
+data: {"type":"narrative","delta":"张兰一"}
+
+data: {"type":"narrative","delta":"裤脚"}
+
+data: {"type":"narrative","delta":"。可"}
+
+data: {"type":"narrative","delta":"伍卿的手"}
+
+data: {"type":"narrative","delta":"刚搭"}
+
+data: {"type":"narrative","delta":"上它的脖子"}
+
+data: {"type":"narrative","delta":"，它"}
+
+data: {"type":"ping"}
+
+data: {"type":"narrative","delta":"就把大"}
+
+data: {"type":"narrative","delta":"脑袋低下来"}
+
+data: {"type":"narrative","delta":"，舌头舔"}
+
+data: {"type":"narrative","delta":"了舔"}
+
+data: {"type":"narrative","delta":"他湿透"}
+
+data: {"type":"narrative","delta":"的袖"}
+
+data: {"type":"narrative","delta":"口。\n\n"}
+
+data: {"type":"narrative","delta":"「啧"}
+
+data: {"type":"narrative","delta":"。」张"}
+
+data: {"type":"narrative","delta":"兰又"}
+
+data: {"type":"narrative","delta":"啐了一口，「"}
+
+data: {"type":"narrative","delta":"人晦"}
+
+data: {"type":"narrative","delta":"气，牛"}
+
+data: {"type":"narrative","delta":"也晦"}
+
+data: {"type":"narrative","delta":"气。赶紧"}
+
+data: {"type":"narrative","delta":"滚，别"}
+
+data: {"type":"narrative","delta":"耽误我做"}
+
+data: {"type":"narrative","delta":"生意！」\n\n"}
+
+data: {"type":"narrative","delta":"伍卿低着头"}
+
+data: {"type":"narrative","delta":"，牵着"}
+
+data: {"type":"narrative","delta":"牛往"}
+
+data: {"type":"narrative","delta":"街沿"}
+
+data: {"type":"narrative","delta":"挪。\n\n"}
+
+data: {"type":"narrative","delta":"然后他听见了"}
+
+data: {"type":"narrative","delta":"车声。\n\n不是"}
+
+data: {"type":"narrative","delta":"牛车，不是"}
+
+data: {"type":"narrative","delta":"三轮。是"}
+
+data: {"type":"narrative","delta":"那种碾过积水"}
+
+data: {"type":"narrative","delta":"都不怎么"}
+
+data: {"type":"narrative","delta":"溅水"}
+
+data: {"type":"narrative","delta":"花的、"}
+
+data: {"type":"narrative","delta":"沉得发"}
+
+data: {"type":"narrative","delta":"闷的动静"}
+
+data: {"type":"narrative","delta":"。一辆通"}
+
+data: {"type":"narrative","delta":"体漆黑的"}
+
+data: {"type":"narrative","delta":"商务车停在"}
+
+data: {"type":"narrative","delta":"雨里，车窗"}
+
+data: {"type":"narrative","delta":"玻璃一看"}
+
+data: {"type":"narrative","delta":"就不是"}
+
+data: {"type":"narrative","delta":"便宜货——"}
+
+data: {"type":"narrative","delta":"防弹"}
+
+data: {"type":"narrative","delta":"的。车门"}
+
+data: {"type":"narrative","delta":"打开，先"}
+
+data: {"type":"narrative","delta":"下来两个穿"}
+
+data: {"type":"narrative","delta":"黑西"}
+
+data: {"type":"narrative","delta":"装的女子，撑"}
+
+data: {"type":"narrative","delta":"开伞，退"}
+
+data: {"type":"narrative","delta":"到两侧。\n\n深"}
+
+data: {"type":"narrative","delta":"灰色"}
+
+data: {"type":"narrative","delta":"大衣"}
+
+data: {"type":"narrative","delta":"的女人"}
+
+data: {"type":"narrative","delta":"走进雨"}
+
+data: {"type":"narrative","delta":"里。\n\n她"}
+
+data: {"type":"narrative","delta":"没打伞"}
+
+data: {"type":"narrative","delta":"。步子"}
+
+data: {"type":"narrative","delta":"不快"}
+
+data: {"type":"narrative","delta":"，却"}
+
+data: {"type":"narrative","delta":"每一步都像踩"}
+
+data: {"type":"narrative","delta":"在什么"}
+
+data: {"type":"narrative","delta":"节点上。街上"}
+
+data: {"type":"narrative","delta":"本来就没几个"}
+
+data: {"type":"narrative","delta":"男人，这会儿"}
+
+data: {"type":"narrative","delta":"更是"}
+
+data: {"type":"narrative","delta":"静得只剩"}
+
+data: {"type":"narrative","delta":"雨声。"}
+
+data: {"type":"narrative","delta":"所有目光都黏"}
+
+data: {"type":"narrative","delta":"在她身上——"}
+
+data: {"type":"narrative","delta":"她太"}
+
+data: {"type":"narrative","delta":"打眼了"}
+
+data: {"type":"narrative","delta":"，像一"}
+
+data: {"type":"narrative","delta":"柄收在"}
+
+data: {"type":"narrative","delta":"鞘里的刀，"}
+
+data: {"type":"narrative","delta":"忽然出了"}
+
+data: {"type":"narrative","delta":"鞘。\n\n伍"}
+
+data: {"type":"narrative","delta":"卿牵"}
+
+data: {"type":"narrative","delta":"着他的牛，"}
+
+data: {"type":"narrative","delta":"本来已经"}
+
+data: {"type":"narrative","delta":"准备绕"}
+
+data: {"type":"narrative","delta":"到巷"}
+
+data: {"type":"narrative","delta":"子里去"}
+
+data: {"type":"narrative","delta":"。\n\n他听见"}
+
+data: {"type":"narrative","delta":"她开口了"}
+
+data: {"type":"narrative","delta":"。\n\n声音不高"}
+
+data: {"type":"narrative","delta":"，却像"}
+
+data: {"type":"narrative","delta":"一根针穿过雨"}
+
+data: {"type":"narrative","delta":"幕，直"}
+
+data: {"type":"narrative","delta":"直扎"}
+
+data: {"type":"narrative","delta":"进他耳膜"}
+
+data: {"type":"narrative","delta":"。\n\n「卿"}
+
+data: {"type":"narrative","delta":"儿。」\n\n伍"}
+
+data: {"type":"narrative","delta":"卿一愣。\n\n"}
+
+data: {"type":"narrative","delta":"他左右看了看"}
+
+data: {"type":"narrative","delta":"。巷口没人"}
+
+data: {"type":"narrative","delta":"，墙"}
+
+data: {"type":"narrative","delta":"根底下没人"}
+
+data: {"type":"narrative","delta":"，只有张兰"}
+
+data: {"type":"narrative","delta":"挎着"}
+
+data: {"type":"narrative","delta":"篮子站在门口，"}
+
+data: {"type":"narrative","delta":"脸色发"}
+
+data: {"type":"narrative","delta":"白。\n\n……"}
+
+data: {"type":"narrative","delta":"卿？"}
+
+data: {"type":"narrative","delta":"什么卿"}
+
+data: {"type":"narrative","delta":"？\n\n是在"}
+
+data: {"type":"narrative","delta":"骂他？\n\n"}
+
+data: {"type":"narrative","delta":"伍"}
+
+data: {"type":"narrative","delta":"卿心里那"}
+
+data: {"type":"narrative","delta":"池弹"}
+
+data: {"type":"narrative","delta":"幕轰地"}
+
+data: {"type":"narrative","delta":"炸开。他"}
+
+data: {"type":"narrative","delta":"天天挨"}
+
+data: {"type":"narrative","delta":"骂，卖"}
+
+data: {"type":"narrative","delta":"破烂时"}
+
+data: {"type":"narrative","delta":"被摊主骂"}
+
+data: {"type":"narrative","delta":"「傻小子」，"}
+
+data: {"type":"narrative","delta":"被同行"}
+
+data: {"type":"narrative","delta":"骂「抢"}
+
+data: {"type":"narrative","delta":"生意」，被房东"}
+
+data: {"type":"narrative","delta":"骂「欠"}
+
+data: {"type":"narrative","delta":"租」。可"}
+
+data: {"type":"narrative","delta":"「卿儿」"}
+
+data: {"type":"narrative","delta":"这两个字……"}
+
+data: {"type":"narrative","delta":"他怎么听怎么"}
+
+data: {"type":"narrative","delta":"像那种"}
+
+data: {"type":"narrative","delta":"拐着弯"}
+
+data: {"type":"narrative","delta":"的损"}
+
+data: {"type":"narrative","delta":"人话。青"}
+
+data: {"type":"narrative","delta":"儿？亲"}
+
+data: {"type":"narrative","delta":"儿？还是"}
+
+data: {"type":"narrative","delta":"嫌他刚才"}
+
+data: {"type":"narrative","delta":"挡路"}
+
+data: {"type":"narrative","delta":"，骂他青"}
+
+data: {"type":"narrative","delta":"头"}
+
+data: {"type":"narrative","delta":"楞脑"}
+
+data: {"type":"narrative","delta":"？\n\n他小声嘀咕"}
+
+data: {"type":"narrative","delta":"：「……认"}
+
+data: {"type":"narrative","delta":"错人"}
+
+data: {"type":"narrative","delta":"了吧。」\n\n可"}
+
+data: {"type":"narrative","delta":"那女人已经"}
+
+data: {"type":"narrative","delta":"走到他面前了"}
+
+data: {"type":"narrative","delta":"。\n\n伞罩"}
+
+data: {"type":"narrative","delta":"下来，在他"}
+
+data: {"type":"narrative","delta":"头顶撑"}
+
+data: {"type":"narrative","delta":"开一小片没"}
+
+data: {"type":"narrative","delta":"雨的天空。伍"}
+
+data: {"type":"narrative","delta":"卿这才看清她的"}
+
+data: {"type":"narrative","delta":"脸。很"}
+
+data: {"type":"narrative","delta":"白，不是"}
+
+data: {"type":"narrative","delta":"养尊"}
+
+data: {"type":"narrative","delta":"处优"}
+
+data: {"type":"narrative","delta":"的那种白"}
+
+data: {"type":"narrative","delta":"，是那种"}
+
+data: {"type":"narrative","delta":"常年不见笑"}
+
+data: {"type":"narrative","delta":"色的冷白"}
+
+data: {"type":"narrative","delta":"。眉眼深"}
+
+data: {"type":"narrative","delta":"，鼻梁"}
+
+data: {"type":"narrative","delta":"高，看"}
+
+data: {"type":"narrative","delta":"人的时候像"}
+
+data: {"type":"narrative","delta":"在掂"}
+
+data: {"type":"narrative","delta":"量一件"}
+
+data: {"type":"narrative","delta":"东西的斤两"}
+
+data: {"type":"narrative","delta":"。\n\n可她的眼眶"}
+
+data: {"type":"narrative","delta":"——\n\n红了。\n\n不是"}
+
+data: {"type":"narrative","delta":"要哭。"}
+
+data: {"type":"narrative","delta":"就是眼眶边缘"}
+
+data: {"type":"narrative","delta":"泛着一"}
+
+data: {"type":"narrative","delta":"层极"}
+
+data: {"type":"narrative","delta":"淡的红"}
+
+data: {"type":"narrative","delta":"，像被"}
+
+data: {"type":"narrative","delta":"雨淋的，"}
+
+data: {"type":"narrative","delta":"又不像。\n\n"}
+
+data: {"type":"narrative","delta":"伍卿往后"}
+
+data: {"type":"narrative","delta":"缩了"}
+
+data: {"type":"narrative","delta":"缩。左"}
+
+data: {"type":"narrative","delta":"腿脚"}
+
+data: {"type":"narrative","delta":"腕突然一抽"}
+
+data: {"type":"narrative","delta":"，他差点"}
+
+data: {"type":"narrative","delta":"跪在水"}
+
+data: {"type":"narrative","delta":"洼里。\n\n"}
+
+data: {"type":"narrative","delta":"「当"}
+
+data: {"type":"narrative","delta":"心。」她"}
+
+data: {"type":"narrative","delta":"伸手，扶"}
+
+data: {"type":"narrative","delta":"住了他的"}
+
+data: {"type":"narrative","delta":"胳膊。\n\n隔"}
+
+data: {"type":"narrative","delta":"着一层"}
+
+data: {"type":"narrative","delta":"湿透的粗"}
+
+data: {"type":"narrative","delta":"布衣衫"}
+
+data: {"type":"narrative","delta":"，她的手"}
+
+data: {"type":"narrative","delta":"很烫。伍"}
+
+data: {"type":"narrative","delta":"卿浑身一"}
+
+data: {"type":"narrative","delta":"僵，像被"}
+
+data: {"type":"narrative","delta":"火钳碰"}
+
+data: {"type":"narrative","delta":"了似的"}
+
+data: {"type":"narrative","delta":"弹开"}
+
+data: {"type":"narrative","delta":"半步。怀"}
+
+data: {"type":"narrative","delta":"里的玉佩隔着"}
+
+data: {"type":"narrative","delta":"衣服贴"}
+
+data: {"type":"narrative","delta":"着他的胸口，莫名其妙"}
+
+data: {"type":"narrative","delta":"地烫了一下。"}
+
+data: {"type":"narrative","delta":"他疑心"}
+
+data: {"type":"narrative","delta":"是自己体温"}
+
+data: {"type":"narrative","delta":"太高，没"}
+
+data: {"type":"narrative","delta":"敢去摸"}
+
+data: {"type":"narrative","delta":"。\n\n「你……」"}
+
+data: {"type":"narrative","delta":"她盯着"}
+
+data: {"type":"narrative","delta":"他，声音低"}
+
+data: {"type":"narrative","delta":"了下去，「不"}
+
+data: {"type":"narrative","delta":"记得了"}
+
+data: {"type":"narrative","delta":"？」\n\n伍卿：「"}
+
+data: {"type":"narrative","delta":"…………啊"}
+
+data: {"type":"narrative","delta":"？」\n\n他该"}
+
+data: {"type":"narrative","delta":"记得什么？"}
+
+data: {"type":"narrative","delta":"他记得今天"}
+
+data: {"type":"narrative","delta":"卖了七"}
+
+data: {"type":"narrative","delta":"十几块，记得"}
+
+data: {"type":"narrative","delta":"奶奶还"}
+
+data: {"type":"narrative","delta":"等他回去"}
+
+data: {"type":"narrative","delta":"吃饭，记得"}
+
+data: {"type":"narrative","delta":"牛车该"}
+
+data: {"type":"narrative","delta":"上油了"}
+
+data: {"type":"narrative","delta":"。剩下的——"}
+
+data: {"type":"narrative","delta":"CPU都快烧"}
+
+data: {"type":"narrative","delta":"了，他真"}
+
+data: {"type":"narrative","delta":"不记得认识"}
+
+data: {"type":"narrative","delta":"这号"}
+
+data: {"type":"narrative","delta":"人物。\n\n凌"}
+
+data: {"type":"narrative","delta":"玥收回"}
+
+data: {"type":"narrative","delta":"手，"}
+
+data: {"type":"narrative","delta":"转身。\n\n她看向"}
+
+data: {"type":"narrative","delta":"那两个随"}
+
+data: {"type":"narrative","delta":"从，语气"}
+
+data: {"type":"narrative","delta":"平得没有"}
+
+data: {"type":"narrative","delta":"一丝波纹：「去买"}
+
+data: {"type":"narrative","delta":"。男装"}
+
+data: {"type":"narrative","delta":"，从头"}
+
+data: {"type":"narrative","delta":"到脚"}
+
+data: {"type":"narrative","delta":"。鞋码"}
+
+data: {"type":"narrative","delta":"问他自己"}
+
+data: {"type":"narrative","delta":"。」\n\n「是"}
+
+data: {"type":"narrative","delta":"。」\n\n「再去"}
+
+data: {"type":"narrative","delta":"最近的菜市"}
+
+data: {"type":"narrative","delta":"。肉，"}
+
+data: {"type":"narrative","delta":"菜，米"}
+
+data: {"type":"narrative","delta":"。要最好的"}
+
+data: {"type":"narrative","delta":"。」\n\n随"}
+
+data: {"type":"narrative","delta":"从"}
+
+data: {"type":"narrative","delta":"没动。其中一个"}
+
+data: {"type":"narrative","delta":"迟疑道"}
+
+data: {"type":"narrative","delta":"：「凌总"}
+
+data: {"type":"narrative","delta":"，这不合"}
+
+data: {"type":"narrative","delta":"规矩……」\n\n「"}
+
+data: {"type":"narrative","delta":"我让你"}
+
+data: {"type":"narrative","delta":"去。」凌玥"}
+
+data: {"type":"narrative","delta":"侧过脸"}
+
+data: {"type":"narrative","delta":"，「需要我"}
+
+data: {"type":"narrative","delta":"重复？」\n\n那"}
+
+data: {"type":"narrative","delta":"随从猛地"}
+
+data: {"type":"narrative","delta":"低头，快步"}
+
+data: {"type":"narrative","delta":"走进雨"}
+
+data: {"type":"narrative","delta":"里。\n\n张兰"}
+
+data: {"type":"narrative","delta":"在门口站着"}
+
+data: {"type":"narrative","delta":"，进"}
+
+data: {"type":"narrative","delta":"也不是，退"}
+
+data: {"type":"narrative","delta":"也不是，脸色"}
+
+data: {"type":"narrative","delta":"由白"}
+
+data: {"type":"narrative","delta":"转青。\n\n凌"}
+
+data: {"type":"narrative","delta":"玥这时"}
+
+data: {"type":"narrative","delta":"才瞥"}
+
+data: {"type":"narrative","delta":"向她。\n\n只"}
+
+data: {"type":"narrative","delta":"一眼。\n\n「你的"}
+
+data: {"type":"narrative","delta":"铺子，」"}
+
+data: {"type":"narrative","delta":"凌玥说"}
+
+data: {"type":"narrative","delta":"，「明天"}
+
+data: {"type":"narrative","delta":"开始，不用"}
+
+data: {"type":"narrative","delta":"开了。」\n\n张兰"}
+
+data: {"type":"narrative","delta":"腿一软，"}
+
+data: {"type":"narrative","delta":"差点跌坐在门槛"}
+
+data: {"type":"narrative","delta":"上。\n\n伍卿"}
+
+data: {"type":"narrative","delta":"在旁边听着，手心"}
+
+data: {"type":"narrative","delta":"开始冒汗。"}
+
+data: {"type":"narrative","delta":"他扯了"}
+
+data: {"type":"narrative","delta":"扯凌玥的"}
+
+data: {"type":"narrative","delta":"袖子——他没"}
+
+data: {"type":"narrative","delta":"意识到自己"}
+
+data: {"type":"narrative","delta":"胆子这么大，等他"}
+
+data: {"type":"narrative","delta":"反应过来时"}
+
+data: {"type":"narrative","delta":"，手指"}
+
+data: {"type":"narrative","delta":"已经扯上了"}
+
+data: {"type":"narrative","delta":"那"}
+
+data: {"type":"narrative","delta":"层湿"}
+
+data: {"type":"narrative","delta":"冷的"}
+
+data: {"type":"narrative","delta":"衣"}
+
+data: {"type":"narrative","delta":"料。\n\n「那个"}
+
+data: {"type":"narrative","delta":"……」他挤出"}
+
+data: {"type":"narrative","delta":"声音，「"}
+
+data: {"type":"narrative","delta":"不用这样"}
+
+data: {"type":"narrative","delta":"。我就是"}
+
+data: {"type":"narrative","delta":"个捡"}
+
+data: {"type":"narrative","delta":"破烂的。」\n\n凌"}
+
+data: {"type":"narrative","delta":"玥低头"}
+
+data: {"type":"narrative","delta":"看他扯"}
+
+data: {"type":"narrative","delta":"着自己的手"}
+
+data: {"type":"narrative","delta":"。\n\n然后"}
+
+data: {"type":"narrative","delta":"她做"}
+
+data: {"type":"narrative","delta":"了一件让"}
+
+data: {"type":"narrative","delta":"伍卿想"}
+
+data: {"type":"narrative","delta":"当场挖"}
+
+data: {"type":"narrative","delta":"个坑把自己"}
+
+data: {"type":"narrative","delta":"埋了"}
+
+data: {"type":"narrative","delta":"的事。\n\n她把"}
+
+data: {"type":"narrative","delta":"他的手，握"}
+
+data: {"type":"narrative","delta":"住了。\n\n不是"}
+
+data: {"type":"narrative","delta":"抓，是"}
+
+data: {"type":"narrative","delta":"包住。她的手"}
+
+data: {"type":"narrative","delta":"很大，指"}
+
+data: {"type":"narrative","delta":"节有力"}
+
+data: {"type":"narrative","delta":"，掌心烫"}
+
+data: {"type":"narrative","delta":"得吓人。"}
+
+data: {"type":"narrative","delta":"伍卿像"}
+
+data: {"type":"narrative","delta":"被雷劈了"}
+
+data: {"type":"narrative","delta":"，脑子里只剩"}
+
+data: {"type":"narrative","delta":"一个念头在"}
+
+data: {"type":"narrative","delta":"刷屏：社"}
+
+data: {"type":"narrative","delta":"死。社"}
+
+data: {"type":"narrative","delta":"死感"}
+
+data: {"type":"narrative","delta":"拉满。这条"}
+
+data: {"type":"narrative","delta":"街虽然"}
+
+data: {"type":"narrative","delta":"人不多，可"}
+
+data: {"type":"narrative","delta":"背后那些窗户"}
+
+data: {"type":"narrative","delta":"后面指"}
+
+data: {"type":"narrative","delta":"不定多少双"}
+
+data: {"type":"narrative","delta":"眼睛在看"}
+
+data: {"type":"narrative","delta":"。\n\n「你就是"}
+
+data: {"type":"narrative","delta":"。」凌"}
+
+data: {"type":"narrative","delta":"玥说，「跟我"}
+
+data: {"type":"narrative","delta":"有关。」\n\n…………"}
+
+data: {"type":"narrative","delta":"啊？\n\n"}
+
+data: {"type":"narrative","delta":"伍卿没"}
+
+data: {"type":"narrative","delta":"来得及问"}
+
+data: {"type":"narrative","delta":"「怎么有关"}
+
+data: {"type":"narrative","delta":"」，凌"}
+
+data: {"type":"narrative","delta":"玥已经放"}
+
+data: {"type":"narrative","delta":"开了他，对"}
+
+data: {"type":"narrative","delta":"另一个随从道"}
+
+data: {"type":"narrative","delta":"：「牛车，"}
+
+data: {"type":"narrative","delta":"牵走"}
+
+data: {"type":"narrative","delta":"。牛，"}
+
+data: {"type":"narrative","delta":"照顾好。」\n\n「我不"}
+
+data: {"type":"narrative","delta":"……」伍卿急了"}
+
+data: {"type":"narrative","delta":"，「牛"}
+
+data: {"type":"narrative","delta":"不给人"}
+
+data: {"type":"narrative","delta":"！」\n\n大黑牛"}
+
+data: {"type":"narrative","delta":"也像是听"}
+
+data: {"type":"narrative","delta":"懂了，前"}
+
+data: {"type":"narrative","delta":"蹄猛地"}
+
+data: {"type":"narrative","delta":"一蹬，水"}
+
+data: {"type":"narrative","delta":"花溅起半"}
+
+data: {"type":"narrative","delta":"尺高"}
+
+data: {"type":"narrative","delta":"，吓得"}
+
+data: {"type":"narrative","delta":"那随从连"}
+
+data: {"type":"narrative","delta":"退三步"}
+
+data: {"type":"narrative","delta":"。可"}
+
+data: {"type":"narrative","delta":"伍卿手"}
+
+data: {"type":"narrative","delta":"一按上"}
+
+data: {"type":"narrative","delta":"它的角，它"}
+
+data: {"type":"narrative","delta":"立刻就老实"}
+
+data: {"type":"narrative","delta":"了，还把"}
+
+data: {"type":"narrative","delta":"脑袋拱"}
+
+data: {"type":"narrative","delta":"进他"}
+
+data: {"type":"narrative","delta":"怀里，蹭"}
+
+data: {"type":"narrative","delta":"得他满"}
+
+data: {"type":"narrative","delta":"身雨水"}
+
+data: {"type":"narrative","delta":"混着牛"}
+
+data: {"type":"narrative","delta":"毛。\n\n凌"}
+
+data: {"type":"narrative","delta":"玥看着这一幕"}
+
+data: {"type":"narrative","delta":"，眼神"}
+
+data: {"type":"narrative","delta":"暗了暗"}
+
+data: {"type":"narrative","delta":"。\n\n「它"}
+
+data: {"type":"narrative","delta":"认你"}
+
+data: {"type":"narrative","delta":"。」她说。\n\n"}
+
+data: {"type":"narrative","delta":"「……它"}
+
+data: {"type":"narrative","delta":"当然认"}
+
+data: {"type":"narrative","delta":"我。」伍卿"}
+
+data: {"type":"narrative","delta":"小声逼逼"}
+
+data: {"type":"narrative","delta":"，「我养"}
+
+data: {"type":"ping"}
+
+data: {"type":"narrative","delta":"了它四年"}
+
+data: {"type":"narrative","delta":"。」\n\n雨越"}
+
+data: {"type":"narrative","delta":"下越大"}
+
+data: {"type":"narrative","delta":"。\n\n新衣服"}
+
+data: {"type":"narrative","delta":"买回来的时候"}
+
+data: {"type":"narrative","delta":"，伍卿觉得自己"}
+
+data: {"type":"narrative","delta":"像被套"}
+
+data: {"type":"narrative","delta":"进了一个"}
+
+data: {"type":"narrative","delta":"塑料袋。面料"}
+
+data: {"type":"narrative","delta":"太滑，太"}
+
+data: {"type":"narrative","delta":"挺括"}
+
+data: {"type":"narrative","delta":"，碰得皮肤"}
+
+data: {"type":"narrative","delta":"发痒。他"}
+
+data: {"type":"narrative","delta":"别扭地扯"}
+
+data: {"type":"narrative","delta":"着领"}
+
+data: {"type":"narrative","delta":"口，左脚"}
+
+data: {"type":"narrative","delta":"右脚"}
+
+data: {"type":"narrative","delta":"不自觉地并"}
+
+data: {"type":"narrative","delta":"了并"}
+
+data: {"type":"narrative","delta":"——虽然"}
+
+data: {"type":"narrative","delta":"是最"}
+
+data: {"type":"narrative","delta":"简单的"}
+
+data: {"type":"narrative","delta":"男装长"}
+
+data: {"type":"narrative","delta":"裤和上衣，"}
+
+data: {"type":"narrative","delta":"可这料"}
+
+data: {"type":"narrative","delta":"子他连"}
+
+data: {"type":"narrative","delta":"在电视"}
+
+data: {"type":"narrative","delta":"里都没"}
+
+data: {"type":"narrative","delta":"见过。\n\n凌"}
+
+data: {"type":"narrative","delta":"玥就站在"}
+
+data: {"type":"narrative","delta":"雨里看着他"}
+
+data: {"type":"narrative","delta":"换。\n\n不是"}
+
+data: {"type":"narrative","delta":"她逼他"}
+
+data: {"type":"narrative","delta":"当场换。是"}
+
+data: {"type":"narrative","delta":"随从买"}
+
+data: {"type":"narrative","delta":"回来，她在"}
+
+data: {"type":"narrative","delta":"旁边看着"}
+
+data: {"type":"narrative","delta":"，他总不能"}
+
+data: {"type":"narrative","delta":"穿着湿衣服"}
+
+data: {"type":"narrative","delta":"发霉。他"}
+
+data: {"type":"narrative","delta":"躲到牛车"}
+
+data: {"type":"narrative","delta":"后面换的"}
+
+data: {"type":"narrative","delta":"，探出头"}
+
+data: {"type":"narrative","delta":"时，凌"}
+
+data: {"type":"narrative","delta":"玥还站在原地"}
+
+data: {"type":"narrative","delta":"，背"}
+
+data: {"type":"narrative","delta":"对着他，"}
+
+data: {"type":"narrative","delta":"肩膀绷得很"}
+
+data: {"type":"narrative","delta":"直。\n\n「"}
+
+data: {"type":"narrative","delta":"上车。」她说"}
+
+data: {"type":"narrative","delta":"。\n\n「我"}
+
+data: {"type":"narrative","delta":"奶奶还在等我"}
+
+data: {"type":"narrative","delta":"。」\n\n「我知道"}
+
+data: {"type":"narrative","delta":"。」凌玥转过身"}
+
+data: {"type":"narrative","delta":"，「我"}
+
+data: {"type":"narrative","delta":"跟你回去。」\n\n伍"}
+
+data: {"type":"narrative","delta":"卿：「"}
+
+data: {"type":"narrative","delta":"…………」\n\n她知道"}
+
+data: {"type":"narrative","delta":"？她知道"}
+
+data: {"type":"narrative","delta":"我奶奶姓"}
+
+data: {"type":"narrative","delta":"黎？他知道"}
+
+data: {"type":"narrative","delta":"我家住哪个"}
+
+data: {"type":"narrative","delta":"疙瘩？他知道"}
+
+data: {"type":"narrative","delta":"我——\n\n"}
+
+data: {"type":"narrative","delta":"他不敢"}
+
+data: {"type":"narrative","delta":"想。\n\n商务"}
+
+data: {"type":"narrative","delta":"车太大"}
+
+data: {"type":"narrative","delta":"，进不了山"}
+
+data: {"type":"narrative","delta":"道。最后"}
+
+data: {"type":"narrative","delta":"是凌"}
+
+data: {"type":"narrative","delta":"玥上了一"}
+
+data: {"type":"narrative","delta":"辆小的"}
+
+data: {"type":"narrative","delta":"、底盘高的"}
+
+data: {"type":"narrative","delta":"车，跟着"}
+
+data: {"type":"narrative","delta":"他的牛"}
+
+data: {"type":"narrative","delta":"车后面走"}
+
+data: {"type":"narrative","delta":"。雨"}
+
+data: {"type":"narrative","delta":"刷器"}
+
+data: {"type":"narrative","delta":"疯狂地"}
+
+data: {"type":"narrative","delta":"摆动，车灯"}
+
+data: {"type":"narrative","delta":"在雨"}
+
+data: {"type":"narrative","delta":"幕里切开"}
+
+data: {"type":"narrative","delta":"两道昏"}
+
+data: {"type":"narrative","delta":"黄的光。\n\n伍"}
+
+data: {"type":"narrative","delta":"卿牵着"}
+
+data: {"type":"narrative","delta":"牛，走在"}
+
+data: {"type":"narrative","delta":"车灯前面"}
+
+data: {"type":"narrative","delta":"。\n\n他左"}
+
+data: {"type":"narrative","delta":"腿又开始痛"}
+
+data: {"type":"narrative","delta":"。走慢"}
+
+data: {"type":"narrative","delta":"看不出来，可"}
+
+data: {"type":"narrative","delta":"这会儿山道滑"}
+
+data: {"type":"narrative","delta":"，他"}
+
+data: {"type":"narrative","delta":"每一步都得踩"}
+
+data: {"type":"narrative","delta":"实，脚"}
+
+data: {"type":"narrative","delta":"腕就像"}
+
+data: {"type":"narrative","delta":"有根锈"}
+
+data: {"type":"narrative","delta":"钉子在里面"}
+
+data: {"type":"narrative","delta":"慢慢拧。他"}
+
+data: {"type":"narrative","delta":"咬着牙没"}
+
+data: {"type":"narrative","delta":"吭声，后背"}
+
+data: {"type":"narrative","delta":"却能感觉到车"}
+
+data: {"type":"narrative","delta":"子里那道"}
+
+data: {"type":"narrative","delta":"视线，沉"}
+
+data: {"type":"narrative","delta":"甸甸地压"}
+
+data: {"type":"narrative","delta":"在他肩"}
+
+data: {"type":"narrative","delta":"胛骨"}
+
+data: {"type":"narrative","delta":"上。\n\n玉佩又"}
+
+data: {"type":"narrative","delta":"烫了。\n\n这次"}
+
+data: {"type":"narrative","delta":"烫得他差点"}
+
+data: {"type":"narrative","delta":"叫出来"}
+
+data: {"type":"narrative","delta":"。他偷偷"}
+
+data: {"type":"narrative","delta":"低头，从"}
+
+data: {"type":"narrative","delta":"领口扯出"}
+
+data: {"type":"narrative","delta":"那根红绳"}
+
+data: {"type":"narrative","delta":"——玉佩乌"}
+
+data: {"type":"narrative","delta":"漆嘛"}
+
+data: {"type":"narrative","delta":"黑的，半点"}
+
+data: {"type":"narrative","delta":"绿光也没有"}
+
+data: {"type":"narrative","delta":"。\n\n……眼"}
+
+data: {"type":"narrative","delta":"花了。\n\n他"}
+
+data: {"type":"narrative","delta":"刚想把"}
+
+data: {"type":"narrative","delta":"玉佩塞回去"}
+
+data: {"type":"narrative","delta":"，前面"}
+
+data: {"type":"narrative","delta":"村口的茅"}
+
+data: {"type":"narrative","delta":"草屋子"}
+
+data: {"type":"narrative","delta":"露出了轮廓"}
+
+data: {"type":"narrative","delta":"。\n\n烟囱在"}
+
+data: {"type":"narrative","delta":"冒烟。\n\n黎"}
+
+data: {"type":"narrative","delta":"婆站在门口。\n\n"}
+
+data: {"type":"narrative","delta":"她穿那"}
+
+data: {"type":"narrative","delta":"身黑色"}
+
+data: {"type":"narrative","delta":"粗布衣"}
+
+data: {"type":"narrative","delta":"，头裹"}
+
+data: {"type":"narrative","delta":"灰巾"}
+
+data: {"type":"narrative","delta":"，手里攥着"}
+
+data: {"type":"narrative","delta":"个旱烟杆"}
+
+data: {"type":"narrative","delta":"。她没"}
+
+data: {"type":"narrative","delta":"看牛"}
+
+data: {"type":"narrative","delta":"车，没看"}
+
+data: {"type":"narrative","delta":"车灯，她"}
+
+data: {"type":"narrative","delta":"直直地盯着"}
+
+data: {"type":"narrative","delta":"从车上下"}
+
+data: {"type":"narrative","delta":"来的那个人"}
+
+data: {"type":"narrative","delta":"。\n\n凌玥站在"}
+
+data: {"type":"narrative","delta":"雨里，车门"}
+
+data: {"type":"narrative","delta":"都没让"}
+
+data: {"type":"narrative","delta":"随从关"}
+
+data: {"type":"narrative","delta":"。\n\n两个"}
+
+data: {"type":"narrative","delta":"女人隔"}
+
+data: {"type":"narrative","delta":"着一片雨幕"}
+
+data: {"type":"narrative","delta":"对视。\n\n黎婆"}
+
+data: {"type":"narrative","delta":"忽然把手"}
+
+data: {"type":"narrative","delta":"里的旱"}
+
+data: {"type":"narrative","delta":"烟杆往"}
+
+data: {"type":"narrative","delta":"地上一放"}
+
+data: {"type":"narrative","delta":"。\n\n砰——\n\n不"}
+
+data: {"type":"narrative","delta":"响。"}
+
+data: {"type":"narrative","delta":"是闷闷"}
+
+data: {"type":"narrative","delta":"的一声，砸"}
+
+data: {"type":"narrative","delta":"在泥水里"}
+
+data: {"type":"narrative","delta":"。\n\n「混"}
+
+data: {"type":"narrative","delta":"洞女"}
+
+data: {"type":"narrative","delta":"娃。」黎"}
+
+data: {"type":"narrative","delta":"婆开口了"}
+
+data: {"type":"narrative","delta":"，山里头"}
+
+data: {"type":"narrative","delta":"特有的尾"}
+
+data: {"type":"narrative","delta":"音，又"}
+
+data: {"type":"narrative","delta":"硬又冷"}
+
+data: {"type":"narrative","delta":"，「你还"}
+
+data: {"type":"narrative","delta":"敢来？」\n\n"}
+
+data: {"type":"narrative","delta":"凌玥的"}
+
+data: {"type":"narrative","delta":"背绷"}
+
+data: {"type":"narrative","delta":"直了。她"}
+
+data: {"type":"narrative","delta":"拱手，微"}
+
+data: {"type":"narrative","delta":"躬身——那是平"}
+
+data: {"type":"narrative","delta":"辈见"}
+
+data: {"type":"narrative","delta":"长辈的礼"}
+
+data: {"type":"narrative","delta":"。"}
+
+data: {"type":"narrative","delta":"可她做"}
+
+data: {"type":"narrative","delta":"出来，像"}
+
+data: {"type":"narrative","delta":"一柄刀忽然"}
+
+data: {"type":"narrative","delta":"入了鞘。\n\n「"}
+
+data: {"type":"narrative","delta":"婆婆。」凌"}
+
+data: {"type":"narrative","delta":"玥说，「我"}
+
+data: {"type":"narrative","delta":"接卿儿"}
+
+data: {"type":"narrative","delta":"回去。」\n\n「"}
+
+data: {"type":"narrative","delta":"放你娘的"}
+
+data: {"type":"narrative","delta":"屁。」黎婆"}
+
+data: {"type":"narrative","delta":"往前跨了一步"}
+
+data: {"type":"narrative","delta":"，旱烟杆"}
+
+data: {"type":"narrative","delta":"从泥里"}
+
+data: {"type":"narrative","delta":"捡起来，指"}
+
+data: {"type":"narrative","delta":"头点"}
+
+data: {"type":"narrative","delta":"着凌玥，「"}
+
+data: {"type":"narrative","delta":"七年前你"}
+
+data: {"type":"narrative","delta":"凌家怎么"}
+
+data: {"type":"narrative","delta":"答应我的"}
+
+data: {"type":"narrative","delta":"？啊？"}
+
+data: {"type":"narrative","delta":"把我娃"}
+
+data: {"type":"narrative","delta":"丢在十五"}
+
+data: {"type":"narrative","delta":"路，丢"}
+
+data: {"type":"narrative","delta":"在雨里，"}
+
+data: {"type":"narrative","delta":"你们凌家的"}
+
+data: {"type":"narrative","delta":"女娃都是"}
+
+data: {"type":"narrative","delta":"这么疼"}
+
+data: {"type":"narrative","delta":"人的？」\n\n伍"}
+
+data: {"type":"narrative","delta":"卿站在"}
+
+data: {"type":"narrative","delta":"旁边，牵"}
+
+data: {"type":"narrative","delta":"牛的手紧了"}
+
+data: {"type":"narrative","delta":"紧。\n\n七"}
+
+data: {"type":"narrative","delta":"年前。十五"}
+
+data: {"type":"narrative","delta":"路。\n\n他"}
+
+data: {"type":"narrative","delta":"脑子里「嗡"}
+
+data: {"type":"narrative","delta":"」的一声。"}
+
+data: {"type":"narrative","delta":"有些影子晃过去"}
+
+data: {"type":"narrative","delta":"，快得抓"}
+
+data: {"type":"narrative","delta":"不住。他只"}
+
+data: {"type":"narrative","delta":"记得自己十岁"}
+
+data: {"type":"narrative","delta":"那年发"}
+
+data: {"type":"narrative","delta":"过一场大"}
+
+data: {"type":"narrative","delta":"烧，烧"}
+
+data: {"type":"narrative","delta":"退了，以前"}
+
+data: {"type":"narrative","delta":"的事就"}
+
+data: {"type":"narrative","delta":"模糊了大"}
+
+data: {"type":"narrative","delta":"半。黎"}
+
+data: {"type":"narrative","delta":"婆从没细"}
+
+data: {"type":"narrative","delta":"说过，只"}
+
+data: {"type":"narrative","delta":"讲她是"}
+
+data: {"type":"narrative","delta":"「捡"}
+
+data: {"type":"narrative","delta":"」到"}
+
+data: {"type":"narrative","delta":"他的。\n\n凌玥"}
+
+data: {"type":"narrative","delta":"的声音低下去"}
+
+data: {"type":"narrative","delta":"：「是我"}
+
+data: {"type":"narrative","delta":"家对不起他"}
+
+data: {"type":"narrative","delta":"。」\n\n「知道"}
+
+data: {"type":"narrative","delta":"对不起就好。」黎"}
+
+data: {"type":"narrative","delta":"婆冷笑，「那就"}
+
+data: {"type":"narrative","delta":"滚。我这"}
+
+data: {"type":"narrative","delta":"庙小"}
+
+data: {"type":"narrative","delta":"，养不起"}
+
+data: {"type":"narrative","delta":"你这尊大"}
+
+data: {"type":"narrative","delta":"佛。卿"}
+
+data: {"type":"narrative","delta":"儿是我捡"}
+
+data: {"type":"narrative","delta":"回来的，他"}
+
+data: {"type":"narrative","delta":"姓伍，"}
+
+data: {"type":"narrative","delta":"不姓凌"}
+
+data: {"type":"narrative","delta":"。」\n\n「"}
+
+data: {"type":"narrative","delta":"婆婆，」"}
+
+data: {"type":"narrative","delta":"凌玥抬起"}
+
+data: {"type":"narrative","delta":"眼，那双"}
+
+data: {"type":"narrative","delta":"冷白的"}
+
+data: {"type":"narrative","delta":"眼睛里，那"}
+
+data: {"type":"narrative","delta":"层淡红"}
+
+data: {"type":"narrative","delta":"又泛"}
+
+data: {"type":"narrative","delta":"上来了"}
+
+data: {"type":"narrative","delta":"，「我不是"}
+
+data: {"type":"narrative","delta":"来抢"}
+
+data: {"type":"narrative","delta":"他的。」\n\n她"}
+
+data: {"type":"narrative","delta":"顿了顿。\n\n「我是"}
+
+data: {"type":"narrative","delta":"来提"}
+
+data: {"type":"narrative","delta":"亲的。」\n\n雨"}
+
+data: {"type":"narrative","delta":"声哗"}
+
+data: {"type":"narrative","delta":"啦啦地响"}
+
+data: {"type":"narrative","delta":"。\n\n伍卿牵"}
+
+data: {"type":"narrative","delta":"着他的牛"}
+
+data: {"type":"narrative","delta":"，站在"}
+
+data: {"type":"narrative","delta":"自己家破烂"}
+
+data: {"type":"narrative","delta":"的篱笆"}
+
+data: {"type":"narrative","delta":"门外，穿着那"}
+
+data: {"type":"narrative","delta":"身滑"}
+
+data: {"type":"narrative","delta":"得难受的新"}
+
+data: {"type":"narrative","delta":"衣服，兜"}
+
+data: {"type":"narrative","delta":"里还"}
+
+data: {"type":"narrative","delta":"揣着今天"}
+
+data: {"type":"narrative","delta":"卖破烂"}
+
+data: {"type":"narrative","delta":"挣的七十几"}
+
+data: {"type":"narrative","delta":"块。他听见"}
+
+data: {"type":"narrative","delta":"凌玥一字"}
+
+data: {"type":"narrative","delta":"一字地说"}
+
+data: {"type":"narrative","delta":"：\n\n「卿儿"}
+
+data: {"type":"narrative","delta":"就当姐姐"}
+
+data: {"type":"narrative","delta":"去提"}
+
+data: {"type":"narrative","delta":"亲不就好了"}
+
+data: {"type":"narrative","delta":"。」\n\n「名"}
+
+data: {"type":"narrative","delta":"分先"}
+
+data: {"type":"narrative","delta":"定下来。」\n\n「"}
+
+data: {"type":"narrative","delta":"其余的，慢慢"}
+
+data: {"type":"narrative","delta":"还。」\n\n黎"}
+
+data: {"type":"narrative","delta":"婆的旱"}
+
+data: {"type":"narrative","delta":"烟杆抬"}
+
+data: {"type":"narrative","delta":"了起来，指着"}
+
+data: {"type":"narrative","delta":"凌玥的鼻"}
+
+data: {"type":"narrative","delta":"尖，又慢慢"}
+
+data: {"type":"narrative","delta":"放下，往"}
+
+data: {"type":"narrative","delta":"地上重重"}
+
+data: {"type":"narrative","delta":"一磕"}
+
+data: {"type":"narrative","delta":"。\n\n「你凌"}
+
+data: {"type":"narrative","delta":"家欠的，"}
+
+data: {"type":"narrative","delta":"」黎婆说"}
+
+data: {"type":"narrative","delta":"，「拿什么"}
+
+data: {"type":"narrative","delta":"还？」\n\n凌"}
+
+data: {"type":"narrative","delta":"玥没答"}
+
+data: {"type":"narrative","delta":"。\n\n她转过头"}
+
+data: {"type":"narrative","delta":"，看向"}
+
+data: {"type":"narrative","delta":"伍卿。\n\n那一"}
+
+data: {"type":"narrative","delta":"瞬间，伍"}
+
+data: {"type":"narrative","delta":"卿在她"}
+
+data: {"type":"narrative","delta":"眼睛里看到"}
+
+data: {"type":"narrative","delta":"了一点别的东西——"}
+
+data: {"type":"narrative","delta":"不是雨，不是"}
+
+data: {"type":"narrative","delta":"冷，是一种"}
+
+data: {"type":"narrative","delta":"沉到底"}
+
+data: {"type":"narrative","delta":"的、近乎"}
+
+data: {"type":"narrative","delta":"孤注一"}
+
+data: {"type":"narrative","delta":"掷的东西。她"}
+
+data: {"type":"narrative","delta":"朝他走近一步，"}
+
+data: {"type":"narrative","delta":"声音压得"}
+
+data: {"type":"narrative","delta":"极低，只有"}
+
+data: {"type":"narrative","delta":"他能听见：\n\n"}
+
+data: {"type":"narrative","delta":"「你的腿"}
+
+data: {"type":"narrative","delta":"，是不是一到"}
+
+data: {"type":"narrative","delta":"下雨就"}
+
+data: {"type":"narrative","delta":"疼？」\n\n伍卿"}
+
+data: {"type":"narrative","delta":"浑身一僵。\n\n"}
+
+data: {"type":"narrative","delta":"她怎么知道？\n\n"}
+
+data: {"type":"narrative","delta":"他左腿脚"}
+
+data: {"type":"narrative","delta":"腕的旧伤"}
+
+data: {"type":"narrative","delta":"，连黎"}
+
+data: {"type":"narrative","delta":"婆都只"}
+
+data: {"type":"narrative","delta":"当他是小时候"}
+
+data: {"type":"narrative","delta":"摔的"}
+
+data: {"type":"narrative","delta":"。可"}
+
+data: {"type":"narrative","delta":"凌玥看着他"}
+
+data: {"type":"narrative","delta":"，那"}
+
+data: {"type":"narrative","delta":"目光像刀子，"}
+
+data: {"type":"narrative","delta":"精准地剖开了"}
+
+data: {"type":"narrative","delta":"他十七年"}
+
+data: {"type":"narrative","delta":"的人生，落在"}
+
+data: {"type":"narrative","delta":"那个他自己"}
+
+data: {"type":"narrative","delta":"都想不"}
+
+data: {"type":"narrative","delta":"起来的节点上。\n\n"}
+
+data: {"type":"narrative","delta":"「还有，」"}
+
+data: {"type":"narrative","delta":"凌玥的"}
+
+data: {"type":"narrative","delta":"视线移"}
+
+data: {"type":"narrative","delta":"向他怀里"}
+
+data: {"type":"narrative","delta":"——玉佩"}
+
+data: {"type":"narrative","delta":"的位置，「你贴身"}
+
+data: {"type":"narrative","delta":"戴的那"}
+
+data: {"type":"narrative","delta":"块玉……」\n\n"}
+
+data: {"type":"narrative","delta":"她没说完。\n\n"}
+
+data: {"type":"narrative","delta":"怀里的玉佩骤然"}
+
+data: {"type":"narrative","delta":"一烫"}
+
+data: {"type":"narrative","delta":"。\n\n伍"}
+
+data: {"type":"narrative","delta":"卿低头，眼睁睁"}
+
+data: {"type":"narrative","delta":"看着那枚乌"}
+
+data: {"type":"narrative","delta":"黑的玉佩，在他"}
+
+data: {"type":"narrative","delta":"湿透的衣衫"}
+
+data: {"type":"narrative","delta":"深处，透"}
+
+data: {"type":"narrative","delta":"出了一点极"}
+
+data: {"type":"narrative","delta":"幽、极"}
+
+data: {"type":"narrative","delta":"暗的绿"}
+
+data: {"type":"narrative","delta":"光。\n\n那"}
+
+data: {"type":"narrative","delta":"光芒很"}
+
+data: {"type":"narrative","delta":"弱，却清晰地"}
+
+data: {"type":"narrative","delta":"在他胸口投"}
+
+data: {"type":"narrative","delta":"下了一个字"}
+
+data: {"type":"ping"}
+
+data: {"type":"narrative","delta":"。\n\n——"}
+
+data: {"type":"narrative","delta":"凌。\n\n黎"}
+
+data: {"type":"narrative","delta":"婆的旱烟"}
+
+data: {"type":"narrative","delta":"杆掉在了"}
+
+data: {"type":"narrative","delta":"泥里。\n\n大"}
+
+data: {"type":"narrative","delta":"黑牛忽然"}
+
+data: {"type":"narrative","delta":"发出一声低"}
+
+data: {"type":"narrative","delta":"哞，巨大的"}
+
+data: {"type":"narrative","delta":"牛头抵"}
+
+data: {"type":"narrative","delta":"住伍卿的后"}
+
+data: {"type":"narrative","delta":"背，把他"}
+
+data: {"type":"narrative","delta":"往凌"}
+
+data: {"type":"narrative","delta":"玥的方向，轻轻"}
+
+data: {"type":"narrative","delta":"推了半步"}
+
+data: {"type":"narrative","delta":"。\n\n伍卿没"}
+
+data: {"type":"narrative","delta":"动。\n\n他"}
+
+data: {"type":"narrative","delta":"站在雨"}
+
+data: {"type":"narrative","delta":"里，站在"}
+
+data: {"type":"narrative","delta":"他的牛和他的"}
+
+data: {"type":"narrative","delta":"破烂中间"}
+
+data: {"type":"narrative","delta":"，站在他"}
+
+data: {"type":"narrative","delta":"好不容易攒下的"}
+
+data: {"type":"narrative","delta":"七十几块钱"}
+
+data: {"type":"narrative","delta":"和他完全想"}
+
+data: {"type":"narrative","delta":"不起来的过去"}
+
+data: {"type":"narrative","delta":"之间。\n\n凌"}
+
+data: {"type":"narrative","delta":"玥伸出手"}
+
+data: {"type":"narrative","delta":"。\n\n「卿"}
+
+data: {"type":"narrative","delta":"儿，」她说"}
+
+data: {"type":"narrative","delta":"，「选一个"}
+
+data: {"type":"narrative","delta":"。」\n\n选什么？\n\n"}
+
+data: {"type":"narrative","delta":"伍卿张"}
+
+data: {"type":"narrative","delta":"着嘴，雨"}
+
+data: {"type":"narrative","delta":"顺着他的下巴"}
+
+data: {"type":"narrative","delta":"滴进领"}
+
+data: {"type":"narrative","delta":"口。他看看"}
+
+data: {"type":"narrative","delta":"黎婆铁"}
+
+data: {"type":"narrative","delta":"青的脸，看看"}
+
+data: {"type":"narrative","delta":"凌玥悬"}
+
+data: {"type":"narrative","delta":"在半空的手，"}
+
+data: {"type":"narrative","delta":"看看那块还在"}
+
+data: {"type":"narrative","delta":"发光的玉佩。\n\n"}
+
+data: {"type":"narrative","delta":"他的腿很"}
+
+data: {"type":"narrative","delta":"痛。\n\n他的"}
+
+data: {"type":"narrative","delta":"脑子很乱。\n\n"}
+
+data: {"type":"narrative","delta":"他这辈子最大的"}
+
+data: {"type":"narrative","delta":"理想，就是牵着"}
+
+data: {"type":"narrative","delta":"牛车回"}
+
+data: {"type":"narrative","delta":"山里，一天"}
+
+data: {"type":"narrative","delta":"挣七十几"}
+
+data: {"type":"narrative","delta":"块，吃饱"}
+
+data: {"type":"narrative","delta":"，睡"}
+
+data: {"type":"narrative","delta":"暖，别"}
+
+data: {"type":"narrative","delta":"惹事。\n\n可现在"}
+
+data: {"type":"narrative","delta":"——\n\n牛又"}
+
+data: {"type":"narrative","delta":"抵了他"}
+
+data: {"type":"narrative","delta":"一下。\n\n大"}
+
+data: {"type":"narrative","delta":"黑牛温"}
+
+data: {"type":"narrative","delta":"顺的眼睛"}
+
+data: {"type":"narrative","delta":"在雨"}
+
+data: {"type":"narrative","delta":"里望着他，"}
+
+data: {"type":"narrative","delta":"舌头伸出来，"}
+
+data: {"type":"narrative","delta":"舔了舔他"}
+
+data: {"type":"narrative","delta":"冰凉的手腕。\n\n"}
+
+data: {"type":"narrative","delta":"就像它过去"}
+
+data: {"type":"narrative","delta":"四年里的每一天"}
+
+data: {"type":"narrative","delta":"一样。\n\n仿佛"}
+
+data: {"type":"narrative","delta":"在说"}
+
+data: {"type":"narrative","delta":"：跟我"}
+
+data: {"type":"narrative","delta":"走，或者，"}
+
+data: {"type":"narrative","delta":"带它走"}
+
+data: {"type":"narrative","delta":"。\n\n随便哪一个"}
+
+data: {"type":"narrative","delta":"。\n\n只要你"}
+
+data: {"type":"narrative","delta":"开口。"}
+
+data: {"type":"narrative_done","content":"雨是砸下来的。\n\n不是落，是砸。伍卿蹲在东街中心九十五号对面的墙根底下，把最后一麻袋空瓶罐往牛车边拢了拢，抬头看天——乌云压得很低，低得像是要塌在他脑袋上。\n\nA市的夏天就这样，说翻脸就翻脸。他今天跑了三条街，收了四麻袋，刚在收购点过了秤，兜里揣着卖破烂挣的七十几块，还没来得及焐热，豆大的雨点就砸在他脸上，生疼。\n\n「去去去！」杂货铺的门猛地被推开，张兰挎着个竹篮站在台阶上，眉头拧成死疙瘩，「小叫花子，堵我家门口干嘛？湿漉漉的晦气！」\n\n伍卿张了张嘴。\n\n…………哦。\n\n他确实挡着人家门口了。他撑着地站起来，左腿脚腕那儿这几天一直犯懒，站猛了就像有条筋被谁偷偷揪了一下。他牵起牛绳，往边上让。\n\n大黑牛不耐烦地打了个响鼻。它今天驮了四麻袋，累得够呛，脾气烂得很，蹄子刨着水洼，泥水溅了张兰一裤脚。可伍卿的手刚搭上它的脖子，它就把大脑袋低下来，舌头舔了舔他湿透的袖口。\n\n「啧。」张兰又啐了一口，「人晦气，牛也晦气。赶紧滚，别耽误我做生意！」\n\n伍卿低着头，牵着牛往街沿挪。\n\n然后他听见了车声。\n\n不是牛车，不是三轮。是那种碾过积水都不怎么溅水花的、沉得发闷的动静。一辆通体漆黑的商务车停在雨里，车窗玻璃一看就不是便宜货——防弹的。车门打开，先下来两个穿黑西装的女子，撑开伞，退到两侧。\n\n深灰色大衣的女人走进雨里。\n\n她没打伞。步子不快，却每一步都像踩在什么节点上。街上本来就没几个男人，这会儿更是静得只剩雨声。所有目光都黏在她身上——她太打眼了，像一柄收在鞘里的刀，忽然出了鞘。\n\n伍卿牵着他的牛，本来已经准备绕到巷子里去。\n\n他听见她开口了。\n\n声音不高，却像一根针穿过雨幕，直直扎进他耳膜。\n\n「卿儿。」\n\n伍卿一愣。\n\n他左右看了看。巷口没人，墙根底下没人，只有张兰挎着篮子站在门口，脸色发白。\n\n……卿？什么卿？\n\n是在骂他？\n\n伍卿心里那池弹幕轰地炸开。他天天挨骂，卖破烂时被摊主骂「傻小子」，被同行骂「抢生意」，被房东骂「欠租」。可「卿儿」这两个字……他怎么听怎么像那种拐着弯的损人话。青儿？亲儿？还是嫌他刚才挡路，骂他青头楞脑？\n\n他小声嘀咕：「……认错人了吧。」\n\n可那女人已经走到他面前了。\n\n伞罩下来，在他头顶撑开一小片没雨的天空。伍卿这才看清她的脸。很白，不是养尊处优的那种白，是那种常年不见笑色的冷白。眉眼深，鼻梁高，看人的时候像在掂量一件东西的斤两。\n\n可她的眼眶——\n\n红了。\n\n不是要哭。就是眼眶边缘泛着一层极淡的红，像被雨淋的，又不像。\n\n伍卿往后缩了缩。左腿脚腕突然一抽，他差点跪在水洼里。\n\n「当心。」她伸手，扶住了他的胳膊。\n\n隔着一层湿透的粗布衣衫，她的手很烫。伍卿浑身一僵，像被火钳碰了似的弹开半步。怀里的玉佩隔着衣服贴着他的胸口，莫名其妙地烫了一下。他疑心是自己体温太高，没敢去摸。\n\n「你……」她盯着他，声音低了下去，「不记得了？」\n\n伍卿：「…………啊？」\n\n他该记得什么？他记得今天卖了七十几块，记得奶奶还等他回去吃饭，记得牛车该上油了。剩下的——CPU都快烧了，他真不记得认识这号人物。\n\n凌玥收回手，转身。\n\n她看向那两个随从，语气平得没有一丝波纹：「去买。男装，从头到脚。鞋码问他自己。」\n\n「是。」\n\n「再去最近的菜市。肉，菜，米。要最好的。」\n\n随从没动。其中一个迟疑道：「凌总，这不合规矩……」\n\n「我让你去。」凌玥侧过脸，「需要我重复？」\n\n那随从猛地低头，快步走进雨里。\n\n张兰在门口站着，进也不是，退也不是，脸色由白转青。\n\n凌玥这时才瞥向她。\n\n只一眼。\n\n「你的铺子，」凌玥说，「明天开始，不用开了。」\n\n张兰腿一软，差点跌坐在门槛上。\n\n伍卿在旁边听着，手心开始冒汗。他扯了扯凌玥的袖子——他没意识到自己胆子这么大，等他反应过来时，手指已经扯上了那层湿冷的衣料。\n\n「那个……」他挤出声音，「不用这样。我就是个捡破烂的。」\n\n凌玥低头看他扯着自己的手。\n\n然后她做了一件让伍卿想当场挖个坑把自己埋了的事。\n\n她把他的手，握住了。\n\n不是抓，是包住。她的手很大，指节有力，掌心烫得吓人。伍卿像被雷劈了，脑子里只剩一个念头在刷屏：社死。社死感拉满。这条街虽然人不多，可背后那些窗户后面指不定多少双眼睛在看。\n\n「你就是。」凌玥说，「跟我有关。」\n\n…………啊？\n\n伍卿没来得及问「怎么有关」，凌玥已经放开了他，对另一个随从道：「牛车，牵走。牛，照顾好。」\n\n「我不……」伍卿急了，「牛不给人！」\n\n大黑牛也像是听懂了，前蹄猛地一蹬，水花溅起半尺高，吓得那随从连退三步。可伍卿手一按上它的角，它立刻就老实了，还把脑袋拱进他怀里，蹭得他满身雨水混着牛毛。\n\n凌玥看着这一幕，眼神暗了暗。\n\n「它认你。」她说。\n\n「……它当然认我。」伍卿小声逼逼，「我养了它四年。」\n\n雨越下越大。\n\n新衣服买回来的时候，伍卿觉得自己像被套进了一个塑料袋。面料太滑，太挺括，碰得皮肤发痒。他别扭地扯着领口，左脚右脚不自觉地并了并——虽然是最简单的男装长裤和上衣，可这料子他连在电视里都没见过。\n\n凌玥就站在雨里看着他换。\n\n不是她逼他当场换。是随从买回来，她在旁边看着，他总不能穿着湿衣服发霉。他躲到牛车后面换的，探出头时，凌玥还站在原地，背对着他，肩膀绷得很直。\n\n「上车。」她说。\n\n「我奶奶还在等我。」\n\n「我知道。」凌玥转过身，「我跟你回去。」\n\n伍卿：「…………」\n\n她知道？她知道我奶奶姓黎？他知道我家住哪个疙瘩？他知道我——\n\n他不敢想。\n\n商务车太大，进不了山道。最后是凌玥上了一辆小的、底盘高的车，跟着他的牛车后面走。雨刷器疯狂地摆动，车灯在雨幕里切开两道昏黄的光。\n\n伍卿牵着牛，走在车灯前面。\n\n他左腿又开始痛。走慢看不出来，可这会儿山道滑，他每一步都得踩实，脚腕就像有根锈钉子在里面慢慢拧。他咬着牙没吭声，后背却能感觉到车子里那道视线，沉甸甸地压在他肩胛骨上。\n\n玉佩又烫了。\n\n这次烫得他差点叫出来。他偷偷低头，从领口扯出那根红绳——玉佩乌漆嘛黑的，半点绿光也没有。\n\n……眼花了。\n\n他刚想把玉佩塞回去，前面村口的茅草屋子露出了轮廓。\n\n烟囱在冒烟。\n\n黎婆站在门口。\n\n她穿那身黑色粗布衣，头裹灰巾，手里攥着个旱烟杆。她没看牛车，没看车灯，她直直地盯着从车上下来的那个人。\n\n凌玥站在雨里，车门都没让随从关。\n\n两个女人隔着一片雨幕对视。\n\n黎婆忽然把手里的旱烟杆往地上一放。\n\n砰——\n\n不响。是闷闷的一声，砸在泥水里。\n\n「混洞女娃。」黎婆开口了，山里头特有的尾音，又硬又冷，「你还敢来？」\n\n凌玥的背绷直了。她拱手，微躬身——那是平辈见长辈的礼。可她做出来，像一柄刀忽然入了鞘。\n\n「婆婆。」凌玥说，「我接卿儿回去。」\n\n「放你娘的屁。」黎婆往前跨了一步，旱烟杆从泥里捡起来，指头点着凌玥，「七年前你凌家怎么答应我的？啊？把我娃丢在十五路，丢在雨里，你们凌家的女娃都是这么疼人的？」\n\n伍卿站在旁边，牵牛的手紧了紧。\n\n七年前。十五路。\n\n他脑子里「嗡」的一声。有些影子晃过去，快得抓不住。他只记得自己十岁那年发过一场大烧，烧退了，以前的事就模糊了大半。黎婆从没细说过，只讲她是「捡」到他的。\n\n凌玥的声音低下去：「是我家对不起他。」\n\n「知道对不起就好。」黎婆冷笑，「那就滚。我这庙小，养不起你这尊大佛。卿儿是我捡回来的，他姓伍，不姓凌。」\n\n「婆婆，」凌玥抬起眼，那双冷白的眼睛里，那层淡红又泛上来了，「我不是来抢他的。」\n\n她顿了顿。\n\n「我是来提亲的。」\n\n雨声哗啦啦地响。\n\n伍卿牵着他的牛，站在自己家破烂的篱笆门外，穿着那身滑得难受的新衣服，兜里还揣着今天卖破烂挣的七十几块。他听见凌玥一字一字地说：\n\n「卿儿就当姐姐去提亲不就好了。」\n\n「名分先定下来。」\n\n「其余的，慢慢还。」\n\n黎婆的旱烟杆抬了起来，指着凌玥的鼻尖，又慢慢放下，往地上重重一磕。\n\n「你凌家欠的，」黎婆说，「拿什么还？」\n\n凌玥没答。\n\n她转过头，看向伍卿。\n\n那一瞬间，伍卿在她眼睛里看到了一点别的东西——不是雨，不是冷，是一种沉到底的、近乎孤注一掷的东西。她朝他走近一步，声音压得极低，只有他能听见：\n\n「你的腿，是不是一到下雨就疼？」\n\n伍卿浑身一僵。\n\n她怎么知道？\n\n他左腿脚腕的旧伤，连黎婆都只当他是小时候摔的。可凌玥看着他，那目光像刀子，精准地剖开了他十七年的人生，落在那个他自己都想不起来的节点上。\n\n「还有，」凌玥的视线移向他怀里——玉佩的位置，「你贴身戴的那块玉……」\n\n她没说完。\n\n怀里的玉佩骤然一烫。\n\n伍卿低头，眼睁睁看着那枚乌黑的玉佩，在他湿透的衣衫深处，透出了一点极幽、极暗的绿光。\n\n那光芒很弱，却清晰地在他胸口投下了一个字。\n\n——凌。\n\n黎婆的旱烟杆掉在了泥里。\n\n大黑牛忽然发出一声低哞，巨大的牛头抵住伍卿的后背，把他往凌玥的方向，轻轻推了半步。\n\n伍卿没动。\n\n他站在雨里，站在他的牛和他的破烂中间，站在他好不容易攒下的七十几块钱和他完全想不起来的过去之间。\n\n凌玥伸出手。\n\n「卿儿，」她说，「选一个。」\n\n选什么？\n\n伍卿张着嘴，雨顺着他的下巴滴进领口。他看看黎婆铁青的脸，看看凌玥悬在半空的手，看看那块还在发光的玉佩。\n\n他的腿很痛。\n\n他的脑子很乱。\n\n他这辈子最大的理想，就是牵着牛车回山里，一天挣七十几块，吃饱，睡暖，别惹事。\n\n可现在——\n\n牛又抵了他一下。\n\n大黑牛温顺的眼睛在雨里望着他，舌头伸出来，舔了舔他冰凉的手腕。\n\n就像它过去四年里的每一天一样。\n\n仿佛在说：跟我走，或者，带它走。\n\n随便哪一个。\n\n只要你开口。","token_count":3976,"finish_reason":"stop","usage":{"prompt_tokens":2501,"completion_tokens":8598,"total_tokens":11099,"cached_tokens":0,"reasoning_tokens":0,"ttft_ms":3712,"duration_ms":167953,"output_chars":12377,"tps":52.3,"cache_rate":0}}
+
+data: {"type":"ping"}
+
+data: {"type":"ping"}
+
+data: {"type":"ping"}
+
+data: {"type":"ping"}
+
+data: {"type":"memory","stats":{"round_summary":"伍卿在东街收破烂遇暴雨，被杂货铺主张兰驱赶。凌家女凌玥乘黑色商务车而至，当街喊他「卿儿」，扶住他并命随从购置男装菜肉，又一句话令张兰关铺。她握住伍卿的手称「你就是。跟我有关。」强行随他回村。村口茅草屋前，黎婆持旱烟杆与凌玥对峙，揭露七年前凌家将十岁的伍卿丢在十五路雨中。凌玥拱手行礼，直言「我是来提亲的」「名分先定下来」。她又精准说出伍卿左腿下雨疼的秘密，并盯上他贴身佩戴的乌黑玉佩。伍卿胸前玉佩骤然发烫，透出幽暗绿光，在衣襟下投下一个「凌」字。黎婆旱烟杆坠地，大黑牛低哞着将伍卿往凌玥方向轻推。凌玥伸手，令他在雨中选择一个。","entities":8,"facts":11,"relations":3,"threads":3,"reflection":null,"compressed":{"created":[],"archived":0},"usage":{"prompt_tokens":3731,"completion_tokens":4354,"total_tokens":8085,"cached_tokens":0,"reasoning_tokens":0,"ttft_ms":0,"duration_ms":66491,"output_chars":7426,"tps":65.5,"cache_rate":0},"context_tokens":15366,"context_max":200000,"turn_count":1,"notes":0,"reflections":0,"compression":1,"tiers":[{"level":1,"count":1,"tokens":290,"last":{"turn_from":1,"turn_to":1,"tokens":290}},{"level":2,"count":0,"tokens":0,"last":null},{"level":3,"count":0,"tokens":0,"last":null},{"level":4,"count":0,"tokens":0,"last":null}]}}
+
+data: {"type":"state","state":{"time":"夏日·暴雨中","location":"村口茅草屋门外","weather":"夏日暴雨","tension":0.85,"characters":{"伍卿":{"mood":"混乱震惊","location":"家门外雨中","status":"身着凌玥赠新衣，左腿疼痛"},"凌玥":{"mood":"孤注一掷","location":"伍卿家门外雨中","status":"眼眶泛红"},"黎婆":{"mood":"愤怒震骇","location":"家门口","status":"旱烟杆坠地"}},"last_hook":"凌玥令伍卿在她与黎婆之间「选一个」，胸前玉佩透出「凌」字","inventory":["凌玥赠的新男装"],"quests":[{"goal":"弄清凌玥为何认识自己","progress":"她喊出小名「卿儿」并称「跟我有关」","status":"active"},{"goal":"应对凌玥的提亲","progress":"凌玥当黎婆面提出提亲，要求先定名分","status":"active"},{"goal":"查明七年前十五路旧事","progress":"黎婆揭露凌家曾将十岁的伍卿丢在十五路","status":"active"}]},"turn_no":1}
+
+data: {"type":"ping"}
+
+data: {"type":"ping"}
+
+data: {"type":"ping"}
+
+data: {"type":"ping"}
+
+data: {"type":"branches","branches":[{"id":"b1","title":"握住奶奶的手","description":"他打算绕开凌玥，走过去扶住黎婆颤抖的手臂，说他这辈子是黎婆捡回来的，只认这座茅草屋；赌上的是永远不知道七年前十五路发生了什么，以及独自面对凌家后续的怒火。","tone":"情感","tension_delta":0.2},{"id":"b2","title":"跟她定下名分","description":"他打算忽略黎婆的怒喝，握住凌玥悬在半空的手，点头让她把名分先定下来；赌上的是离开养他四年的奶奶和大黑牛，以及把身家性命押给一个刚相认的仇人之女。","tone":"激进","tension_delta":0.3},{"id":"b3","title":"提出要带奶奶","description":"他打算谁也不选，仰头问凌玥提亲能不能连奶奶一起接，或让他定下名分后仍回村照顾黎婆；赌上的是同时惹恼两个女人的耐心，暴露自己最贪心的软肋。","tone":"智取","tension_delta":0.1},{"id":"b4","title":"假装旧伤复发","description":"他打算顺势跌坐在泥里，捂着左腿喊疼，或是拉起大黑牛挡在身前，让这头不会说话的畜生替他做出选择；赌上的是两个女人看穿他的懦弱后，连现有的安稳都保不住。","tone":"诡道","tension_delta":-0.15}],"scene_summary":"暴雨中，凌玥以玉佩透字和七年前旧事逼伍卿在她与黎婆间选一个，牛在身后轻推，他腿痛记忆混乱。"}
+
+data: {"type":"done","turn_no":1,"usage":{"prompt_tokens":2501,"completion_tokens":8598,"total_tokens":11099,"cached_tokens":0,"reasoning_tokens":0,"ttft_ms":3712,"duration_ms":167953,"output_chars":12377,"tps":52.3,"cache_rate":0},"session_usage":{"requests":1,"prompt_tokens":2501,"completion_tokens":8598,"cached_tokens":0,"reasoning_tokens":0,"total_ms":167953,"first_token_ms":3712,"output_chars":12377},"memory":{"degraded":false}}
+
