@@ -64,6 +64,7 @@ export default {
 
       page.appendChild(el('div.page-head', {},
         el('div.page-head-text', {},
+          el('div.eyebrow', {}, 'World Codex'),
           el('h1.page-title', {}, '世界卡'),
           el('div.page-sub', {},
             worlds.length
@@ -85,7 +86,7 @@ export default {
       }
 
       const list = el('div.worlds-list');
-      worlds.forEach((w) => list.appendChild(worldRow(w, load)));
+      worlds.forEach((w, i) => list.appendChild(worldRow(w, load, i)));
       page.appendChild(list);
 
       page.appendChild(el('div.group-note', { style: 'padding-top:14px;' },
@@ -97,16 +98,21 @@ export default {
   },
 };
 
-function worldRow(w, reload) {
+function worldRow(w, reload, index = 0) {
   const card = w.card || {};
   const tags = (w.tags || card.genre || []).slice(0, 4);
+  const hue = Number(w.cover_hue) || 210;
   return el('div.world-row', {
     role: 'button', tabindex: '0',
     onclick: () => navigate(`#/world/${w.id}`),
     onkeydown: (e) => { if (e.key === 'Enter') navigate(`#/world/${w.id}`); },
   },
-    el('div.world-cover', { style: `background:${hueTint(w.cover_hue, { s: 34, l: 38 })};` },
-      firstChar(w.title || '世')),
+    el('div.world-cover', {
+      style: `background:linear-gradient(135deg, ${hueTint(hue, { s: 42, l: 40 })}, ${hueTint(hue + 24, { s: 38, l: 24 })});`,
+    },
+      el('span.world-cover-glyph', {}, firstChar(w.title || '世')),
+      el('span.world-cover-index', {}, String(index + 1).padStart(2, '0')),
+    ),
     el('div.world-body', {},
       el('div.world-name', {}, w.title || '未命名世界'),
       el('div.world-sub', {}, w.subtitle || card.subtitle || '还没有写简介'),

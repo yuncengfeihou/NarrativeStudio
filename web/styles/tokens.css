@@ -1,41 +1,41 @@
 /* =========================================================================
  * tokens.css — 设计令牌
  *
- * 取向：纸墨书房。暖白纸面、深墨文字、一处朱砂强调色。
- * 目标是「一张可以写很久的桌子」：低饱和、少投影、靠留白与细线分层；
- * 所有颜色只从语义角色出发，组件里不出现裸色值。
+ * 取向：夜读手稿。左侧一条深墨书脊，纸面是羊皮纸，唯一的彩色是朱砂。
+ * 大字用衬线，界面小字用无衬线；其余靠留白、细线与极少的阴影分层。
  *
- * 三条规则：
- *   1. 只有一个强调色（--accent = 朱砂）。其余颜色只表达状态。
- *   2. 阴影只给浮层和可抬起元素，正文区一律用 1px 分隔线。
- *   3. 行高优先于字号：中文长文的舒适度来自行距与行宽。
+ * 规则：
+ *   1. 只有一个强调色（--accent = 朱砂），金色/绿色只出现在语义状态里。
+ *   2. 深浅两套主题是同一套语义角色，组件里不出现裸色值。
+ *   3. 阅读区优先：行高与行宽先于字号，正文不参与 UI 的紧凑节奏。
  * ========================================================================= */
 
 :root {
   color-scheme: light;
 
   /* ---- 字体 ---- */
-  /* 界面字体：除演绎正文外的所有 UI 文字。设置页可在根节点覆盖 --font-ui。 */
   --font-ui-base: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-ui: var(--font-ui-base);
   --font-title: var(--font-ui);
-  /* 阅读正文出厂沿用 UI 字体：Windows 中文衬线回退过重，长时间阅读更累。
-     --font-read-base 是出厂栈，--font-read 是用户覆盖层，两者分开避免自引用。 */
+  /* 展示字体：页面主标题、世界名、书封字。中文回退到宋体，大字下才有书卷气。 */
+  --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua",
+    "Songti SC", "Noto Serif SC", "Source Han Serif SC", STSong, SimSun, serif;
+  --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", STSong, SimSun, serif;
   --font-read-base: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-read: var(--font-read-base);
-  --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", STSong, serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* ---- 字号 ---- */
-  --fs-display: 28px;        /* 页面主标题 */
-  --fs-title: 16px;          /* 面板标题 */
-  --fs-headline: 19px;       /* 区块大标题 */
-  --fs-body: 14px;           /* 正文 UI */
-  --fs-read: 18px;           /* 阅读正文（用户可覆盖） */
-  --fs-label: 13px;          /* 表单标签、列表主标题 */
-  --fs-caption: 12px;        /* 辅助信息 */
+  --fs-display: 42px;        /* 页面主标题 */
+  --fs-hero: 34px;           /* 世界卡标题 */
+  --fs-headline: 24px;       /* 区块大标题 */
+  --fs-title: 18px;          /* 面板标题 */
+  --fs-body: 14.5px;         /* 正文 UI */
+  --fs-read: 19px;           /* 阅读正文（用户可覆盖） */
+  --fs-label: 13.5px;        /* 表单标签、列表主标题 */
+  --fs-caption: 12.5px;      /* 辅助信息 */
   --fs-micro: 11px;          /* 角标、计数 */
 
   /* ---- 间距 ---- */
@@ -47,51 +47,52 @@
   --sp-6: 24px;
   --sp-8: 32px;
   --sp-10: 40px;
+  --sp-14: 56px;
 
-  /* ---- 中性色：暖纸与墨 ---- */
-  --paper: #FBF9F4;            /* 主背景 */
-  --paper-sunken: #F3EFE6;     /* 次级背景 / 内嵌区 */
-  --paper-raised: #FFFDF9;     /* 卡片 */
-  --paper-hover: #F0EBE0;
+  /* ---- 中性色：羊皮纸与墨 ---- */
+  --paper: #F1E9DA;
+  --paper-sunken: #E7DCC8;
+  --paper-raised: #FAF4E7;
+  --paper-hover: #EBE1CF;
 
-  --ink: #1E1B16;              /* 主文字 */
-  --ink-2: #575147;            /* 次要文字 */
-  --ink-3: #776F63;            /* 弱化文字（12px 也满足 4.5:1） */
-  --ink-4: #B3AA9A;            /* 占位 / 极弱 */
+  --ink: #17130E;
+  --ink-2: #544A3C;
+  --ink-3: #7C7060;
+  --ink-4: #A39784;
 
-  --line: #E7E0D2;             /* 分隔线 */
-  --line-strong: #D6CCBA;      /* 输入框边框 */
-  --line-soft: #F0EADD;        /* 更淡的分隔 */
+  --line: #D9CBB2;
+  --line-strong: #C4B295;
+  --line-soft: #E4D9C3;
 
-  /* ---- 强调色：朱砂 ---- */
-  --accent: #A8442B;
-  --accent-hover: #8E3722;
-  --accent-soft: #F8ECE6;
-  --accent-border: #E4C6BA;
-  --accent-ink: #7E2F1C;
-  --on-accent: #FFF9F5;
+  /* ---- 唯一强调色：朱砂 ---- */
+  --accent: #AE3B26;
+  --accent-hover: #922E1C;
+  --accent-soft: #F3DDD4;
+  --accent-border: #DFB9AC;
+  --accent-ink: #7C2413;
+  --on-accent: #FFF6EC;
 
-  /* ---- 语义色（只用于状态） ---- */
-  --ok: #3F7352;
-  --ok-soft: #EDF3ED;
-  --warn: #93641F;
-  --warn-soft: #FAF2E2;
-  --danger: #A33C35;
-  --danger-soft: #F9EBE9;
-  --info: #3E5B78;
-  --info-soft: #EDF1F5;
+  /* ---- 语义色 ---- */
+  --ok: #3C6B4C;
+  --ok-soft: #E4EDE3;
+  --warn: #8B611C;
+  --warn-soft: #F6EAD2;
+  --danger: #9C352E;
+  --danger-soft: #F6E2DE;
+  --info: #3B566F;
+  --info-soft: #E4EBF1;
 
   /* ---- 圆角 ---- */
-  --r-sm: 6px;
-  --r-md: 9px;
-  --r-lg: 12px;
-  --r-xl: 16px;
+  --r-sm: 4px;
+  --r-md: 7px;
+  --r-lg: 10px;
+  --r-xl: 14px;
   --r-pill: 999px;
 
-  /* ---- 阴影（暖色、极浅） ---- */
-  --sh-sm: 0 1px 2px rgba(46, 36, 20, 0.05);
-  --sh-md: 0 4px 14px rgba(46, 36, 20, 0.08), 0 1px 3px rgba(46, 36, 20, 0.04);
-  --sh-lg: 0 18px 48px rgba(46, 36, 20, 0.16), 0 4px 12px rgba(46, 36, 20, 0.06);
+  /* ---- 阴影（少而深，只给浮层与抬起元素） ---- */
+  --sh-sm: 0 1px 2px rgba(38, 26, 10, 0.07);
+  --sh-md: 0 6px 20px rgba(38, 26, 10, 0.10), 0 1px 3px rgba(38, 26, 10, 0.05);
+  --sh-lg: 0 24px 64px rgba(38, 26, 10, 0.22), 0 4px 14px rgba(38, 26, 10, 0.08);
 
   /* ---- 动效 ---- */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
@@ -100,55 +101,55 @@
   --dur-fast: 0.12s;
   --dur: 0.18s;
   --dur-slow: 0.26s;
-  --dur-enter: 0.34s;
+  --dur-enter: 0.38s;
 
   /* ---- 布局 ---- */
-  --rail-w: 68px;
-  --sidebar-w: 264px;
-  --nav-h: 56px;
-  --page-max: 1120px;
-  --read-max: 42em;
+  --rail-w: 78px;
+  --sidebar-w: 282px;
+  --nav-h: 64px;
+  --page-max: 1180px;
+  --read-max: 40em;
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
 /* =========================================================================
- * 深色：墨夜。不用纯黑，保留纸的暖意。
+ * 深色：夜读。不是纯黑，保留纸的暖灰。
  * ========================================================================= */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --paper: #14120F;
-  --paper-sunken: #0F0E0C;
-  --paper-raised: #1C1916;
-  --paper-hover: #252119;
+  --paper: #0C0B09;
+  --paper-sunken: #070605;
+  --paper-raised: #16130F;
+  --paper-hover: #201B14;
 
-  --ink: #EDE7DB;
-  --ink-2: #AFA79A;
-  --ink-3: #8A8275;
-  --ink-4: #5A544A;
+  --ink: #EDE3D2;
+  --ink-2: #B9AD99;
+  --ink-3: #8A7F6D;
+  --ink-4: #5C5345;
 
-  --line: #2C2822;
-  --line-strong: #3D382F;
-  --line-soft: #24211B;
+  --line: #2A241C;
+  --line-strong: #3E362A;
+  --line-soft: #1F1B15;
 
-  --accent: #D98B72;
-  --accent-hover: #E7A188;
-  --accent-soft: #2B1D18;
-  --accent-border: #4A2E24;
-  --accent-ink: #F0BBA7;
-  --on-accent: #1C130E;
+  --accent: #E0603F;
+  --accent-hover: #F07454;
+  --accent-soft: #2C1812;
+  --accent-border: #553024;
+  --accent-ink: #F5AE95;
+  --on-accent: #170B07;
 
-  --ok: #83B295;
-  --ok-soft: #18241C;
-  --warn: #D0A45F;
-  --warn-soft: #292115;
-  --danger: #D98A82;
-  --danger-soft: #2B1B19;
-  --info: #8FA9C4;
-  --info-soft: #1B232D;
+  --ok: #82AF8E;
+  --ok-soft: #141E17;
+  --warn: #D2A45C;
+  --warn-soft: #241B10;
+  --danger: #DE8A80;
+  --danger-soft: #291614;
+  --info: #8FA8C0;
+  --info-soft: #141B22;
 
-  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
-  --sh-md: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
-  --sh-lg: 0 18px 52px rgba(0, 0, 0, 0.58), 0 4px 14px rgba(0, 0, 0, 0.35);
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.5);
+  --sh-md: 0 8px 24px rgba(0, 0, 0, 0.55), 0 1px 3px rgba(0, 0, 0, 0.4);
+  --sh-lg: 0 28px 80px rgba(0, 0, 0, 0.7), 0 6px 20px rgba(0, 0, 0, 0.45);
 }

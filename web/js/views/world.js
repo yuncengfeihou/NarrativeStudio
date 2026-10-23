@@ -127,14 +127,24 @@ export default {
     function hero(w, card) {
       const tags = (w.tags || card.genre || []).slice(0, 6);
       return el('div.wk-hero', {},
-        el('div.wk-cover', { style: `background:${hueTint(w.cover_hue, { s: 34, l: 38 })};` },
+        el('div.wk-cover', {
+          style: `background:linear-gradient(150deg, ${hueTint(w.cover_hue, { s: 42, l: 40 })}, ${hueTint((Number(w.cover_hue) || 210) + 24, { s: 38, l: 24 })});`,
+        },
           [...(w.title || '世')][0]),
         el('div.wk-hero-text', {},
+          el('div.eyebrow', {}, 'World Codex'),
           el('h1.wk-title', {}, w.title),
           el('div.wk-tagline', {}, w.subtitle || card.subtitle || ''),
           tags.length
             ? el('div.wk-tags', {}, ...tags.map((t) => el('span.chip.is-plain', {}, t)))
             : null,
+          el('div.wk-hero-actions', {},
+            el('button.btn.btn-primary', { type: 'button', onclick: startSession },
+              icon('play', { size: 13, fill: true }), '开一局'),
+            el('button.btn.btn-secondary', {
+              type: 'button', onclick: () => navigate(`#/edit/${worldId}`),
+            }, icon('edit', { size: 13 }), '编辑设定'),
+          ),
         ),
       );
     }

@@ -73,7 +73,7 @@ function applyTheme(theme = ui.get().theme) {
   const root = document.documentElement;
   root.setAttribute('data-theme', resolved);
   const meta = $('meta[name="theme-color"]');
-  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#14120F' : '#FBF9F4');
+  if (meta) meta.setAttribute('content', resolved === 'dark' ? '#0C0B09' : '#F1E9DA');
 }
 
 export function setTheme(theme) {
