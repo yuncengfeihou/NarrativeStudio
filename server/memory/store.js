@@ -28,6 +28,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { config } from '../config.js';
 import { estimateTokens } from '../tokens.js';
+import { isFunctionalPredicate } from './predicates.js';
 
 let db = null;
 
@@ -133,6 +134,38 @@ export function getDb() {
       updated_at INTEGER NOT NULL,
       UNIQUE(session_id, branch_id, title)
     );
+
+    -- 关系/线索的追加式历史：当前表只保留最新值，分叉时按事件重放到分叉点。
+    CREATE TABLE IF NOT EXISTS relation_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      from_name TEXT NOT NULL,
+      to_name TEXT NOT NULL,
+      kind TEXT NOT NULL DEFAULT '',
+      sentiment REAL NOT NULL DEFAULT 0,
+      note TEXT NOT NULL DEFAULT '',
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_relation_events
+      ON relation_events(session_id, branch_id, turn_no);
+
+    CREATE TABLE IF NOT EXISTS thread_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      title TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'open',
+      weight REAL NOT NULL DEFAULT 0.5,
+      planted_turn INTEGER NOT NULL DEFAULT 0,
+      resolved_turn INTEGER,
+      note TEXT NOT NULL DEFAULT '',
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_thread_events
+      ON thread_events(session_id, branch_id, turn_no);
 
     /* ══════════════════════════════════════════════════════════════════ */
     /* v4：世界卡（类型化辞书 / 时间线 / 可玩时间点）                        */
@@ -756,28 +789,42 @@ export function upsertRelation(sessionId, rel) {
   const existing = getDb().prepare(
     `SELECT * FROM relations WHERE session_id=? AND branch_id=? AND from_name=? AND to_name=?`,
   ).get(sessionId, branchId, rel.from, rel.to);
+
+  const next = existing
+    ? {
+      kind: rel.kind || existing.kind,
+      sentiment: Number.isFinite(Number(rel.sentiment)) ? Number(rel.sentiment) : existing.sentiment,
+      note: rel.note || existing.note,
+      turn_no: rel.turn_no ?? existing.turn_no,
+    }
+    : {
+      kind: rel.kind || '',
+      sentiment: Number.isFinite(Number(rel.sentiment)) ? Number(rel.sentiment) : 0,
+      note: rel.note || '',
+      turn_no: rel.turn_no ?? 0,
+    };
+
+  let id;
   if (existing) {
     getDb().prepare(`
       UPDATE relations SET kind=?, sentiment=?, note=?, turn_no=?, updated_at=? WHERE id=?
-    `).run(
-      rel.kind || existing.kind,
-      Number.isFinite(Number(rel.sentiment)) ? Number(rel.sentiment) : existing.sentiment,
-      rel.note || existing.note,
-      rel.turn_no ?? existing.turn_no,
-      now,
-      existing.id,
-    );
-    return existing.id;
+    `).run(next.kind, next.sentiment, next.note, next.turn_no, now, existing.id);
+    id = existing.id;
+  } else {
+    const info = getDb().prepare(`
+      INSERT INTO relations (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(sessionId, branchId, rel.from, rel.to, next.kind, next.sentiment, next.note, next.turn_no, now);
+    id = Number(info.lastInsertRowid);
   }
-  const info = getDb().prepare(`
-    INSERT INTO relations (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, updated_at)
+
+  // 追加式历史：分叉时按 turn_no 重放，而不是整表复制「最新值」。
+  getDb().prepare(`
+    INSERT INTO relation_events
+      (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    sessionId, branchId, rel.from, rel.to, rel.kind || '',
-    Number.isFinite(Number(rel.sentiment)) ? Number(rel.sentiment) : 0,
-    rel.note || '', rel.turn_no ?? 0, now,
-  );
-  return Number(info.lastInsertRowid);
+  `).run(sessionId, branchId, rel.from, rel.to, next.kind, next.sentiment, next.note, next.turn_no, now);
+  return id;
 }
 
 export function getRelations(sessionId, { branchId = null, limit = 60 } = {}) {
@@ -795,30 +842,50 @@ export function upsertThread(sessionId, t) {
   const existing = getDb().prepare(
     `SELECT * FROM threads WHERE session_id=? AND branch_id=? AND title=?`,
   ).get(sessionId, branchId, t.title);
+
+  const next = existing
+    ? {
+      status: t.status || existing.status,
+      weight: Number.isFinite(Number(t.weight)) ? Number(t.weight) : existing.weight,
+      note: t.note || existing.note,
+      resolved_turn: t.resolved_turn === undefined ? existing.resolved_turn : t.resolved_turn,
+      planted_turn: existing.planted_turn,
+    }
+    : {
+      status: t.status || 'open',
+      weight: Number.isFinite(Number(t.weight)) ? Number(t.weight) : 0.5,
+      note: t.note || '',
+      resolved_turn: t.resolved_turn ?? null,
+      planted_turn: t.planted_turn ?? 0,
+    };
+  const eventTurn = t.turn_no ?? t.resolved_turn ?? t.planted_turn ?? existing?.planted_turn ?? 0;
+
+  let id;
   if (existing) {
     getDb().prepare(`
       UPDATE threads SET status=?, weight=?, note=?, resolved_turn=?, updated_at=? WHERE id=?
+    `).run(next.status, next.weight, next.note, next.resolved_turn, now, existing.id);
+    id = existing.id;
+  } else {
+    const info = getDb().prepare(`
+      INSERT INTO threads (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, updated_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
-      t.status || existing.status,
-      Number.isFinite(Number(t.weight)) ? Number(t.weight) : existing.weight,
-      t.note || existing.note,
-      t.resolved_turn === undefined ? existing.resolved_turn : t.resolved_turn,
-      now,
-      existing.id,
+      sessionId, branchId, t.title, next.status, next.weight,
+      next.planted_turn, next.resolved_turn, next.note, now,
     );
-    return existing.id;
+    id = Number(info.lastInsertRowid);
   }
-  const info = getDb().prepare(`
-    INSERT INTO threads (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+
+  getDb().prepare(`
+    INSERT INTO thread_events
+      (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, turn_no, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    sessionId, branchId, t.title, t.status || 'open',
-    Number.isFinite(Number(t.weight)) ? Number(t.weight) : 0.5,
-    t.planted_turn ?? 0,
-    t.resolved_turn ?? null,
-    t.note || '', now,
+    sessionId, branchId, t.title, next.status, next.weight,
+    next.planted_turn, next.resolved_turn, next.note, eventTurn, now,
   );
-  return Number(info.lastInsertRowid);
+  return id;
 }
 
 export function getThreads(sessionId, { branchId = null, status = null, limit = 40 } = {}) {
@@ -1063,17 +1130,104 @@ export function copyBranchState(sessionId, { fromBranch, toBranch, forkTurn = 0 
       `).run(sessionId, to, turn, JSON.stringify(state.state), Date.now());
     }
 
+    // 关系/线索：复制分叉点之前的事件，再按「每个键最后一条事件」重建当前表。
+    // 旧会话没有事件表时，退回「只复制分叉点前的行」，至少不再把之后的更新带进来。
     d.prepare(`
-      INSERT INTO relations (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, updated_at)
-      SELECT session_id, ?, from_name, to_name, kind, sentiment, note, turn_no, updated_at
-      FROM relations WHERE session_id=? AND branch_id=?
-    `).run(to, sessionId, from);
+      INSERT INTO relation_events
+        (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, created_at)
+      SELECT session_id, ?, from_name, to_name, kind, sentiment, note, turn_no, created_at
+      FROM relation_events WHERE session_id=? AND branch_id=? AND turn_no<=?
+    `).run(to, sessionId, from, turn);
+
+    const relEvents = d.prepare(
+      `SELECT COUNT(*) AS c FROM relation_events WHERE session_id=? AND branch_id=? AND turn_no<=?`,
+    ).get(sessionId, to, turn).c;
+    if (relEvents) {
+      d.prepare(`DELETE FROM relations WHERE session_id=? AND branch_id=?`).run(sessionId, to);
+      d.prepare(`
+        INSERT INTO relations
+          (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, updated_at)
+        SELECT e.session_id, ?, e.from_name, e.to_name, e.kind, e.sentiment, e.note, e.turn_no, e.created_at
+        FROM relation_events e
+        JOIN (
+          SELECT from_name, to_name, MAX(id) AS id
+          FROM relation_events
+          WHERE session_id=? AND branch_id=? AND turn_no<=?
+          GROUP BY from_name, to_name
+        ) latest ON latest.id = e.id
+      `).run(to, sessionId, to, turn);
+
+      // 混合库：升级前就存在、没有事件的关系，按当前行补进来（只取分叉点之前的）。
+      d.prepare(`
+        INSERT INTO relations
+          (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, updated_at)
+        SELECT r.session_id, ?, r.from_name, r.to_name, r.kind, r.sentiment, r.note, r.turn_no, r.updated_at
+        FROM relations r
+        WHERE r.session_id=? AND r.branch_id=? AND r.turn_no<=?
+          AND NOT EXISTS (
+            SELECT 1 FROM relation_events e
+            WHERE e.session_id=? AND e.branch_id=? AND e.from_name=r.from_name
+              AND e.to_name=r.to_name AND e.turn_no<=?
+          )
+      `).run(to, sessionId, from, turn, sessionId, to, turn);
+    } else {
+      d.prepare(`
+        INSERT INTO relations
+          (session_id, branch_id, from_name, to_name, kind, sentiment, note, turn_no, updated_at)
+        SELECT session_id, ?, from_name, to_name, kind, sentiment, note, turn_no, updated_at
+        FROM relations WHERE session_id=? AND branch_id=? AND turn_no<=?
+      `).run(to, sessionId, from, turn);
+    }
 
     d.prepare(`
-      INSERT INTO threads (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, updated_at)
-      SELECT session_id, ?, title, status, weight, planted_turn, resolved_turn, note, updated_at
-      FROM threads WHERE session_id=? AND branch_id=?
-    `).run(to, sessionId, from);
+      INSERT INTO thread_events
+        (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, turn_no, created_at)
+      SELECT session_id, ?, title, status, weight, planted_turn, resolved_turn, note, turn_no, created_at
+      FROM thread_events WHERE session_id=? AND branch_id=? AND turn_no<=?
+    `).run(to, sessionId, from, turn);
+
+    const threadEvents = d.prepare(
+      `SELECT COUNT(*) AS c FROM thread_events WHERE session_id=? AND branch_id=? AND turn_no<=?`,
+    ).get(sessionId, to, turn).c;
+    if (threadEvents) {
+      d.prepare(`DELETE FROM threads WHERE session_id=? AND branch_id=?`).run(sessionId, to);
+      d.prepare(`
+        INSERT INTO threads
+          (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, updated_at)
+        SELECT e.session_id, ?, e.title, e.status, e.weight, e.planted_turn, e.resolved_turn, e.note, e.created_at
+        FROM thread_events e
+        JOIN (
+          SELECT title, MAX(id) AS id
+          FROM thread_events
+          WHERE session_id=? AND branch_id=? AND turn_no<=?
+          GROUP BY title
+        ) latest ON latest.id = e.id
+      `).run(to, sessionId, to, turn);
+
+      // 混合库：没有事件的旧线索按当前行补；分叉点之后才回收的，恢复成 open。
+      d.prepare(`
+        INSERT INTO threads
+          (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, updated_at)
+        SELECT r.session_id, ?, r.title,
+          CASE WHEN r.resolved_turn IS NOT NULL AND r.resolved_turn>? THEN 'open' ELSE r.status END,
+          r.weight, r.planted_turn,
+          CASE WHEN r.resolved_turn>? THEN NULL ELSE r.resolved_turn END,
+          r.note, r.updated_at
+        FROM threads r
+        WHERE r.session_id=? AND r.branch_id=? AND r.planted_turn<=?
+          AND NOT EXISTS (
+            SELECT 1 FROM thread_events e
+            WHERE e.session_id=? AND e.branch_id=? AND e.title=r.title AND e.turn_no<=?
+          )
+      `).run(to, turn, turn, sessionId, from, turn, sessionId, to, turn);
+    } else {
+      d.prepare(`
+        INSERT INTO threads
+          (session_id, branch_id, title, status, weight, planted_turn, resolved_turn, note, updated_at)
+        SELECT session_id, ?, title, status, weight, planted_turn, resolved_turn, note, updated_at
+        FROM threads WHERE session_id=? AND branch_id=? AND planted_turn<=?
+      `).run(to, sessionId, from, turn);
+    }
 
     d.prepare(`
       INSERT INTO character_states (session_id, branch_id, who, field, value, valid_from, valid_to, updated_turn, created_at)
@@ -1259,6 +1413,8 @@ export function getAssertions(sessionId, {
 /** 找出与待写入断言冲突的旧断言：同主同谓、对象不同、有效期重叠。 */
 export function findConflictingAssertions(sessionId, { branchId, subject, predicate, object, validFrom }) {
   if (!subject || !predicate || !object) return [];
+  // 多值谓词（知道/拥有/想要…）可以同时有多个对象；只有单值谓词才算矛盾。
+  if (!isFunctionalPredicate(predicate)) return [];
   const rows = getDb().prepare(`
     SELECT * FROM assertions
     WHERE session_id=? AND branch_id=? AND subject=? AND predicate=? AND status='active'
@@ -1453,13 +1609,60 @@ export function getSummaries(sessionId, { branchId = 'main', limit = 20 } = {}) 
   `).all(sessionId, branchId, limit).map(decorateSummary);
 }
 
+/**
+ * 当前分支 → 祖先链，每条边带上「祖先可继承到哪一轮」的上限。
+ *
+ * 上限来自**子分支**的 fork_turn：b3 从 b2 的第 13 轮分叉，那么 b3 能看见
+ * b2 的 ≤13 轮；b2 从 main 的第 8 轮分叉，那么 b2 能看见 main 的 ≤8 轮。
+ * 只看全局 turn_no 会把兄弟分支的回合也带进来（嵌套分叉串线）。
+ */
+function branchChain(sessionId, branchId) {
+  const rows = getDb().prepare(
+    `SELECT branch_id, parent_branch, fork_turn FROM branches WHERE session_id=?`,
+  ).all(sessionId);
+  if (!rows.length) return null;
+  const byId = new Map(rows.map((r) => [r.branch_id, r]));
+  if (!byId.has(branchId)) return null;
+
+  const chain = [];
+  const seen = new Set();
+  let cur = byId.get(branchId);
+  let limit = null; // 当前分支没有上限
+  while (cur && !seen.has(cur.branch_id) && chain.length < 64) {
+    seen.add(cur.branch_id);
+    chain.push({ branch_id: cur.branch_id, limit });
+    limit = Number(cur.fork_turn) || 0;
+    cur = cur.parent_branch ? byId.get(cur.parent_branch) : null;
+  }
+  return chain;
+}
+
 export function getTurnsForBranch(sessionId, branchId, forkTurn, { from = 0, to = Number.MAX_SAFE_INTEGER, kinds = null } = {}) {
-  let sql = `SELECT * FROM turns WHERE session_id=? AND turn_no BETWEEN ? AND ?
-             AND (branch_id=? OR turn_no<=?)`;
-  const params = [sessionId, from, to, branchId, forkTurn];
+  const chain = branchChain(sessionId, branchId);
+  let sql = `SELECT * FROM turns WHERE session_id=? AND turn_no BETWEEN ? AND ?`;
+  const params = [sessionId, from, to];
+  const limits = chain ? new Map(chain.map((c) => [c.branch_id, c.limit])) : null;
+
+  if (limits) {
+    const ids = [...limits.keys()];
+    sql += ` AND branch_id IN (${ids.map(() => '?').join(',')})`;
+    params.push(...ids);
+  } else {
+    // 兼容没有分支记录的旧会话/纯回合测试：退回「自己的 + 编号不大于分叉点」。
+    sql += ` AND (branch_id=? OR turn_no<=?)`;
+    params.push(branchId, forkTurn);
+  }
   if (kinds?.length) { sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`; params.push(...kinds); }
   sql += ` ORDER BY turn_no ASC, id ASC`;
-  return getDb().prepare(sql).all(...params).map(decorateTurn);
+
+  const rows = getDb().prepare(sql).all(...params);
+  if (!limits) return rows.map(decorateTurn);
+  return rows
+    .filter((r) => {
+      const lim = limits.get(r.branch_id);
+      return lim == null || r.turn_no <= lim;
+    })
+    .map(decorateTurn);
 }
 
 /**

@@ -15,8 +15,8 @@ import { chat } from '../llm.js';
 import { buildAliasIndex, normalizeCard, resolveEntity } from '../world/schema.js';
 import { pathsFor } from '../world/state-paths.js';
 import {
-  addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getScenes, getState,
-  getThreads, getTurnsForBranch, invalidateAssertion, latestScene,
+  addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getRelations, getScenes,
+  getState, getThreads, getTurnsForBranch, invalidateAssertion, latestScene,
   searchAssertions, searchTurns, setCharState, upsertThread,
 } from '../memory/store.js';
 import {
@@ -247,7 +247,10 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
     } else if (action === 'resolve_thread' && target) {
       const hit = threads.find((t) => t.title === target);
       if (hit) {
-        upsertThread(sessionId, { branch_id: branchId, title: hit.title, status: 'resolved', resolved_turn: turnNo });
+        upsertThread(sessionId, {
+          branch_id: branchId, title: hit.title, status: 'resolved',
+          resolved_turn: turnNo, turn_no: turnNo,
+        });
         status = 'applied';
         applied++;
       }
@@ -281,6 +284,24 @@ const TOOLS = {
     const hit = rows.find((s) => s.turn_from <= turn && s.turn_to >= turn);
     return hit ? [{ scene_id: hit.scene_id, turn_from: hit.turn_from, turn_to: hit.turn_to, question: hit.question, outcome: hit.outcome }] : [];
   },
+  get_relations: (sessionId, branchId, args) => {
+    const who = str(args.who);
+    return getRelations(sessionId, { branchId, limit: 60 })
+      .filter((r) => !who || r.from_name === who || r.to_name === who)
+      .map((r) => ({
+        from: r.from_name, to: r.to_name, kind: r.kind,
+        sentiment: r.sentiment, note: r.note, turn_no: r.turn_no,
+      }));
+  },
+  search_claims: (sessionId, branchId, args) => getAssertions(sessionId, {
+    branchId,
+    subject: str(args.subject) || null,
+    predicate: str(args.predicate) || null,
+    limit: 20,
+  }).map((a) => ({
+    subject: a.subject, predicate: a.predicate, object: a.object,
+    status: a.status, asserted_turn: a.asserted_turn,
+  })),
 };
 
 /**
@@ -424,7 +445,10 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
     if (e.thread) {
       const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
       if (!open.some((t) => t.title === e.thread)) {
-        upsertThread(sessionId, { branch_id: branchId, title: e.thread, status: 'open', weight: 0.5, planted_turn: turnNo, note: '世界呼吸推演' });
+        upsertThread(sessionId, {
+          branch_id: branchId, title: e.thread, status: 'open', weight: 0.5,
+          planted_turn: turnNo, turn_no: turnNo, note: '世界呼吸推演',
+        });
       }
     }
   }

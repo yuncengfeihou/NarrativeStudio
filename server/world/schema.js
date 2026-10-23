@@ -397,8 +397,8 @@ export function resolveEntity(name, aliasIndex) {
   if (!n) return { kind: '', id: '', name: '' };
   const hit = (aliasIndex || []).find((e) => e.alias === n);
   return hit
-    ? { kind: hit.kind, id: hit.id, name: hit.name }
-    : { kind: '', id: n, name: n };
+    ? { kind: hit.kind, id: hit.id, name: hit.name, type: hit.type || '' }
+    : { kind: '', id: n, name: n, type: '' };
 }
 
 /** 场景主题标签：在场实体的 tags ∪ 账本 theme_tags ∪ 线索 tags。 */

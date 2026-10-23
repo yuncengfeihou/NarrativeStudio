@@ -20,6 +20,7 @@ process.env.DB_PATH = tmp;
 const store = await import('../server/memory/store.js');
 const engine = await import('../server/memory/context-engine.js');
 const schema = await import('../server/world/schema.js');
+const { config } = await import('../server/config.js');
 
 let pass = 0;
 let fail = 0;
@@ -163,6 +164,27 @@ console.log('\n=== 实体链接只改在场者 ===');
   ok(b.meta.present.some((c) => c.name === '伍卿'), '账本里的主角仍在场');
 }
 
+console.log('\n=== 在场：present 优先于账本 characters ===');
+{
+  const sid = `s-presence-${Date.now()}`;
+  const s2 = store.createSession({ id: sid, title: 'presence', worldId: world.id });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  store.setState(sid, 4, {
+    present: ['凌玥'],
+    characters: { 'wu-qing': { mood: '窘迫' }, 'zhang-lan': { mood: '刻薄' } },
+    place: '雨街', time: '黄昏', turn_no: 4,
+  }, 'main');
+
+  const c = await engine.assembleContext({
+    session: { ...s2, branch_id: 'main', anchor_id: 'prologue' },
+    world, turnNo: 5, playerText: '我往前走。',
+  });
+  ok(c.meta.present.some((x) => x.name === '凌玥'), '显式 present 进场');
+  ok(!c.meta.present.some((x) => x.name === '张兰'), '账本 characters 里的离场者不再自动进场');
+  ok(c.meta.present.some((x) => x.name === '伍卿'), '玩家永远在场');
+}
+
 console.log('\n=== 辞书挑选三条路径 ===');
 {
   const ctx = await engine.assembleContext({
@@ -174,6 +196,17 @@ console.log('\n=== 辞书挑选三条路径 ===');
   const why = ctx.meta.codex.flatMap((c) => c.why);
   ok(why.some((w) => w === '钉选'), '标注钉选原因');
   ok(why.some((w) => w === '实体在场' || w === '本场主题'), '标注连接原因');
+}
+
+console.log('\n=== 装配清单：候选 vs 实际渲染 ===');
+{
+  const ctx = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '玥姐姐说，司楼见。',
+  });
+  ok(typeof ctx.meta.codex_candidates === 'number', '记录辞书候选数');
+  ok(ctx.meta.codex_rendered <= ctx.meta.codex_candidates, '渲染数不超过候选');
+  ok(Array.isArray(ctx.meta.dropped_sections), '记录被丢弃的段');
+  ok(ctx.meta.facts_candidates >= ctx.meta.facts, '事实候选数不小于渲染数');
 }
 
 console.log('\n=== 场记单内容 ===');
@@ -354,6 +387,15 @@ console.log('\n=== 前情提要：覆盖边界与最近原文 ===');
   eq(ctx.meta.summary?.covers_turn_to, 6, 'meta 记录摘要覆盖边界');
   ok(ctx.messages[0].role === 'system', '摘要不改变 system 位置');
   ok(ctx.messages[ctx.messages.length - 1].role === 'user', '本轮输入仍在最后');
+
+  // 摘要 Agent 写超时，装配层必须按 BUDGET_SUMMARY 截断，不能挤占其他层。
+  store.addSummary(sid, { branchId: 'main', coversTurnTo: 6, text: '长'.repeat(6000) });
+  const long = await engine.assembleContext({
+    session: sumSession, world, turnNo: 9, playerText: '我继续往前走。',
+  });
+  ok(long.budget.summary <= config.context.layerBudget.summary + 8, '摘要层不超过独立配额');
+  ok(!long.messages.some((m) => typeof m.content === 'string' && m.content.includes('长'.repeat(2000))),
+    '超长摘要被截断');
 }
 
 console.log('\n=== 摘要触发：计划是纯函数 ===');

@@ -79,7 +79,8 @@ export const config = {
   },
 
   // ---- Agent defaults (reasoning_effort: low | medium | high) ----
-  // 注意：step-5-preview 的推理过程计入 max_tokens。
+  // 注意：step-5-preview 的推理过程计入 max_tokens。旁路 Agent 的 JSON 在推理之后才输出，
+  // 预算必须给推理留足空间；否则会得到「completion_tokens 用满、content 为空」的假成功。
   // 分工：narrator 只管正文，永远不输出 JSON；记账全部交给史官与校勘。
   agents: {
     narrator: {
@@ -91,55 +92,55 @@ export const config = {
     archivist: {
       reasoningEffort: env.ARCHIVIST_EFFORT || 'medium',
       temperature: float(env.ARCHIVIST_TEMPERATURE, 0.3),
-      maxTokens: int(env.ARCHIVIST_MAX_TOKENS, 6000),
+      maxTokens: int(env.ARCHIVIST_MAX_TOKENS, 16000),
       model: env.ARCHIVIST_MODEL || null,
     },
     sceneKeeper: {
       reasoningEffort: env.SCENE_KEEPER_EFFORT || 'medium',
       temperature: float(env.SCENE_KEEPER_TEMPERATURE, 0.3),
-      maxTokens: int(env.SCENE_KEEPER_MAX_TOKENS, 4000),
+      maxTokens: int(env.SCENE_KEEPER_MAX_TOKENS, 10000),
       model: env.SCENE_KEEPER_MODEL || null,
     },
     summarizer: {
       reasoningEffort: env.SUMMARY_EFFORT || 'low',
       temperature: float(env.SUMMARY_TEMPERATURE, 0.3),
-      maxTokens: int(env.SUMMARY_MAX_TOKENS, 3000),
+      maxTokens: int(env.SUMMARY_MAX_TOKENS, 10000),
       model: env.SUMMARY_MODEL || null,
     },
     retrieval: {
       reasoningEffort: env.RETRIEVAL_EFFORT || 'low',
       temperature: float(env.RETRIEVAL_TEMPERATURE, 0.2),
-      maxTokens: int(env.RETRIEVAL_MAX_TOKENS, 500),
+      maxTokens: int(env.RETRIEVAL_MAX_TOKENS, 2000),
       model: env.RETRIEVAL_MODEL || null,
     },
     continuity: {
       reasoningEffort: env.CONTINUITY_EFFORT || 'medium',
       temperature: float(env.CONTINUITY_TEMPERATURE, 0.2),
-      maxTokens: int(env.CONTINUITY_MAX_TOKENS, 5000),
+      maxTokens: int(env.CONTINUITY_MAX_TOKENS, 12000),
       model: env.CONTINUITY_MODEL || null,
     },
     librarian: {
       reasoningEffort: env.LIBRARIAN_EFFORT || 'low',
       temperature: float(env.LIBRARIAN_TEMPERATURE, 0.2),
-      maxTokens: int(env.LIBRARIAN_MAX_TOKENS, 3000),
+      maxTokens: int(env.LIBRARIAN_MAX_TOKENS, 6000),
       model: env.LIBRARIAN_MODEL || null,
     },
     worldTick: {
       reasoningEffort: env.WORLD_TICK_EFFORT || 'medium',
       temperature: float(env.WORLD_TICK_TEMPERATURE, 0.7),
-      maxTokens: int(env.WORLD_TICK_MAX_TOKENS, 4000),
+      maxTokens: int(env.WORLD_TICK_MAX_TOKENS, 10000),
       model: env.WORLD_TICK_MODEL || null,
     },
     branch: {
       reasoningEffort: env.BRANCH_EFFORT || 'medium',
       temperature: float(env.BRANCH_TEMPERATURE, 0.9),
-      maxTokens: int(env.BRANCH_MAX_TOKENS, 5000),
+      maxTokens: int(env.BRANCH_MAX_TOKENS, 10000),
       model: env.BRANCH_MODEL || null,
     },
     cardSmith: {
       reasoningEffort: env.CARD_SMITH_EFFORT || 'medium',
       temperature: float(env.CARD_SMITH_TEMPERATURE, 0.4),
-      maxTokens: int(env.CARD_SMITH_MAX_TOKENS, 8000),
+      maxTokens: int(env.CARD_SMITH_MAX_TOKENS, 16000),
       model: env.CARD_SMITH_MODEL || null,
     },
   },

@@ -11,7 +11,7 @@
 import { config } from '../config.js';
 import { chat } from '../llm.js';
 import {
-  CODEX_TYPES, buildAliasIndex, normalizeCard, resolveEntity, slugify,
+  CODEX_TYPES, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
   LIST_PATH_SET, ENTITY_KINDS, pathsFor,
@@ -204,10 +204,15 @@ export function mergeLedger(oldState, delta, { aliasIndex = [] } = {}) {
   const d = obj(delta);
   const next = { ...base };
 
-  for (const k of ['time', 'place', 'place_id', 'weather', 'last_hook']) {
+  for (const k of ['time', 'place', 'weather', 'last_hook']) {
     if (str(d[k])) next[k] = str(d[k]);
   }
-  if (Number.isFinite(Number(d.tension))) next.tension = Math.max(0, Math.min(1, Number(d.tension)));
+  // place_id 允许显式清空：地点换了但没有对应实体时，不能沿用旧地点的 id。
+  if (d.place_id !== undefined) next.place_id = str(d.place_id);
+  // null / 缺省表示「这一拍没有新信息」，不能把张力清零。
+  if (d.tension != null && d.tension !== '' && Number.isFinite(Number(d.tension))) {
+    next.tension = Math.max(0, Math.min(1, Number(d.tension)));
+  }
 
   const characters = obj(next.characters);
   for (const [rawWho, fields] of Object.entries(obj(d.characters))) {
@@ -216,6 +221,19 @@ export function mergeLedger(oldState, delta, { aliasIndex = [] } = {}) {
     characters[who] = { ...(characters[who] || {}), ...obj(fields) };
   }
   next.characters = characters;
+
+  // 在场是「这一拍镜头里的人物」，不是「账本里出现过的所有人」。
+  if (Array.isArray(d.present)) {
+    const present = [];
+    const seen = new Set();
+    for (const raw of d.present) {
+      const who = canonicalize(raw, aliasIndex) || str(raw);
+      if (!who || seen.has(who)) continue;
+      seen.add(who);
+      present.push(who);
+    }
+    next.present = present;
+  }
 
   const inventory = arr(next.inventory).map((i) => (typeof i === 'string' ? { name: i, holder: '' } : { ...obj(i) }));
   const remove = new Set(arr(d.inventory_remove).map((x) => str(typeof x === 'string' ? x : obj(x).name)).filter(Boolean));
@@ -291,7 +309,7 @@ function escapeRawControlCharsInStrings(text) {
 }
 
 const EMPTY_UPDATE = {
-  scene_change: { changed: false, reason: '', when: '', place: '', place_id: '', weather: '', tension: null },
+  scene_change: { changed: false, reason: '', when: '', place: '', place_id: '', weather: '', tension: null, present: [] },
   ledger: { characters: {}, inventory_add: [], inventory_remove: [], quests_add: [], quests_update: [], last_hook: '', theme_tags: [] },
   assertions: [], changes: [], states: [], relations: [], threads: [], quotes: [], uncertain: [],
 };
@@ -322,7 +340,10 @@ export function parseArchivistUpdate(content) {
       place: str(scene.place),
       place_id: str(scene.place_id),
       weather: str(scene.weather),
-      tension: Number.isFinite(Number(scene.tension)) ? Number(scene.tension) : null,
+      tension: scene.tension != null && scene.tension !== '' && Number.isFinite(Number(scene.tension))
+        ? Number(scene.tension)
+        : null,
+      present: arr(scene.present).map(str).filter(Boolean),
     },
     ledger: {
       characters,
@@ -504,7 +525,10 @@ export function applyArchivistUpdate({
       const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
       const hit = open.find((x) => x.title === title) || open.find((x) => str(x.title) === title);
       if (hit) {
-        upsertThread(sessionId, { branch_id: branchId, title: hit.title, status: 'resolved', resolved_turn: turnNo });
+        upsertThread(sessionId, {
+          branch_id: branchId, title: hit.title, status: 'resolved',
+          resolved_turn: turnNo, turn_no: turnNo,
+        });
         applied.threads++;
       }
       continue;
@@ -518,6 +542,7 @@ export function applyArchivistUpdate({
       weight: Number.isFinite(Number(t.weight)) ? Math.max(0, Math.min(1, Number(t.weight))) : 0.5,
       note: str(t.note).slice(0, 200),
       planted_turn: hit ? hit.planted_turn : turnNo,
+      turn_no: turnNo,
     });
     applied.threads++;
   }
@@ -558,15 +583,34 @@ export function applyArchivistUpdate({
   const old = getState(sessionId, { branchId, atTurn: turnNo });
   const delta = update.ledger || {};
   const scene = update.scene_change || {};
+
+  // 地点名能对上辞书里的 place 时，自动补 place_id；这让「当前地点」加分与
+  // 地点辞书进场不再依赖模型是否手写了 id。
+  let placeId = scene.place_id || '';
+  if (!placeId && scene.place) {
+    const resolved = resolveEntity(scene.place, aliasIndex);
+    if (resolved.kind === 'codex' && resolved.type === 'place') {
+      placeId = resolved.id;
+    } else {
+      // 「凌府门口 → 凌府天井」这类复合地名：用实体链接取最长的 place 命中。
+      const hit = linkEntities(scene.place, aliasIndex).codex
+        .map((id) => aliasIndex.find((e) => e.kind === 'codex' && e.id === id && e.type === 'place'))
+        .find(Boolean);
+      if (hit) placeId = hit.id;
+    }
+  }
+
   const mergedDelta = {
     ...delta,
     time: scene.when || undefined,
     place: scene.place || undefined,
-    place_id: scene.place_id || undefined,
+    place_id: (scene.place || scene.place_id) ? placeId : undefined,
     weather: scene.weather || undefined,
     tension: scene.tension,
+    present: scene.present?.length ? scene.present : undefined,
   };
   const next = mergeLedger(old?.state || {}, mergedDelta, { aliasIndex });
+  next.turn_no = turnNo;
   setState(sessionId, turnNo, next, branchId);
   applied.ledger = true;
 

@@ -24,6 +24,8 @@ const OUT = path.join(__dirname, 'real-10turn-report.json');
 const PROGRESS = path.join(__dirname, 'real-10turn-progress.json');
 const SERVER_LOG = path.join(__dirname, 'real-10turn-server.log');
 
+const MAX_TURNS = Math.max(1, Math.min(12, Number(process.env.AUDIT_TURNS) || 12));
+
 const ACTIONS = [
   '雨还在下。我把蛇皮袋往肩上一甩，隔着雨幕问那个撑伞的女人：「你认得我？」',
   '我说：「我叫伍卿，就住在东街十五路后头的山村里。你认错人了。」',
@@ -85,7 +87,7 @@ async function waitUp() {
 
 const report = {
   startedAt: new Date().toISOString(),
-  actions: ACTIONS,
+  actions: ACTIONS.slice(0, MAX_TURNS),
   turns: [],
   checks: {},
   db: null,
@@ -106,6 +108,7 @@ function shortState(state) {
     weather: state.weather,
     tension: state.tension,
     characters: state.characters,
+    present: state.present,
     inventory: state.inventory,
     quests: state.quests,
     threads: state.threads,
@@ -161,13 +164,25 @@ async function runOneTurn(sessionId, n, action, extra = {}) {
       timeline_past: context.meta?.timeline_past,
       timeline_future_held: context.meta?.timeline_future_held,
       codex_total: context.meta?.codex_total,
+      codex_candidates: context.meta?.codex_candidates,
+      codex_rendered: context.meta?.codex_rendered,
+      codex_dropped: context.meta?.codex_dropped,
+      facts_candidates: context.meta?.facts_candidates,
+      dropped_sections: context.meta?.dropped_sections,
       summary: context.meta?.summary,
       retrieval: context.meta?.retrieval,
       degraded: context.meta?.degraded,
     } : null,
     sceneSheetHead: sceneSheet.slice(0, 700),
     memory: memory ? {
-      applied: memory.stats?.applied,
+      assertions: memory.stats?.assertions,
+      assertions_invalidated: memory.stats?.assertions_invalidated,
+      states: memory.stats?.states,
+      changes: memory.stats?.changes,
+      relations: memory.stats?.relations,
+      threads: memory.stats?.threads,
+      voices: memory.stats?.voices,
+      ledger: memory.stats?.ledger,
       scene_change: memory.stats?.scene_change,
       stale: memory.stats?.stale,
       uncertain: memory.stats?.uncertain,
@@ -244,7 +259,7 @@ try {
   // 起始账本（锚点 turn 0）
   report.initial = { settings: session.json.settings, anchor: session.json.anchor_id, branch: session.json.branch_id };
 
-  for (let i = 0; i < ACTIONS.length; i++) {
+  for (let i = 0; i < MAX_TURNS; i++) {
     const n = i + 1;
     console.log(`\n--- 第 ${n} 轮 ---\n${ACTIONS[i]}`);
     let rec;
@@ -395,7 +410,8 @@ try {
     maxVisibleTurn: Math.max(0, ...turnsAfterFork.map((t) => t.turn_no)),
     worldStateAt8Before: worldAt8Before.changes?.length ?? null,
     worldStateAt8After: worldAt8After.changes?.length ?? null,
-    sameAtFork: JSON.stringify(wsKey(worldAt8Before.changes)) === JSON.stringify(wsKey(worldAt8After.changes)),
+    sameAtFork: JSON.stringify(wsKey(worldAt8Before.changes).map((r) => JSON.stringify(r)).sort())
+      === JSON.stringify(wsKey(worldAt8After.changes).map((r) => JSON.stringify(r)).sort()),
     worldStateAt8Sample: wsKey(worldAt8After.changes).slice(0, 12),
   };
 
@@ -503,6 +519,8 @@ function printSummary(r) {
   const ok = (v) => (v ? '✓' : '✗');
   console.log(`轮数：player=${c.afterRun?.playerTurns} narrator=${c.afterRun?.narratorTurns} 空正文=${c.afterRun?.emptyNarratives}`);
   console.log(`装配 meta：${ok(c.afterRun?.assemblyOnEveryNarrator)}｜上下文 token 范围 ${c.afterRun?.contextTotalMin}–${c.afterRun?.contextTotalMax}`);
+  console.log(`在场/张力：${(r.turns || []).map((t) => `${t.n}:${(t.context?.present || []).length}/${t.state?.tension ?? '-'}`).join(' ')}`);
+  console.log(`辞书候选/渲染：${(r.turns || []).map((t) => `${t.n}:${t.context?.codex_candidates ?? '?'}/${t.context?.codex_rendered ?? '?'}`).join(' ')}`);
   console.log(`工具文本漏进正文：${ok(!c.afterRun?.toolLeak)}`);
   console.log(`断言 ${c.afterRun?.assertions?.total}（有效 ${c.afterRun?.assertions?.live}，失效 ${c.afterRun?.assertions?.invalidated}）`);
   console.log(`人物状态 ${c.afterRun?.states?.total}｜场次 ${c.afterRun?.scenes?.total}｜线索 ${c.afterRun?.threads?.total}｜原声 ${c.afterRun?.voices?.total}`);

@@ -123,11 +123,16 @@ turns    { id, session_id, turn_no, kind, content, images_json, reasoning,
 branches { session_id, branch_id, parent_branch, fork_turn, status, note }
 ```
 
-回合编号全局递增；`branch_id` 标记归属。分支可见 = 本分支回合 + fork_turn 之前的继承回合。
+回合编号全局递增；`branch_id` 标记归属。分支可见 = **当前分支 + 祖先链**，每条祖先边只继承到
+子分支 `fork_turn` 为止；不能只看全局 `turn_no`（否则嵌套分叉会读到废弃兄弟分支的回合）。
 
 **分支隔离**：`states / relations / threads / character_states / assertions / voices /
 scenes / world_state / summaries` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork：把分叉点仍有效的
 状态复制到新分支，新分支不会读到旧线在分叉点之后写下的任何内容。
+
+`relations` / `threads` 的当前表只保留最新值，所以另有两张追加式历史表
+`relation_events` / `thread_events`。fork 时复制 `turn_no <= fork_turn` 的事件，再按
+「每个键最后一条事件」重建当前表；分叉点之后才建立/更新/回收的关系与线索不会进入新分支。
 
 `summaries` 只复制 `covers_turn_to <= fork_turn` 的摘要；分叉后写的摘要不会出现在新分支。
 
@@ -158,11 +163,12 @@ summaries(session_id, branch_id, covers_turn_to, text, prev_id, token_count, cre
 身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas)` 把
 模板与增量投影成当轮有效的世界；上下文引擎只读投影结果，永远不把运行期状态写回 `card_json`。
 
-**断言语义**：冲突（同主同谓、对象不同、有效期重叠）时旧断言 `status='invalidated'`
-并记 `valid_to`，**不删除**。`getAssertions(atTurn)` 按时间点回溯，不过滤 status
-（只排除 retracted）。
+**断言语义**：只有**单值谓词**（位于 / 是 / 曾经是）在「同主同谓、对象不同、有效期重叠」时
+把旧断言 `status='invalidated'` 并记 `valid_to`，**不删除**；多值谓词（知道 / 拥有 / 想要…）
+的多个对象可以并存。基数表在 `server/memory/predicates.js`。
+`getAssertions(atTurn)` 按时间点回溯，不过滤 status（只排除 retracted）。
 
-**受控词表**（`server/prompts/archivist.js`）：
+**受控词表**（`server/memory/predicates.js`，提示词 re-export）：
 
 ```js
 PREDICATES = ['知道','不知道','相信','想要','害怕','拥有','位于','属于',
@@ -193,10 +199,12 @@ renderCardText(card)               // 纯文本导出（时间线标 canon 供�
 import { renderWorldIndex, selectCodex, renderSceneSheet } from './world/scene-sheet.js';
 
 renderWorldIndex(card, capTokens)                  // 人物表；超配额降级为只留名字
-selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds })
-  // -> [{entry, score, why[]}]  实体连接 60 / 主题标签 30 / 钉选 100
+selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlaceId })
+  // -> [{entry, score, why[]}]  实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20
+  // currentPlaceId 只认账本 place_id，不把所有被提及的地点都标成「当前地点」
 renderSceneSheet({ ledger, present, relations, threads, codex, voices, echoes, directive, capTokens })
   // -> {text, meta}  按 when/cast/pressure/threads/relations/knowledge/directive/codex/echoes 顺序装配
+  // meta 额外记录 kept[] / dropped[] / codex_rendered（候选 ≠ 实际渲染）
 ```
 
 ## Context Engine 接口
@@ -208,8 +216,9 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
                                     branchChoice, isOpening, directive, retrieval });
 // retrieval = { text, queries, entries } | null   // 模型主动检索的辞书全文（当拍）
 // -> { messages, budget:{system,summary,recent,scene,retrieval,current,total}, state, ledger, anchor,
-//      recentTurns, echoes, meta:{present, mentioned, theme_tags, codex, branch, summary,
-//                                 retrieval, degraded} }
+//      recentTurns, echoes, meta:{present, mentioned, theme_tags, codex, codex_candidates,
+//                                 codex_rendered, codex_dropped, facts, facts_candidates,
+//                                 dropped_sections, branch, summary, retrieval, degraded} }
 ```
 
 装配顺序（缓存友好）：**稳定前缀 → 前情提要 → 追加原文 → 易变尾部**
@@ -231,8 +240,10 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   不是第四条自动注入路径，代码不因文本匹配自动塞设定。
 - codex 条目按预估成本决定条数（`scene * 0.45 / 90`），高分优先，低分整条放弃。
 - 超预算降级：裁场记单 → 裁前情提要 → 砍一半最近原文 → 截断最长非 system 消息。
+- 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
+  最近原文提到但不在场的角色只进辞书邻域/关系提示，不占完整人物卡位。
 - 玩家角色永远在场（即使不在 cast 里，也会造一个最小条目）。
-- `turns.meta.assembly` 持久化本轮装配清单（层预算、在场、辞书候选与原因、摘要/检索、降级标记）。
+- `turns.meta.assembly` 持久化本轮装配清单（层预算、在场、辞书候选/实渲染与原因、摘要/检索、降级标记）。
 
 ## Agent 接口
 
@@ -258,7 +269,9 @@ trimToolHistory(messages, baseLen, budgetTokens) -> removed
 // 史官（每轮后）
 runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, signal, guard })
 // -> { applied:{assertions, assertions_invalidated, states, changes, relations, threads, voices, ledger},
-//      scene_change, uncertain, usage, stale? }
+//      scene_change:{changed, when, place, place_id, weather, tension, present[]},
+//      uncertain, usage, stale? }
+// scene_change.present 是「这一拍镜头里的人物」的唯一依据；place 能对上辞书 place 时自动补 place_id。
 // guard: () => boolean；false = 调用期间分支/回合已变，整批丢弃并记 patches(status='stale')。
 applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerName })   // 纯函数，可单测
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
@@ -275,6 +288,8 @@ closeScene({ session, world, turnNo, reason, guard })    // 切场归档；stale
 detectSceneChange(session, update, turnNo)                // 地点/时间/在场者变了就切
 runContinuity({ session, world, turnNo, signal, guard })  // -> {issues, healthy, applied, stale?}
 runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}
+// 工具：search_events / search_assertions / get_character_state / get_threads / get_scene /
+//       get_relations(who) / search_claims(subject,predicate)
 runWorldTick({ session, world, turnNo, signal, guard })   // -> {events, stale?}
 
 // 前情提要（server/agents/summarizer.js）

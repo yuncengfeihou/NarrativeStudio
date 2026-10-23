@@ -22,6 +22,7 @@ const store = await import('../server/memory/store.js');
 const arch = await import('../server/agents/archivist.js');
 const orch = await import('../server/agents/orchestrator.js');
 const schema = await import('../server/world/schema.js');
+const effective = await import('../server/world/effective.js');
 
 let pass = 0;
 let fail = 0;
@@ -69,6 +70,36 @@ console.log('\n=== 断言：冲突失效，不删除 ===');
 
   store.retractAssertion(sid, a2);
   eq(store.getAssertions(sid, { branchId: 'main' }).length, 1, '撤回后退出有效集');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 断言：多值谓词不误判冲突 ===');
+{
+  const sid = `s-many-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '知道', object: '玉佩在发光', valid_from: 1, source_turn: 1 });
+  const conflict = store.findConflictingAssertions(sid, {
+    branchId: 'main', subject: '伍卿', predicate: '知道', object: '凌玥在门外', validFrom: 2,
+  });
+  eq(conflict.length, 0, '知道 A 与知道 B 不冲突');
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '知道', object: '凌玥在门外', valid_from: 2, source_turn: 2 });
+  const knows = store.getAssertions(sid, { branchId: 'main', subject: '伍卿' })
+    .filter((a) => a.predicate === '知道');
+  eq(knows.length, 2, '多值事实可以并存');
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '拥有', object: '无纹玉佩', valid_from: 2, source_turn: 2 });
+  store.addAssertion(sid, { subject: '伍卿', predicate: '拥有', object: '牛车', valid_from: 3, source_turn: 3 });
+  eq(store.getAssertions(sid, { branchId: 'main', subject: '伍卿' })
+    .filter((a) => a.predicate === '拥有').length, 2, '拥有多个物品不冲突');
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '位于', object: '雨街', valid_from: 1, source_turn: 1 });
+  const move = store.findConflictingAssertions(sid, {
+    branchId: 'main', subject: '伍卿', predicate: '位于', object: '凌府', validFrom: 4,
+  });
+  eq(move.map((a) => a.object), ['雨街'], '单值谓词仍然判冲突');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -223,6 +254,18 @@ console.log('\n=== 史官：净化与合并 ===');
   eq(next.quests.length, 2, '目标新增');
   eq(next.quests.find((q) => q.goal === '弄清她是谁').progress, '还没问出口', '目标按 goal 更新');
   eq(next.last_hook, '她说出「以前认识」', 'last_hook 覆盖');
+
+  const noTension = arch.mergeLedger(old, { tension: null }, {});
+  eq(noTension.tension, 0.3, '缺省张力不清零');
+  const zeroTension = arch.mergeLedger(old, { tension: 0 }, {});
+  eq(zeroTension.tension, 0, '显式 0 可以写入');
+
+  const withPresent = arch.mergeLedger(old, { present: ['玥姐姐', '伍卿', '伍卿'] }, {
+    aliasIndex: schema.buildAliasIndex(card),
+  });
+  eq(withPresent.present, ['凌玥', '伍卿'], '在场名单按别名归一、去重');
+  const noPresent = arch.mergeLedger({ ...old, present: ['凌玥'] }, {}, {});
+  eq(noPresent.present, ['凌玥'], '缺省 present 不清空上场名单');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -249,6 +292,11 @@ console.log('\n=== 史官：解析容错 ===');
   const empty = arch.parseArchivistUpdate('');
   ok(empty.scene_change.changed === false, '空输入降级不抛错');
   eq(empty.assertions, [], '空输入给空数组');
+
+  const noTension = arch.parseArchivistUpdate('{"scene_change":{"changed":false}}');
+  eq(noTension.scene_change.tension, null, '缺省 tension 解析为 null，不是 0');
+  const withPresent = arch.parseArchivistUpdate('{"scene_change":{"present":["凌玥","伍卿"]}}');
+  eq(withPresent.scene_change.present, ['凌玥', '伍卿'], '解析在场名单');
 
   const truncated = arch.parseArchivistUpdate('{"assertions":[{"subject":"凌玥","predicate":"知');
   ok(Array.isArray(truncated.assertions), '截断 JSON 不抛错');
@@ -285,6 +333,9 @@ console.log('\n=== 史官：确定性落库 ===');
   eq(r.assertions, 1, '第一轮写入 1 条断言');
   eq(r.states, 2, '写入 2 条状态（伍卿 condition + 凌玥 mood，不同人不同字段）');
   eq(r.threads, 1, '埋下 1 条线索');
+  const st1 = store.getState(sid, { branchId: 'main', atTurn: 1 });
+  eq(st1.turn_no, 1, 'states 行记录正确轮次');
+  eq(st1.state.turn_no, 1, '账本对象内部轮次也同步');
 
   r = arch.applyArchivistUpdate({
     sessionId: sid, branchId: 'main', turnNo: 5,
@@ -311,6 +362,25 @@ console.log('\n=== 史官：确定性落库 ===');
   });
   eq(r.threads, 1, '回收线索');
   eq(store.getThreads(sid, { status: 'open' }).length, 0, '回收后无未回收线索');
+
+  // 地点名能对上辞书 place 时自动补 place_id（当前地点加分不再依赖模型手写 id）。
+  const placeIdx = [{ alias: '司楼', kind: 'codex', id: 'silou', name: '司楼', type: 'place' }];
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 10,
+    aliasIndex: placeIdx,
+    update: { scene_change: { changed: true, place: '司楼' } },
+  });
+  const st10 = store.getState(sid, { branchId: 'main', atTurn: 10 });
+  eq(st10.state.place_id, 'silou', '地点名自动解析成 place_id');
+  eq(st10.state.tension, undefined, '缺省张力不写入 0');
+
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 11,
+    aliasIndex: [{ alias: '凌府', kind: 'codex', id: 'ling-fu', name: '凌府', type: 'place' }],
+    update: { scene_change: { changed: true, place: '凌府门口 → 凌府天井' } },
+  });
+  const st11 = store.getState(sid, { branchId: 'main', atTurn: 11 });
+  eq(st11.state.place_id, 'ling-fu', '复合地名按实体链接解析 place_id');
 
   const patches = store.listPatches(sid, { limit: 50 });
   ok(patches.some((p) => p.kind === 'assertion' && p.status === 'applied'), '断言提案有审计');
@@ -407,6 +477,21 @@ console.log('\n=== 世界状态：落库与投影 ===');
 
   const patches = store.listPatches(sid, { branchId: 'main', limit: 20 });
   ok(patches.some((p) => p.kind === 'world_change' && p.status === 'applied'), '实体变更进入审计');
+
+  // 模型常把「学到 A 和 B」写成数组；投影必须逐项写入，不能拼成 "A,B"。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 4,
+    aliasIndex: [], playerName: '伍卿',
+    update: {
+      changes: [{ kind: 'cast', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: ['A', 'B'] }],
+    },
+  });
+  const eff = effective.buildEffectiveWorld(schema.normalizeCard({ title: 't' }), store.getWorldState(sid, {
+    branchId: 'main', atTurn: 4,
+  }));
+  const ajiu = eff.cast.find((c) => c.id === 'a-jiu');
+  ok(ajiu.knowledge.knows.includes('A'), '数组 add 逐项写入');
+  ok(ajiu.knowledge.knows.includes('B'), '数组 add 不拼成一个字符串');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -434,6 +519,71 @@ console.log('\n=== 分支：分叉复制世界状态 ===');
   eq(store.getCharStateMap(sid, { branchId: 'b2' }).伍卿.condition, '湿透', '人物状态复制到新分支');
   eq(store.getAssertions(sid, { branchId: 'b2' }).length, 1, '有效断言复制到新分支');
   eq(store.getState(sid, { branchId: 'main', atTurn: 10 }).state.place, '凌家院子', '旧分支保持原样');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支：嵌套分叉不读废弃兄弟分支 ===');
+{
+  const sid = `s-nested-${Date.now()}`;
+  store.createSession({ id: sid, title: 'nested' });
+  store.createBranch(sid, { branchId: 'main' });
+  for (let n = 1; n <= 12; n++) {
+    store.addTurn(sid, { turn_no: n, kind: 'player', content: `P${n}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: n, kind: 'narrator', content: `N${n}`, branch_id: 'main' });
+  }
+
+  const f1 = orch.forkSession({ sessionId: sid, toTurn: 8, note: 'b2' });
+  store.addTurn(sid, { turn_no: 13, kind: 'player', content: 'P13', branch_id: f1.branch_id });
+  store.addTurn(sid, { turn_no: 13, kind: 'narrator', content: 'N13', branch_id: f1.branch_id });
+  const f2 = orch.forkSession({ sessionId: sid, toTurn: 13, note: 'b3' });
+
+  const visible = store.getTurnsForBranch(sid, f2.branch_id, f2.fork_turn, { kinds: ['player'] });
+  eq(visible.map((t) => t.turn_no), [1, 2, 3, 4, 5, 6, 7, 8, 13], 'b3 只看祖先链：main ≤8 + b2 第 13 轮');
+  ok(!visible.some((t) => t.branch_id === 'main' && t.turn_no > 8), '看不到废弃兄弟分支的 9–12 轮');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支：关系/线索按分叉点重放 ===');
+{
+  const sid = `s-replay-${Date.now()}`;
+  store.createSession({ id: sid, title: 'replay' });
+  store.createBranch(sid, { branchId: 'main' });
+  for (let n = 1; n <= 12; n++) {
+    store.addTurn(sid, { turn_no: n, kind: 'player', content: `P${n}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: n, kind: 'narrator', content: `N${n}`, branch_id: 'main' });
+  }
+
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '凌玥', to: '伍卿', kind: '旧识', sentiment: 0.3, turn_no: 1,
+  });
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '玉佩发光', status: 'open', planted_turn: 1, turn_no: 1,
+  });
+  // 分叉点之后才发生的变化：新线不应该看到。
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '凌玥', to: '伍卿', kind: '决裂', sentiment: -0.8, turn_no: 9,
+  });
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '玉佩发光', status: 'resolved', resolved_turn: 9, turn_no: 9,
+  });
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '姬凡', to: '伍卿', kind: '敌意', sentiment: -0.5, turn_no: 9,
+  });
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '第九轮才埋的线索', status: 'open', planted_turn: 9, turn_no: 9,
+  });
+
+  const f = orch.forkSession({ sessionId: sid, toTurn: 8, note: '回滚' });
+  const rel = store.getRelations(sid, { branchId: f.branch_id });
+  eq(rel.find((r) => r.from_name === '凌玥' && r.to_name === '伍卿').kind, '旧识', '关系回到分叉点的版本');
+  ok(!rel.some((r) => r.from_name === '姬凡'), '分叉后才建立的关系不出现');
+
+  const th = store.getThreads(sid, { branchId: f.branch_id });
+  eq(th.find((t) => t.title === '玉佩发光').status, 'open', '线索回到未回收状态');
+  ok(!th.some((t) => t.title === '第九轮才埋的线索'), '分叉后才埋的线索不出现');
+
+  const mainRel = store.getRelations(sid, { branchId: 'main' });
+  eq(mainRel.find((r) => r.from_name === '凌玥' && r.to_name === '伍卿').kind, '决裂', '旧分支保持原样');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

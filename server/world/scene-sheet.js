@@ -95,7 +95,9 @@ export function renderWorldIndex(card, capTokens = 1200) {
  *
  * @returns {Array<{entry, score, why:string[]}>}
  */
-export function selectCodex(card, { presentIds = [], mentionedIds = [], threadTags = [], pinnedIds = [] } = {}) {
+export function selectCodex(card, {
+  presentIds = [], mentionedIds = [], threadTags = [], pinnedIds = [], currentPlaceId = null,
+} = {}) {
   const linkSet = new Set([...presentIds, ...mentionedIds, ...pinnedIds]);
   const tagSet = new Set((threadTags || []).filter(Boolean));
   const out = [];
@@ -110,7 +112,10 @@ export function selectCodex(card, { presentIds = [], mentionedIds = [], threadTa
       why.push('实体在场');
     }
     if (tagSet.size && entry.tags?.some((t) => tagSet.has(t))) { score += 30; why.push('本场主题'); }
-    if (entry.type === 'place' && presentIds.includes(entry.id)) { score += 20; why.push('当前地点'); }
+    if (entry.type === 'place' && currentPlaceId && entry.id === currentPlaceId) {
+      score += 20;
+      why.push('当前地点');
+    }
     if (score > 0) out.push({ entry, score, why });
   }
   out.sort((a, b) => b.score - a.score
@@ -190,7 +195,15 @@ export function renderSceneSheet({
   voices = {}, echoes = [], facts = [], worldRuntime = {}, directive = '', capTokens = 2200,
 } = {}) {
   const L = ledger || {};
-  const meta = { present: present.length, codex: codex.length, echoes: echoes.length, facts: facts.length };
+  const meta = {
+    present: present.length,
+    codex: codex.length,
+    echoes: echoes.length,
+    facts: facts.length,
+    kept: [],
+    dropped: [],
+    codex_rendered: 0,
+  };
   if (!present.length && !L.place && !L.time) return { text: '', meta };
 
   const head = [];
@@ -282,6 +295,14 @@ export function renderSceneSheet({
     }
   }
 
+  const keptKeys = new Set(kept.map((s) => s.key));
+  meta.kept = kept.map((s) => s.key);
+  meta.dropped = sections.filter((s) => !keptKeys.has(s.key)).map((s) => s.key);
+  const codexText = kept.find((s) => s.key === 'codex')?.text || '';
+  meta.codex_rendered = codexText
+    ? codexText.split('\n').filter((line) => line.startsWith('· ')).length
+    : 0;
+
   const body = kept.map((s) => s.text).join('\n\n');
   const text = body ? `${head.join('\n')}\n\n${body}` : '';
   meta.tokens = estimateTokens(text);
@@ -337,13 +358,23 @@ export function lookupCodex(card, queries, { limit = 3 } = {}) {
 /** 把一个辞书条目渲染成检索结果块（全文级，不是摘要）。 */
 export function renderCodexHit(entry) {
   const lines = [`· ${entry.name}${entry.type ? `（${entry.type}）` : ''}`];
-  if (entry.summary) lines.push(`  ${entry.summary}`);
+  const seen = new Set();
+  // 同一段文字常同时出现在 summary / facets.history / detail 里；按归一化文本去重。
+  const push = (prefix, value) => {
+    const text = str(value);
+    if (!text) return;
+    const key = text.replace(/\s+/g, '');
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    lines.push(`${prefix}${text}`);
+  };
+  push('  ', entry.summary);
   const f = entry.facets || {};
-  if (f.rules?.length) lines.push(`  规则：${join(f.rules, '；')}`);
-  if (f.consequences?.length) lines.push(`  后果：${join(f.consequences, '；')}`);
-  if (f.sensory) lines.push(`  质感：${f.sensory}`);
-  if (f.history) lines.push(`  来历：${f.history}`);
-  if (entry.detail) lines.push(`  细节：${entry.detail}`);
+  if (f.rules?.length) push('  规则：', join(f.rules, '；'));
+  if (f.consequences?.length) push('  后果：', join(f.consequences, '；'));
+  push('  质感：', f.sensory);
+  push('  来历：', f.history);
+  push('  细节：', entry.detail);
   if (entry.reveal === 'secret') lines.push('  （引擎掌握，不得说破）');
   return lines.join('\n');
 }

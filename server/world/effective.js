@@ -128,8 +128,13 @@ function setAt(obj, path, value) {
 
 function addList(obj, path, value) {
   const list = asArray(getAt(obj, path)).slice();
-  const v = String(value ?? '');
-  if (v && !list.includes(v)) list.push(v);
+  // add 允许一次给多个值：模型常把「学到 A 和 B」写成 value: ["A","B"]。
+  // 不能 String(array)，否则会变成一条 "A,B"。
+  const items = Array.isArray(value) ? value : [value];
+  for (const raw of items) {
+    const v = String(raw ?? '').trim();
+    if (v && !list.includes(v)) list.push(v);
+  }
   setAt(obj, path, list);
 }
 

@@ -132,9 +132,12 @@ function loadLedger(sessionId, anchor, { branchId, atTurn }) {
 /* ══════════════════════════════════════════════════════════════════════ */
 
 /**
- * 在场 = 账本里记着的 + 玩家文本实体链接命中的 + always_present 的 + 玩家角色本身。
- * 不再用「名字出现在最近原文里」这种关键词扫描——那是 v3 的做法。
- * @returns {{present:Array, mentionedIds:{cast:[],codex:[]}}}
+ * 在场 = 账本显式 present + 玩家这一拍提到的人 + always_present 的 + 玩家角色本身。
+ *
+ * 旧会话没有 ledger.present 时退回 characters（兼容），但新会话不再把
+ * 「账本里出现过的人」等同于「镜头里的人」——那是人物块膨胀的根因。
+ * 最近原文提到的人只进辞书邻域/关系提示，不自动占完整人物卡位。
+ * @returns {Array}
  */
 function pickPresent(card, { ledger, linked }) {
   const byId = new Map((card.cast || []).map((c) => [c.id, c]));
@@ -142,7 +145,10 @@ function pickPresent(card, { ledger, linked }) {
   const ids = new Set();
 
   for (const c of card.cast || []) if (c.always_present) ids.add(c.id);
-  for (const key of Object.keys(ledger?.characters || {})) {
+  const stage = Array.isArray(ledger?.present) && ledger.present.length
+    ? ledger.present
+    : Object.keys(ledger?.characters || {});
+  for (const key of stage) {
     const hit = byId.get(key) || byName.get(key);
     ids.add(hit ? hit.id : key);
   }
@@ -204,7 +210,16 @@ function pickCodex(card, { ledger, linked, pinnedIds = [] }) {
   for (const item of ledger?.inventory || []) if (item.id) presentIds.push(item.id);
 
   const tags = sceneThemeTags(card, presentIds, ledger?.theme_tags || []);
-  return { candidates: selectCodex(card, { presentIds, mentionedIds: linked?.codex || [], threadTags: tags, pinnedIds }), themeTags: tags };
+  return {
+    candidates: selectCodex(card, {
+      presentIds,
+      mentionedIds: linked?.codex || [],
+      threadTags: tags,
+      pinnedIds,
+      currentPlaceId: ledger?.place_id || null,
+    }),
+    themeTags: tags,
+  };
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -337,11 +352,19 @@ export async function assembleContext({
   const aliasIndex = buildAliasIndex(card);
   const recentText = getRecentTextForBranch(sessionId, branchId, forkTurn, config.context.loreScanDepth || 8);
   const openingSeed = isOpening ? str(anchor?.opening_seed) : '';
-  const scanText = [playerText || '', branchChoice?.description || '', recentText, openingSeed].join('\n');
-  const linked = linkEntities(scanText, aliasIndex);
+  // 在场只看「玩家这一拍提到谁」；最近原文的提及只用于辞书邻域与关系提示。
+  const linkedPlayer = linkEntities(
+    [playerText || '', branchChoice?.description || '', openingSeed].join('\n'),
+    aliasIndex,
+  );
+  const linkedRecent = linkEntities(recentText, aliasIndex);
+  const linked = {
+    cast: [...new Set([...(linkedPlayer.cast || []), ...(linkedRecent.cast || [])])],
+    codex: [...new Set([...(linkedPlayer.codex || []), ...(linkedRecent.codex || [])])],
+  };
 
   /* ---- 在场卡司 ---- */
-  const present = pickPresent(card, { ledger, linked });
+  const present = pickPresent(card, { ledger, linked: linkedPlayer });
 
   /* ---- 辞书 ---- */
   const pinnedIds = (card.codex || []).filter((e) => e.pinned).map((e) => e.id);
@@ -364,12 +387,13 @@ export async function assembleContext({
   const sceneCap = budget.scene;
   const perEntryCost = 90;
   const codexSlots = Math.max(1, Math.floor(sceneCap * 0.45 / perEntryCost));
+  const selectedCodex = candidates.slice(0, codexSlots);
   const sheet = renderSceneSheet({
     ledger,
     present,
     relations,
     threads,
-    codex: candidates.slice(0, codexSlots),
+    codex: selectedCodex,
     voices: {},
     echoes,
     facts,
@@ -377,6 +401,9 @@ export async function assembleContext({
     directive: directive || str(session.settings?.scene_directive),
     capTokens: sceneCap,
   });
+  // 候选 ≠ 实际渲染：场记单预算不足时，codex/facts 可能整段被丢。
+  const codexRendered = sheet.meta?.codex_rendered ?? selectedCodex.length;
+  const factsRendered = (sheet.meta?.kept || []).includes('facts') ? facts.length : 0;
 
   /* ---- 系统层（稳定前缀） ---- */
   const systemMsg = { role: 'system', content: buildSystemLayer(session, world, { card, indexCap: budget.system }) };
@@ -387,8 +414,16 @@ export async function assembleContext({
     branchId,
     atTurn: Number.isInteger(turnNo) ? turnNo : 0,
   });
+  // 摘要层有独立配额：摘要 Agent 可能写超，装配时按 BUDGET_SUMMARY 截断，
+  // 不能因为总预算还宽裕就让它越过自己的层预算。
   const summaryMsg = summary
-    ? { role: 'user', content: `【前情提要】以下是更早剧情的接力摘要，是既定事实。\n\n${summary.text}` }
+    ? {
+      role: 'user',
+      content: truncateToTokens(
+        `【前情提要】以下是更早剧情的接力摘要，是既定事实。\n\n${summary.text}`,
+        budget.summary,
+      ),
+    }
     : null;
 
   /* ---- 最近原文 ---- */
@@ -487,12 +522,18 @@ export async function assembleContext({
       present: present.map((c) => ({ id: c.id, name: c.name, role: c.role })),
       mentioned: linked,
       theme_tags: themeTags,
-      codex: candidates.slice(0, 8).map((c) => ({ id: c.entry.id, name: c.entry.name, why: c.why })),
+      codex: selectedCodex.slice(0, Math.min(codexRendered, 8))
+        .map((c) => ({ id: c.entry.id, name: c.entry.name, why: c.why })),
       codex_total: card.codex.length,
+      codex_candidates: selectedCodex.length,
+      codex_rendered: codexRendered,
+      codex_dropped: Math.max(0, selectedCodex.length - codexRendered),
       timeline_past: (card.timeline || []).filter((t) => t.canon === 'past').length,
       timeline_future_held: (card.timeline || []).filter((t) => t.canon === 'future').length,
       world_state_changes: deltas.length,
-      facts: facts.length,
+      facts: factsRendered,
+      facts_candidates: facts.length,
+      dropped_sections: sheet.meta?.dropped || [],
       branch: branchId,
       summary: summary ? { id: summary.id, covers_turn_to: summary.covers_turn_to, tokens: breakdown.summary } : null,
       retrieval: retrieval?.text

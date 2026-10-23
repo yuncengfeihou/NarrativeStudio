@@ -541,7 +541,11 @@ export function createSessionWithSettings({ title, settings, worldId = null, anc
   // 用锚点快照初始化账本（turn_no = 0 表示「开局之前」）
   const snap = anchor ? card?.anchors.find((a) => a.id === anchor) : null;
   if (snap?.snapshot && Object.keys(snap.snapshot).length) {
-    setState(id, 0, { ...snap.snapshot, turn_no: 0 }, 'main');
+    // 开局在场 = 锚点快照里真正有状态的人；之后由史官的 scene_change.present 维护。
+    const present = Array.isArray(snap.snapshot.present)
+      ? snap.snapshot.present
+      : Object.keys(snap.snapshot.characters || {});
+    setState(id, 0, { ...snap.snapshot, present, turn_no: 0 }, 'main');
   }
   return getSession(id);
 }

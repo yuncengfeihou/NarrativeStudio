@@ -186,6 +186,23 @@ console.log('\n=== 辞书挑选（无关键词）===');
 
   const c = sheet.selectCodex(card, { presentIds: [], threadTags: [] });
   ok(c.every((x) => x.entry.pinned), '无连接无主题时只剩钉选项');
+
+  // 「当前地点」只认账本 place_id，不把所有被提及的地点都标成当前地点。
+  const places = schema.normalizeCard({
+    title: 'p',
+    codex: [
+      { id: 'ling-fu', name: '凌府', type: 'place' },
+      { id: 'silou', name: '司楼', type: 'place' },
+    ],
+  });
+  const d = sheet.selectCodex(places, {
+    presentIds: ['ling-fu', 'silou'], currentPlaceId: 'ling-fu',
+  });
+  const lf = d.find((x) => x.entry.id === 'ling-fu');
+  const sl = d.find((x) => x.entry.id === 'silou');
+  eq(lf.score, 80, '当前地点 +20');
+  ok(lf.why.includes('当前地点'), '只给当前地点标注');
+  ok(!sl.why.includes('当前地点'), '被提及但不是当前地点不加分');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -307,6 +324,12 @@ console.log('\n=== 辞书检索（模型主动取证） ===');
   const text = sheet.renderCodexHit(card.codex[0]);
   ok(text.includes('入内即除籍'), '检索结果渲染规则');
   ok(text.includes('官营青楼'), '检索结果渲染摘要');
+
+  const duplicated = sheet.renderCodexHit({
+    name: '玉佩', summary: '无纹玉佩',
+    facets: { history: '完整来历' }, detail: '完整来历',
+  });
+  eq((duplicated.match(/完整来历/g) || []).length, 1, 'summary/history/detail 重复文本只渲染一次');
 }
 
 console.log(`\n${'═'.repeat(50)}`);
