@@ -431,6 +431,8 @@
 .sel-strip-title { font-weight: 600; }
 
 .quick-branches {
+  position: relative;
+  z-index: 1;
   display: flex;
   gap: 5px;
   overflow-x: auto;
@@ -564,9 +566,9 @@
 .jump-latest {
   position: absolute;
   left: 50%;
-  bottom: calc(88px + var(--safe-b));
+  bottom: calc(112px + var(--safe-b));
   transform: translate(-50%, 8px);
-  z-index: 25;
+  z-index: 30;
   display: flex;
   align-items: center;
   gap: 4px;
