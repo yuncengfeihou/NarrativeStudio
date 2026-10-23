@@ -20,16 +20,35 @@
   <link rel="stylesheet" href="/styles/chat.css" />
   <link rel="stylesheet" href="/styles/panels.css" />
   <script>
-    /* 首屏前解析主题，避免深色模式闪白 */
+    /* 首屏前解析偏好：主题避免闪白，字体与字号避免重排。
+       这里的字体栈规则必须与 store.js → applyAppearancePrefs 保持一致。 */
     (function () {
       try {
-        var raw = localStorage.getItem('narra.prefs.v3');
-        var theme = raw ? (JSON.parse(raw).theme || 'system') : 'system';
+        var raw = localStorage.getItem('narra.prefs.v4');
+        var prefs = raw ? JSON.parse(raw) : {};
+        var theme = prefs.theme || 'system';
         var dark = theme === 'dark' || (theme === 'system' &&
           window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches);
-        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light');
+        var root = document.documentElement;
+        root.setAttribute('data-theme', dark ? 'dark' : 'light');
         var m = document.querySelector('meta[name="theme-color"]');
         if (m) m.setAttribute('content', dark ? '#171614' : '#FCFCFB');
+
+        function stack(value, fallback) {
+          var v = String(value || '').trim();
+          if (!v) return '';
+          if (v.indexOf(',') === -1) v = '"' + v.replace(/"/g, '\\"') + '"';
+          return v + ', ' + fallback;
+        }
+        var uiFont = prefs.uiFont != null ? prefs.uiFont : prefs.titleFont;
+        var ui = stack(uiFont, 'var(--font-ui-base)');
+        if (ui) root.style.setProperty('--font-ui', ui);
+        var read = stack(prefs.readingFont, 'var(--font-read-base)');
+        if (read) root.style.setProperty('--font-read', read);
+
+        var widths = { compact: '34em', normal: '42em', wide: '50em' };
+        root.style.setProperty('--read-max', widths[prefs.readingWidth] || widths.normal);
+        if (prefs.readingSize) root.style.setProperty('--fs-read', prefs.readingSize + 'px');
       } catch (e) { /* 忽略 */ }
     })();
   </script>
@@ -53,6 +72,28 @@
   </div>
 
   <div id="overlay-root"></div>
+
+  <script>
+    // 启动期错误显形：模块求值/动态 import 失败时，把错误写进 #boot，
+    // 避免静默停在「正在载入」。app.js 的 boot() 还会再包一层。
+    window.__bootErrors = [];
+    window.addEventListener('error', (e) => {
+      window.__bootErrors.push((e.message || 'error') + ' @ ' + (e.filename || '').split('/').pop() + ':' + (e.lineno || ''));
+    });
+    window.addEventListener('unhandledrejection', (e) => {
+      const r = e.reason;
+      window.__bootErrors.push('unhandled: ' + ((r && r.stack) ? r.stack.split('\n').slice(0, 2).join(' | ') : String(r)));
+    });
+    setTimeout(() => {
+      const boot = document.getElementById('boot');
+      if (boot && window.__bootErrors.length) {
+        const box = document.createElement('div');
+        box.style.cssText = 'position:fixed;inset:auto 12px 12px 12px;max-height:45%;overflow:auto;padding:12px;border-radius:10px;background:#7f1d1d;color:#fff;font:12px/1.7 ui-monospace,monospace;white-space:pre-wrap;z-index:9999;';
+        box.textContent = window.__bootErrors.join('\n');
+        document.body.appendChild(box);
+      }
+    }, 2500);
+  </script>
 
   <script type="module" src="/js/app.js"></script>
 </body>

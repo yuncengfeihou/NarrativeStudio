@@ -9,8 +9,7 @@
 
 import { $, el, clear } from './util.js';
 import { icon } from './icons.js';
-import { initStore, cycleTheme, ui } from './store.js';
-import { TONE } from './ui-kit.js';
+import { initStore, ui } from './store.js';
 
 const mainRoot = $('#main');
 const overlayRoot = $('#overlay-root');
@@ -52,7 +51,8 @@ const loaders = {
 
 let current = null;
 
-export function closeAllOverlays() {
+/** 路由切换时清掉所有浮层（内部用，不对外导出）。 */
+function closeAllOverlays() {
   const nodes = overlayRoot.querySelectorAll('.veil, .sheet, .dialog, .popover, .actions');
   nodes.forEach((n) => {
     n.classList.remove('is-open');
@@ -63,25 +63,32 @@ export function closeAllOverlays() {
 }
 
 async function handleRoute() {
-  const route = matchRoute();
-  closeAllOverlays();
-  if (current?.handle?.unmount) {
-    try { current.handle.unmount(); } catch (err) { console.error('[route] unmount', err); }
-  }
-  current = null;
-  clear(mainRoot);
+  // 整个流程纳入 try：路由解析、卸载旧视图、清空主区任何一步抛错，
+  // 都要显示成错误页而不是静默停在「正在载入」。
   try {
-    const mod = await (loaders[route.name] || loaders.worlds)();
-    const view = mod.default;
-    if (!view?.mount) throw new Error(`视图 ${route.name} 缺少 mount`);
-    const handle = await view.mount(mainRoot, route.params);
-    current = { name: route.name, handle: handle || {} };
-    mainRoot.querySelector('.view')?.classList.add('is-active');
+    const route = matchRoute();
+    closeAllOverlays();
+    if (current?.handle?.unmount) {
+      try { current.handle.unmount(); } catch (err) { console.error('[route] unmount', err); }
+    }
+    current = null;
+    clear(mainRoot);
+    try {
+      const mod = await (loaders[route.name] || loaders.worlds)();
+      const view = mod.default;
+      if (!view?.mount) throw new Error(`视图 ${route.name} 缺少 mount`);
+      const handle = await view.mount(mainRoot, route.params);
+      current = { name: route.name, handle: handle || {} };
+      mainRoot.querySelector('.view')?.classList.add('is-active');
+    } catch (err) {
+      console.error('[route] mount failed', err);
+      renderError(err);
+    }
+    document.dispatchEvent(new CustomEvent('route:changed', { detail: route }));
   } catch (err) {
-    console.error('[route] mount failed', err);
+    console.error('[route] failed', err);
     renderError(err);
   }
-  document.dispatchEvent(new CustomEvent('route:changed', { detail: route }));
 }
 
 function renderError(err) {
@@ -177,8 +184,8 @@ export function openSheet(opts = {}) {
   let confirmBtn = null;
   const api = { body, sheet, close: () => close(), setConfirmDisabled(v) { if (confirmBtn) confirmBtn.disabled = v; } };
 
-  const cancelBtn = el('button.btn.btn-ghost', { type: 'button' }, cancelText);
-  cancelBtn.addEventListener('click', () => close());
+  const cancelBtn = cancelText === null ? null : el('button.btn.btn-ghost', { type: 'button' }, cancelText);
+  if (cancelBtn) cancelBtn.addEventListener('click', () => close());
 
   if (confirmText) {
     confirmBtn = el('button.btn.btn-primary', { type: 'button' }, confirmText);
@@ -384,14 +391,6 @@ export function openPopover(anchor, items, opts = {}) {
  * 主题
  * ========================================================================= */
 
-export function toggleTheme() {
-  const next = cycleTheme();
-  const label = next === 'light' ? '浅色' : next === 'dark' ? '深色' : '跟随系统';
-  toast(`外观：${label}`);
-  document.dispatchEvent(new CustomEvent('theme:changed'));
-  return next;
-}
-
 ui.subscribe((s, prev) => {
   if (s.theme !== prev.theme) document.documentElement.dataset.prefTheme = s.theme;
 });
@@ -401,20 +400,23 @@ ui.subscribe((s, prev) => {
  * ========================================================================= */
 
 async function boot() {
-  initStore();
-  const { initShell } = await import('./shell.js');
-  initShell();
-  window.addEventListener('hashchange', handleRoute);
-  document.addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      document.dispatchEvent(new CustomEvent('shell:focus-search'));
-    }
-  });
-  handleRoute();
+  try {
+    initStore();
+    const { initShell } = await import('./shell.js');
+    initShell();
+    window.addEventListener('hashchange', handleRoute);
+    document.addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        document.dispatchEvent(new CustomEvent('shell:focus-search'));
+      }
+    });
+    await handleRoute();
+  } catch (err) {
+    console.error('[boot] failed', err);
+    renderError(err);
+  }
 }
-
-export { TONE };
 
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', boot);

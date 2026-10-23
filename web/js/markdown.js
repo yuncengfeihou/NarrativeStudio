@@ -45,15 +45,3 @@ function renderInline(text) {
 
   return html;
 }
-
-/**
- * 纯文本摘要（用于列表预览）：去掉 markdown 标记与多余空白。
- */
-export function plainExcerpt(text, max = 120) {
-  const s = String(text ?? '')
-    .replace(/\*\*/g, '')
-    .replace(/[「」“”]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
-  return s.length > max ? s.slice(0, max - 1) + '…' : s;
-}

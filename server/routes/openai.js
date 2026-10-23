@@ -15,7 +15,7 @@
  */
 import { Router } from 'express';
 import { config } from '../config.js';
-import { chat, chatStream } from '../llm.js';
+import { chat } from '../llm.js';
 import { runTurn, createSessionWithSettings } from '../agents/orchestrator.js';
 import { getSession } from '../memory/store.js';
 
@@ -25,7 +25,6 @@ const VIRTUAL_MODELS = [
   { id: config.upstream.model, object: 'model', created: 1700000000, owned_by: 'stepfun' },
   { id: 'roleplay-narrator', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
   { id: 'roleplay-branch', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
-  { id: 'roleplay-memory', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
   { id: 'step-router-v1', object: 'model', created: 1700000000, owned_by: 'stepfun' },
 ];
 
@@ -124,7 +123,7 @@ function sanitizeBody(body) {
     reasoning_effort, reasoning_format, response_format, stream, stream_options,
     // strip our custom fields
     session_id, settings, generate_branches, branch_choice, roleplay, world_id, is_opening,
-    ...rest
+    directive, ...rest
   } = body;
   const out = { model: model || config.upstream.model, messages: messages || [], ...rest };
   if (temperature != null) out.temperature = temperature;

@@ -21,7 +21,7 @@ function lastUserIndex(messages) {
 /**
  * 组装最终 messages（纯函数，便于单测）。
  */
-export function buildNarratorMessages({ session, world, context, guidance = '' } = {}) {
+function buildNarratorMessages({ session, world, context, guidance = '' } = {}) {
   const messages = Array.isArray(context?.messages)
     ? context.messages.map((m) => ({ ...m }))
     : [];

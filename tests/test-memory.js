@@ -1,24 +1,26 @@
 #!/usr/bin/env node
 /**
- * tests/test-memory.js — 记忆 Agent 的确定性逻辑（无网络）
+ * tests/test-memory.js — 记忆系统 v4 的确定性逻辑（无网络）
  *
  * 覆盖：
- *   - state 合并（标量/人物/物品/任务）
- *   - 中文相似度
- *   - memory update 的 JSON 解析与打捞容错
- *   - 反思解析
- *   - 线索 / 关系 / 反思的存储与回滚清理
+ *   - 断言：冲突失效不删除、有效期查询、撤回
+ *   - 人物状态：按字段可寻址、局部更新、历史可查
+ *   - 原声：存取与每人限量
+ *   - 分支：回合可见性（自己的 + 继承的）
+ *   - 场记：写入与查询
+ *   - 史官：sanitize / mergeLedger / parseArchivistUpdate / applyArchivistUpdate
+ *   - 提案审计表
  */
 import './load-env.js';
 import path from 'node:path';
-import fs from 'node:fs';
 import os from 'node:os';
 
 const tmp = path.join(os.tmpdir(), `narra-mem-${Date.now()}.db`);
 process.env.DB_PATH = tmp;
 
-const agent = await import('../server/agents/memory-agent.js');
 const store = await import('../server/memory/store.js');
+const arch = await import('../server/agents/archivist.js');
+const schema = await import('../server/world/schema.js');
 
 let pass = 0;
 let fail = 0;
@@ -31,143 +33,307 @@ function eq(a, b, label) {
   ok(JSON.stringify(a) === JSON.stringify(b), label, `expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }
 
-console.log('\n=== state 合并 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 断言：冲突失效，不删除 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  const a1 = store.addAssertion(sid, { subject: '凌玥', predicate: '位于', object: '帝都', valid_from: 1, source_turn: 1 });
+  const a2 = store.addAssertion(sid, { subject: '凌玥', predicate: '位于', object: '湘曲', valid_from: 5, source_turn: 5 });
+
+  const conflict = store.findConflictingAssertions(sid, {
+    branchId: 'main', subject: '凌玥', predicate: '位于', object: '湘曲', validFrom: 5,
+  });
+  eq(conflict.map((c) => c.id), [a1], '同主同谓不同对象 → 判为冲突');
+
+  store.invalidateAssertion(sid, a1, { validTo: 5, supersededBy: a2 });
+
+  const active = store.getAssertions(sid, { branchId: 'main' });
+  eq(active.map((a) => a.id), [a2], '冲突后旧断言退出有效集');
+  const all = store.getAssertions(sid, { branchId: 'main', includeInvalid: true });
+  ok(all.length === 2, '旧断言仍在库里（没被删）');
+  eq(all.find((a) => a.id === a1).status, 'invalidated', '状态标为 invalidated');
+  eq(all.find((a) => a.id === a1).valid_to, 5, '记下失效轮次');
+  eq(all.find((a) => a.id === a1).superseded_by, a2, '指向继任者');
+
+  const at3 = store.getAssertions(sid, { branchId: 'main', atTurn: 3 });
+  eq(at3.map((a) => a.object), ['帝都'], '按时间点回溯得到当时的事实');
+  const at9 = store.getAssertions(sid, { branchId: 'main', atTurn: 9 });
+  eq(at9.map((a) => a.object), ['湘曲'], '按时间点查询得到新事实');
+
+  store.addAssertion(sid, { subject: '凌玥', predicate: '想要', object: '带走他', valid_from: 6, source_turn: 6 });
+  eq(store.getAssertions(sid, { branchId: 'main', subject: '凌玥' }).length, 2, '不同谓词不冲突');
+
+  store.retractAssertion(sid, a2);
+  eq(store.getAssertions(sid, { branchId: 'main' }).length, 1, '撤回后退出有效集');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 人物状态：按字段可寻址 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  store.setCharState(sid, { branchId: 'main', who: '伍卿', field: 'condition', value: '湿透', turn: 1 });
+  store.setCharState(sid, { branchId: 'main', who: '伍卿', field: 'mood', value: '窘迫', turn: 1 });
+  store.setCharState(sid, { branchId: 'main', who: '伍卿', field: 'condition', value: '换了干衣', turn: 3 });
+
+  const now = store.getCharStateMap(sid, { branchId: 'main' });
+  eq(now['伍卿'], { condition: '换了干衣', mood: '窘迫' }, '每字段各取最新，互不覆盖');
+  const at1 = store.getCharStateMap(sid, { branchId: 'main', atTurn: 2 });
+  eq(at1['伍卿'].condition, '湿透', '可按轮次回溯');
+  const at5 = store.getCharStateMap(sid, { branchId: 'main', atTurn: 5 });
+  eq(at5['伍卿'].condition, '换了干衣', '新值对后续轮次生效');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 原声 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  for (let i = 1; i <= 5; i++) {
+    store.addVoice(sid, { branchId: 'main', who: '凌玥', text: `第${i}句`, turn_no: i });
+  }
+  store.addVoice(sid, { branchId: 'main', who: '张兰', text: '去去去', turn_no: 1 });
+
+  const map = store.getVoiceMap(sid, { branchId: 'main', perWho: 2 });
+  eq(map['凌玥'], ['第5句', '第4句'], '每人限量取最近');
+  eq(map['张兰'], ['去去去'], '其他人不受影响');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支：回合可见性 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  for (let i = 1; i <= 3; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `正文${i}`, branch_id: 'main' });
+  }
+
+  store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 2 });
+  store.addTurn(sid, { turn_no: 4, kind: 'player', content: '另一条路', branch_id: 'b2' });
+  store.addTurn(sid, { turn_no: 4, kind: 'narrator', content: '另一种可能', branch_id: 'b2' });
+
+  const inMain = store.getTurnsForBranch(sid, 'main', 0).map((t) => `${t.turn_no}${t.kind[0]}`);
+  eq(inMain, ['1p', '1n', '2p', '2n', '3p', '3n'], 'main 分支只看得到自己的 3 轮');
+
+  const inB2 = store.getTurnsForBranch(sid, 'b2', 2).map((t) => `${t.turn_no}${t.kind[0]}`);
+  eq(inB2, ['1p', '1n', '2p', '2n', '4p', '4n'], 'b2 看得到继承的 1-2 轮 + 自己的第 4 轮');
+
+  // n 的单位是「回合」不是「消息」：一个回合 = player + narrator 两条
+  const recent = store.getRecentTurnsForBranch(sid, 'b2', 2, 2).map((t) => t.content);
+  eq(recent, ['行动2', '正文2', '另一条路', '另一种可能'], '最近 2 个回合 = 4 条消息，按时间正序');
+
+  const one = store.getRecentTurnsForBranch(sid, 'b2', 2, 1).map((t) => t.content);
+  eq(one, ['另一条路', '另一种可能'], 'n=1 只取最后一个回合');
+
+  const text = store.getRecentTextForBranch(sid, 'b2', 2, 8);
+  ok(text.includes('另一种可能') && text.includes('正文1'), '分支原文含继承与新写');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 场记 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', turn_from: 1, turn_to: 4,
+    when_label: '初冬', place: '雨街', cast: ['伍卿', '凌玥'],
+    question: '她会不会认下这个乞丐？', outcome: '她把他带上了车',
+    threads: ['七年前的雨夜'], state: { place: '雨街' },
+  });
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S002', turn_from: 5, turn_to: 9,
+    when_label: '当夜', place: '凌家院子', cast: ['伍卿', '凌玥', '黎婆'],
+    question: '奶奶会接受她吗？', outcome: '逐客令', threads: [],
+    state: { place: '凌家院子' },
+  });
+
+  const scenes = store.getScenes(sid, { branchId: 'main' });
+  eq(scenes.length, 2, '两场记录');
+  eq(scenes[0].question, '她会不会认下这个乞丐？', '场次要写成一个问题');
+  ok(scenes[0].outcome.includes('带上了车'), '结局记局势变化');
+  eq(store.getSceneAt(sid, 6, 'main').scene_id, 'S002', '按轮次定位场次');
+  eq(store.latestScene(sid, 'main').scene_id, 'S002', '最近一场');
+
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S002', turn_from: 5, turn_to: 11,
+    question: '奶奶会接受她吗？', outcome: ' revised',
+  });
+  eq(store.getScenes(sid, { branchId: 'main' }).length, 2, '同 scene_id 是更新不是新增');
+  eq(store.latestScene(sid, 'main').turn_to, 11, '更新生效');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 史官：净化与合并 ===');
+{
+  const card = schema.normalizeCard({
+    title: 't',
+    cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }],
+  });
+  const idx = schema.buildAliasIndex(card);
+
+  const a = arch.sanitizeAssertion({ subject: '玥姐姐', predicate: '知道', object: '七年前的真相', confidence: 9, visibility: 'x' }, idx);
+  eq(a.subject, '凌玥', '断言主语按别名归一');
+  eq(a.confidence, 1, 'confidence 越界被 clamp');
+  eq(a.visibility, 'public', '非法 visibility 回落 public');
+  ok(arch.sanitizeAssertion({ subject: '凌玥', predicate: '瞬移', object: 'x' }, idx) === null, '谓词不在白名单 → 拒绝');
+  ok(arch.sanitizeAssertion({ subject: '', predicate: '知道', object: 'x' }, idx) === null, '缺主语 → 拒绝');
+
+  const s = arch.sanitizeState({ who: '玥姐姐', field: 'mood', value: ' 急切 ' }, idx);
+  eq(s, { who: '凌玥', field: 'mood', value: '急切' }, '状态键按别名归一并去空白');
+  ok(arch.sanitizeState({ who: '凌玥', field: '心情', value: 'x' }, idx) === null, '字段不在白名单 → 拒绝');
+}
+
 {
   const old = {
-    time: '第一日', location: '村口', tension: 0.2,
-    characters: { 伍卿: { mood: '平静' }, 黎婆: { mood: '沉默' } },
-    inventory: ['牛绳', '干粮'],
-    quests: [{ goal: '卖破烂', progress: '在路上', status: 'active' }],
+    time: '初冬', place: '雨街', tension: 0.3,
+    characters: { 伍卿: { mood: '窘迫' }, 张兰: { mood: '轻蔑' } },
+    inventory: [{ name: '玉佩', holder: '伍卿' }, { name: '空瓶' }],
+    quests: [{ goal: '弄清她是谁', status: 'active' }],
   };
   const delta = {
-    time: '第二日',
-    tension: 0.7,
-    characters: { 伍卿: { mood: '惊疑' } },
-    inventory_add: ['玉佩'],
-    inventory_remove: ['干粮'],
-    quests_update: [{ goal: '卖破烂', progress: '已卖出', status: 'done' }],
+    characters: { 玥姐姐: { condition: '西装肩上有雨' }, 伍卿: { mood: '松动' } },
+    inventory_add: [{ name: '伞', holder: '凌玥' }],
+    inventory_remove: ['空瓶'],
+    quests_add: [{ goal: '查南荣家', status: 'active' }],
+    quests_update: [{ goal: '弄清她是谁', progress: '还没问出口' }],
+    last_hook: '她说出「以前认识」',
+    tension: 0.72,
   };
-  const next = agent.mergeState(old, delta);
-  eq(next.time, '第二日', '标量覆盖');
-  eq(next.location, '村口', '未提及的标量保留');
-  eq(next.characters['伍卿'].mood, '惊疑', '角色状态更新');
-  eq(next.characters['黎婆'].mood, '沉默', '未提及的角色保留');
-  ok(next.inventory.includes('牛绳'), '原物品保留');
-  ok(next.inventory.includes('玉佩'), '物品加入');
-  ok(!next.inventory.includes('干粮'), '物品移除');
-  eq(next.quests[0].progress, '已卖出', '任务进度更新');
-  eq(next.quests[0].status, 'done', '任务状态更新');
+  const card = schema.normalizeCard({ title: 't', cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }] });
+  const next = arch.mergeLedger(old, delta, { aliasIndex: schema.buildAliasIndex(card) });
+
+  eq(next.tension, 0.72, '标量覆盖');
+  eq(next.characters['凌玥'], { condition: '西装肩上有雨' }, '新角色键按别名归一');
+  eq(next.characters['伍卿'], { mood: '松动' }, '已有角色字段合并');
+  eq(next.characters['张兰'], { mood: '轻蔑' }, '未提及的角色原样保留');
+  eq(next.inventory.map((i) => i.name), ['玉佩', '伞'], '物品增删');
+  eq(next.quests.length, 2, '目标新增');
+  eq(next.quests.find((q) => q.goal === '弄清她是谁').progress, '还没问出口', '目标按 goal 更新');
+  eq(next.last_hook, '她说出「以前认识」', 'last_hook 覆盖');
 }
 
-console.log('\n=== 相似度 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 史官：解析容错 ===');
 {
-  ok(agent.similarity('七年前东街往事', '七年前东街往事') === 1, '完全相同 → 1');
-  ok(agent.similarity('七年前东街往事', '七年前东街往事与伍卿身份') > 0.6, '追加限定语 → 仍高相似');
-  ok(agent.similarity('凌玥的旧伤', '凌璇的旧识') < 0.62, '不同线索 → 低于阈值');
-}
-
-console.log('\n=== JSON 解析容错 ===');
-{
-  const good = JSON.stringify({
-    round_summary: '他认出了她。',
-    entities: [{ type: 'character', name: '凌玥', summary: '家主' }],
-    facts: [{ subject: '凌玥', predicate: '认识', object: '伍卿' }],
-    state_delta: { time: '初冬' },
-    relations: [{ from: '凌玥', to: '伍卿', kind: '旧识', sentiment: 0.8 }],
-    threads: [{ title: '玉佩之谜', action: 'plant', weight: 0.9 }],
-  });
-  const p1 = agent.parseMemoryUpdate(good, '');
-  eq(p1.round_summary, '他认出了她。', '正常 JSON → 摘要');
-  eq(p1.entities.length, 1, '正常 JSON → 实体');
-  eq(p1.relations.length, 1, '正常 JSON → 关系');
-  eq(p1.threads.length, 1, '正常 JSON → 线索');
-
-  // 带 Markdown 围栏
-  const fenced = '```json\n' + good + '\n```';
-  const p2 = agent.parseMemoryUpdate(fenced, '');
-  eq(p2.round_summary, '他认出了她。', 'Markdown 围栏 → 仍能解析');
-
-  // 截断的 JSON：应打捞 round_summary
-  const truncated = '{"round_summary": "他站在雨里，看着那只手。"';
-  const p3 = agent.parseMemoryUpdate(truncated, '');
-  ok(p3.round_summary.includes('雨里'), '截断 JSON → 打捞摘要');
-
-  // 完全不是 JSON
-  const p4 = agent.parseMemoryUpdate('这不是 JSON，只是一段普通文字描述，长度足够长以触发降级路径。', '');
-  ok(p4.round_summary.length > 0, '非 JSON → 降级为文本摘要');
-
-  // 空输出 → 用正文兜底
-  const p5 = agent.parseMemoryUpdate('', '本轮正文内容');
-  eq(p5.round_summary, '本轮正文内容', '空输出 → 正文兜底');
-}
-
-console.log('\n=== 反思解析 ===');
-{
-  const good = JSON.stringify({ reflections: [{ kind: 'insight', content: '她在试他。' }, { kind: 'theme', content: '被抛弃者的自我救赎。' }] });
-  const r = agent.parseReflections(good);
-  eq(r.length, 2, '正常 JSON → 2 条反思');
-  eq(r[0].kind, 'insight', '反思类型保留');
-
-  const bad = agent.parseReflections('```json\n{"reflections":[{"kind":"insight","content":"只此一条"}]}\n```');
-  ok(bad.length === 1, 'Markdown 围栏 → 仍能解析');
-
-  ok(agent.parseReflections('无关内容').length === 0, '无反思 → 空数组');
-
-  const many = agent.parseReflections(JSON.stringify({
-    reflections: Array.from({ length: 8 }, (_, i) => ({ kind: 'insight', content: `第 ${i} 条` })),
+  const good = arch.parseArchivistUpdate(JSON.stringify({
+    scene_change: { changed: true, reason: '地点转移', place: '凌家院子', tension: 0.6 },
+    ledger: { characters: { 凌玥: { mood: '克制' } }, last_hook: '钩子' },
+    assertions: [{ subject: '凌玥', predicate: '知道', object: '真相', confidence: 0.95, evidence: '她看了一眼' }],
+    states: [{ who: '伍卿', field: 'condition', value: '湿透' }],
+    relations: [{ from: '凌玥', to: '伍卿', kind: '旧识·执念', sentiment: 0.8, note: '第一次没有甩开' }],
+    threads: [{ action: 'plant', title: '玉佩发光', weight: 0.9 }],
+    quotes: [{ who: '凌玥', text: '「卿儿，过来。」' }],
+    uncertain: ['她这七年做了什么'],
   }));
-  ok(many.length <= 3, '反思条数上限 3');
+  ok(good.scene_change.changed === true, '解析 scene_change');
+  eq(good.assertions.length, 1, '解析断言');
+  eq(good.quotes[0].who, '凌玥', '解析原声');
+  eq(good.uncertain, ['她这七年做了什么'], '解析未确定项');
+
+  const salvaged = arch.parseArchivistUpdate('前言文字\n{"assertions":[{"subject":"凌玥","predicate":"知道","object":"y"}]}\n后记');
+  eq(salvaged.assertions.length, 1, '从夹杂文本里捞出 JSON');
+
+  const empty = arch.parseArchivistUpdate('');
+  ok(empty.scene_change.changed === false, '空输入降级不抛错');
+  eq(empty.assertions, [], '空输入给空数组');
+
+  const truncated = arch.parseArchivistUpdate('{"assertions":[{"subject":"凌玥","predicate":"知');
+  ok(Array.isArray(truncated.assertions), '截断 JSON 不抛错');
 }
 
-console.log('\n=== 关系 / 线索 / 反思 存储 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 史官：确定性落库 ===');
 {
-  const sid = `m-${Date.now()}`;
-  store.createSession({ id: sid, title: '记忆测试', settings: {} });
+  const sid = `s-${Date.now()}`;
+  const world = {
+    id: `w-${Date.now()}`, title: 't',
+    card: schema.normalizeCard({
+      title: 't',
+      cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }],
+    }),
+  };
+  store.saveWorld(world);
+  const session = store.createSession({ id: sid, title: 't', worldId: world.id });
+  store.createBranch(sid, { branchId: 'main' });
 
-  store.upsertRelation(sid, { from: '凌玥', to: '伍卿', kind: '执念', sentiment: 0.9, note: '找了七年', turn_no: 1 });
-  store.upsertRelation(sid, { from: '凌玥', to: '伍卿', kind: '执念', sentiment: 0.95, note: '找到了', turn_no: 2 });
-  const rels = store.getRelations(sid);
-  eq(rels.length, 1, '同一对关系 → upsert 不重复');
-  eq(rels[0].note, '找到了', '关系被更新');
+  let r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1,
+    aliasIndex: schema.buildAliasIndex(world.card),
+    update: {
+      scene_change: { changed: false },
+      ledger: { characters: { 凌玥: { mood: '急切' } }, last_hook: '她认出他' },
+      assertions: [{ subject: '凌玥', predicate: '位于', object: '帝都', confidence: 1 }],
+      states: [{ who: '伍卿', field: 'condition', value: '湿透' }],
+      relations: [{ from: '凌玥', to: '伍卿', kind: '旧识·执念', sentiment: 0.8, note: '未说破' }],
+      threads: [{ action: 'plant', title: '玉佩发光', weight: 0.9 }],
+      quotes: [{ who: '凌玥', text: '「卿儿，过来。」' }],
+    },
+  });
+  eq(r.assertions, 1, '第一轮写入 1 条断言');
+  eq(r.states, 2, '写入 2 条状态（伍卿 condition + 凌玥 mood，不同人不同字段）');
+  eq(r.threads, 1, '埋下 1 条线索');
 
-  store.upsertThread(sid, { title: '玉佩之谜', status: 'open', weight: 0.9, planted_turn: 1 });
-  store.upsertThread(sid, { title: '左腿旧伤', status: 'open', weight: 0.8, planted_turn: 1 });
-  eq(store.getThreads(sid, { status: 'open' }).length, 2, '线索入库');
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 5,
+    aliasIndex: schema.buildAliasIndex(world.card),
+    update: {
+      scene_change: {},
+      ledger: {},
+      assertions: [{ subject: '凌玥', predicate: '位于', object: '湘曲', confidence: 1 }],
+    },
+  });
+  eq(r.assertions, 1, '第二轮写入新断言');
+  eq(r.assertions_invalidated, 1, '旧断言被标记失效');
 
-  store.upsertThread(sid, { title: '玉佩之谜', status: 'resolved', resolved_turn: 5 });
-  eq(store.getThreads(sid, { status: 'open' }).length, 1, '线索回收后不计入未回收');
+  const active = store.getAssertions(sid, { branchId: 'main' });
+  eq(active.length, 1, '有效集只剩新的');
+  eq(active[0].object, '湘曲', '新断言生效');
+  const hist = store.getAssertions(sid, { branchId: 'main', atTurn: 3 });
+  eq(hist[0].object, '帝都', '回溯第 3 轮仍是帝都');
 
-  store.addReflection(sid, { turn_from: 1, turn_to: 5, kind: 'insight', content: '她在试他' });
-  eq(store.getReflections(sid).length, 1, '反思入库');
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 9,
+    aliasIndex: [],
+    update: { scene_change: {}, ledger: {}, threads: [{ action: 'resolve', title: '玉佩发光' }] },
+  });
+  eq(r.threads, 1, '回收线索');
+  eq(store.getThreads(sid, { status: 'open' }).length, 0, '回收后无未回收线索');
 
-  // 回滚应级联清理
-  store.addTurn(sid, { turn_no: 6, kind: 'player', content: '行动' });
-  const removed = store.truncateSession(sid, 1);
-  ok(removed.turns >= 1, '回滚删除回合');
-  ok(removed.reflections >= 1, '回滚删除 5 轮之后的反思');
-  eq(store.getThreads(sid, { status: 'open' }).length, 2, '回滚把已回收的线索复位为未回收');
+  const patches = store.listPatches(sid, { limit: 50 });
+  ok(patches.some((p) => p.kind === 'assertion' && p.status === 'applied'), '断言提案有审计');
+  ok(patches.every((p) => p.agent === 'archivist'), '审计记录 Agent 名');
 
-  store.deleteSession(sid);
+  const ledger = store.getState(sid).state;
+  eq(ledger.characters['凌玥'].mood, '急切', '账本人物状态落库');
+  eq(ledger.last_hook, '她认出他', '账本 last_hook 落库');
 }
 
-console.log('\n=== 会话遥测累计 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 提案审计表 ===');
 {
-  const sid = `u-${Date.now()}`;
-  store.createSession({ id: sid, title: '遥测', settings: {} });
-  store.accumulateUsage(sid, { prompt_tokens: 100, completion_tokens: 200, cached_tokens: 10, duration_ms: 1000, ttft_ms: 100, output_chars: 500 });
-  store.accumulateUsage(sid, { prompt_tokens: 150, completion_tokens: 250, cached_tokens: 20, duration_ms: 2000, ttft_ms: 200, output_chars: 600 });
-  const s = store.getSession(sid);
-  eq(s.usage.requests, 2, '累计请求数');
-  eq(s.usage.prompt_tokens, 250, '累计输入 token');
-  eq(s.usage.completion_tokens, 450, '累计输出 token');
-  eq(s.usage.cached_tokens, 30, '累计缓存 token');
-  eq(s.usage.first_token_ms, 300, '累计首字延迟');
-  store.deleteSession(sid);
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const id = store.addPatch(sid, { branchId: 'main', agent: 'continuity', kind: 'contradiction', severity: 'blocker', payload: { claim: '时间对不上' }, evidence: '第3轮原文' });
+  store.setPatchStatus(sid, id, 'applied');
+  const p = store.listPatches(sid, { limit: 5 })[0];
+  eq(p.status, 'applied', '补丁状态可改');
+  ok(p.applied_at > 0, '记录应用时间');
+  eq(store.listPatches(sid, { status: 'open' }).length, 0, '按状态过滤');
 }
 
-store.closeDb();
-try { fs.unlinkSync(tmp); } catch { /* 忽略 */ }
-
-console.log(`\n${'─'.repeat(50)}`);
-console.log(`记忆系统：${pass} 通过，${fail} 失败`);
+console.log(`\n${'═'.repeat(50)}`);
+console.log(`test-memory: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

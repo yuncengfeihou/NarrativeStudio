@@ -1,19 +1,29 @@
 /**
  * server/memory/store.js — 数据层（世界卡 · 剧情会话 · 记忆）
  *
- * 结构（v3）：
- *   worlds        世界卡：宪章级设定（worldview / cast / player / rules / director / opening）
- *   lore_entries  世界词条：关键词触发的设定碎片，只在被提到时才进入上下文
- *   sessions      剧情会话：属于某张世界卡，一张卡可以有任意多个会话
- *   turns         逐轮原文（玩家行动 + 旁白），并记录本轮 token 遥测
- *   summaries     分层压缩：L1 轮 → L2 幕 → L3 卷 → L4 编年
- *   entities      实体档案（角色/地点/物品/势力/事件/概念）
- *   facts         三元组事实（可撤回，保留审计）
- *   states        场景快照（时间/地点/在场/物品/张力）
- *   notes         作者笔记（确定性记忆，永不压缩）
- *   relations     关系账本（谁对谁什么态度，随时间演化）
- *   threads       线索/伏笔账本（埋了什么、收了没有）
- *   reflections   反思洞察（跨多轮的高阶结论，比摘要更浓缩）
+ * 结构（v4）：世界卡描述世界，不描述故事。
+ *
+ *   世界卡（worlds + 三张投影表）
+ *     worlds            card_json 是唯一真源（命题/宪章/卡司/辞书/时间线/锚点）
+ *     codex_entries     类型化辞书：靠 links/tags 进场，不靠关键词触发
+ *     timeline_events   past = 既定事实；future = 原著参考，默认不注入
+ *     anchors           可玩时间点，每个带一份世界快照
+ *
+ *   剧情会话
+ *     sessions          运行期参数 + 当前分支 + 当前锚点
+ *     branches          回滚 = 开新分支，历史不删
+ *     turns             逐轮原文，只追加，永不修改（branch_id 标记归属）
+ *
+ *   记忆（原文永远是唯一真相）
+ *     states            场景账本：时间/地点/在场/随身/张力/钩子
+ *     relations         关系账本：谁对谁什么态度，随时间演化
+ *     threads           线索账本：埋了什么、收了没有
+ *     notes             作者笔记：确定性记忆，优先级最高
+ *     scenes            场次记录，从完整原文重写，不是摘要的摘要
+ *     assertions        断言，带有效期；冲突时旧断言失效，不删除
+ *     character_states  人物状态，按字段可寻址，局部更新
+ *     voices            原声台词样本，用来锚定声音
+ *     patches           Agent 提案审计：谁提的、证据是什么、接受了哪条
  */
 import { DatabaseSync } from 'node:sqlite';
 import { config } from '../config.js';
@@ -40,21 +50,6 @@ export function getDb() {
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
-
-    CREATE TABLE IF NOT EXISTS lore_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
-      keys_json TEXT NOT NULL DEFAULT '[]',
-      secondary_json TEXT NOT NULL DEFAULT '[]',
-      title TEXT NOT NULL DEFAULT '',
-      content TEXT NOT NULL,
-      category TEXT NOT NULL DEFAULT 'setting',
-      priority INTEGER NOT NULL DEFAULT 50,
-      constant INTEGER NOT NULL DEFAULT 0,
-      enabled INTEGER NOT NULL DEFAULT 1,
-      sort INTEGER NOT NULL DEFAULT 0
-    );
-    CREATE INDEX IF NOT EXISTS idx_lore_world ON lore_entries(world_id, enabled, priority DESC);
 
     CREATE TABLE IF NOT EXISTS sessions (
       id TEXT PRIMARY KEY,
@@ -84,50 +79,6 @@ export function getDb() {
       UNIQUE(session_id, turn_no, kind)
     );
     CREATE INDEX IF NOT EXISTS idx_turns_session ON turns(session_id, turn_no);
-
-    CREATE TABLE IF NOT EXISTS summaries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      level INTEGER NOT NULL,
-      turn_from INTEGER NOT NULL,
-      turn_to INTEGER NOT NULL,
-      content TEXT NOT NULL,
-      token_count INTEGER NOT NULL DEFAULT 0,
-      archived INTEGER NOT NULL DEFAULT 0,
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_summaries_level ON summaries(session_id, level, turn_from);
-
-    CREATE TABLE IF NOT EXISTS entities (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      type TEXT NOT NULL,
-      name TEXT NOT NULL,
-      summary TEXT NOT NULL DEFAULT '',
-      attributes_json TEXT NOT NULL DEFAULT '{}',
-      first_turn INTEGER NOT NULL,
-      last_turn INTEGER NOT NULL,
-      importance REAL NOT NULL DEFAULT 0.5,
-      mention_count INTEGER NOT NULL DEFAULT 1,
-      pinned INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(session_id, type, name)
-    );
-    CREATE INDEX IF NOT EXISTS idx_entities_session ON entities(session_id, importance DESC, last_turn DESC);
-
-    CREATE TABLE IF NOT EXISTS facts (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      subject TEXT NOT NULL,
-      predicate TEXT NOT NULL,
-      object TEXT NOT NULL,
-      turn_no INTEGER NOT NULL,
-      confidence REAL NOT NULL DEFAULT 1.0,
-      pinned INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'active',
-      created_at INTEGER NOT NULL
-    );
-    CREATE INDEX IF NOT EXISTS idx_facts_session ON facts(session_id, turn_no);
 
     CREATE TABLE IF NOT EXISTS states (
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
@@ -176,18 +127,161 @@ export function getDb() {
       UNIQUE(session_id, title)
     );
 
-    -- 反思洞察：跨多轮沉淀的高阶结论（比摘要更浓缩，长期携带）
-    CREATE TABLE IF NOT EXISTS reflections (
+    /* ══════════════════════════════════════════════════════════════════ */
+    /* v4：世界卡（类型化辞书 / 时间线 / 可玩时间点）                        */
+    /* ══════════════════════════════════════════════════════════════════ */
+
+    -- 辞书：类型化实体。靠 links/tags 进场，不靠关键词触发。
+    CREATE TABLE IF NOT EXISTS codex_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+      codex_id TEXT NOT NULL,
+      type TEXT NOT NULL DEFAULT 'custom',
+      name TEXT NOT NULL,
+      aliases_json TEXT NOT NULL DEFAULT '[]',
+      tags_json TEXT NOT NULL DEFAULT '[]',
+      summary TEXT NOT NULL DEFAULT '',
+      facets_json TEXT NOT NULL DEFAULT '{}',
+      links_json TEXT NOT NULL DEFAULT '[]',
+      reveal TEXT NOT NULL DEFAULT 'public',
+      canon_from TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
+      pinned INTEGER NOT NULL DEFAULT 0,
+      sort INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_codex_world ON codex_entries(world_id, pinned DESC, sort ASC);
+
+    -- 时间线：past 是既定事实，future 只是原著参考（默认不注入）。
+    CREATE TABLE IF NOT EXISTS timeline_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+      event_id TEXT NOT NULL,
+      when_label TEXT NOT NULL DEFAULT '',
+      where_label TEXT NOT NULL DEFAULT '',
+      what TEXT NOT NULL,
+      who_json TEXT NOT NULL DEFAULT '[]',
+      source TEXT NOT NULL DEFAULT '',
+      canon TEXT NOT NULL DEFAULT 'future',
+      sort INTEGER NOT NULL DEFAULT 0
+    );
+    CREATE INDEX IF NOT EXISTS idx_timeline_world ON timeline_events(world_id, canon, sort);
+
+    -- 可玩时间点：每个起点带一份世界快照，中途开局才不会演崩。
+    CREATE TABLE IF NOT EXISTS anchors (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
+      anchor_id TEXT NOT NULL,
+      label TEXT NOT NULL,
+      after_event TEXT NOT NULL DEFAULT '',
+      snapshot_json TEXT NOT NULL DEFAULT '{}',
+      opening_seed TEXT NOT NULL DEFAULT '',
+      note TEXT NOT NULL DEFAULT ''
+    );
+
+    /* ══════════════════════════════════════════════════════════════════ */
+    /* v4：记忆（分支 / 场次 / 断言 / 人物状态 / 原声 / 提案审计）            */
+    /* ══════════════════════════════════════════════════════════════════ */
+
+    CREATE TABLE IF NOT EXISTS branches (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL,
+      parent_branch TEXT NOT NULL DEFAULT '',
+      fork_turn INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'active',
+      note TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_branches ON branches(session_id, branch_id);
+
+    -- 场次记录：从完整原文重写，不是摘要的摘要。
+    CREATE TABLE IF NOT EXISTS scenes (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      scene_id TEXT NOT NULL,
+      level INTEGER NOT NULL DEFAULT 1,
       turn_from INTEGER NOT NULL,
       turn_to INTEGER NOT NULL,
-      kind TEXT NOT NULL DEFAULT 'insight', -- insight | relationship | theme | rule
-      content TEXT NOT NULL,
+      when_label TEXT NOT NULL DEFAULT '',
+      place TEXT NOT NULL DEFAULT '',
+      place_id TEXT NOT NULL DEFAULT '',
+      cast_json TEXT NOT NULL DEFAULT '[]',
+      question TEXT NOT NULL DEFAULT '',
+      outcome TEXT NOT NULL DEFAULT '',
+      threads_json TEXT NOT NULL DEFAULT '[]',
+      state_json TEXT NOT NULL DEFAULT '{}',
       token_count INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
     );
-    CREATE INDEX IF NOT EXISTS idx_reflections_session ON reflections(session_id, turn_to DESC);
+    CREATE INDEX IF NOT EXISTS idx_scenes_session ON scenes(session_id, branch_id, turn_from);
+
+    -- 断言：带有效期。冲突时旧断言失效，不删除——「她曾经相信过什么」是剧情资产。
+    CREATE TABLE IF NOT EXISTS assertions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      subject TEXT NOT NULL,
+      predicate TEXT NOT NULL,
+      object TEXT NOT NULL,
+      valid_from INTEGER NOT NULL DEFAULT 0,
+      valid_to INTEGER,
+      asserted_turn INTEGER NOT NULL DEFAULT 0,
+      source_turn INTEGER NOT NULL DEFAULT 0,
+      confidence REAL NOT NULL DEFAULT 0.9,
+      visibility TEXT NOT NULL DEFAULT 'public',
+      status TEXT NOT NULL DEFAULT 'active',
+      superseded_by INTEGER,
+      evidence TEXT NOT NULL DEFAULT '',
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_assertions ON assertions(session_id, branch_id, subject, predicate);
+
+    -- 人物状态：按字段可寻址，局部更新，不动身份根。
+    CREATE TABLE IF NOT EXISTS character_states (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      who TEXT NOT NULL,
+      field TEXT NOT NULL,
+      value TEXT NOT NULL,
+      valid_from INTEGER NOT NULL DEFAULT 0,
+      valid_to INTEGER,
+      updated_turn INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_char_states ON character_states(session_id, branch_id, who, field, valid_from);
+
+    -- 原声：从正文里摘出来的台词样本，用来锚定声音，不靠形容词描述。
+    CREATE TABLE IF NOT EXISTS voices (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      who TEXT NOT NULL,
+      text TEXT NOT NULL,
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      kind TEXT NOT NULL DEFAULT 'line',
+      pinned INTEGER NOT NULL DEFAULT 0,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_voices ON voices(session_id, branch_id, who, turn_no DESC);
+
+    -- 提案审计：Agent 只提案，代码才落库。这里记下谁提的、证据是什么。
+    CREATE TABLE IF NOT EXISTS patches (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      agent TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      payload_json TEXT NOT NULL DEFAULT '{}',
+      evidence TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'proposed',
+      severity TEXT NOT NULL DEFAULT 'info',
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      applied_at INTEGER,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_patches ON patches(session_id, branch_id, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
@@ -209,8 +303,12 @@ function migrate(d) {
   addColumn('turns', 'edited', 'edited INTEGER NOT NULL DEFAULT 0');
   addColumn('turns', 'branch_taken', 'branch_taken TEXT');
   addColumn('turns', 'usage_json', 'usage_json TEXT');
+  addColumn('turns', 'branch_id', "branch_id TEXT NOT NULL DEFAULT 'main'");
   addColumn('sessions', 'world_id', 'world_id TEXT');
   addColumn('sessions', 'usage_json', 'usage_json TEXT');
+  addColumn('sessions', 'branch_id', "branch_id TEXT NOT NULL DEFAULT 'main'");
+  addColumn('sessions', 'anchor_id', 'anchor_id TEXT');
+  addColumn('sessions', 'scene_seq', 'scene_seq INTEGER NOT NULL DEFAULT 0');
 
   // 索引必须在列补齐之后再建：旧库里 sessions 没有 world_id 时建索引会报错
   d.exec(`CREATE INDEX IF NOT EXISTS idx_sessions_world ON sessions(world_id, updated_at DESC);`);
@@ -220,7 +318,7 @@ function migrate(d) {
 /* Worlds                                                                 */
 /* ══════════════════════════════════════════════════════════════════════ */
 
-export function upsertWorld(world) {
+function upsertWorld(world) {
   const d = getDb();
   const now = Date.now();
   const existing = d.prepare(`SELECT id, created_at FROM worlds WHERE id=?`).get(world.id);
@@ -285,108 +383,6 @@ export function deleteWorld(id) {
 export function touchWorld(id) {
   getDb().prepare(`UPDATE worlds SET updated_at=? WHERE id=?`).run(Date.now(), id);
 }
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Lore entries（世界词条）                                                */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-export function replaceLore(worldId, entries = []) {
-  const d = getDb();
-  d.exec('BEGIN');
-  try {
-    d.prepare(`DELETE FROM lore_entries WHERE world_id=?`).run(worldId);
-    const stmt = d.prepare(`
-      INSERT INTO lore_entries (world_id, keys_json, secondary_json, title, content, category, priority, constant, enabled, sort)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `);
-    entries.forEach((e, i) => {
-      const content = String(e?.content || '').trim();
-      if (!content) return;
-      stmt.run(
-        worldId,
-        JSON.stringify(Array.isArray(e.keys) ? e.keys.filter(Boolean) : []),
-        JSON.stringify(Array.isArray(e.secondary) ? e.secondary.filter(Boolean) : []),
-        String(e.title || '').trim(),
-        content,
-        String(e.category || 'setting'),
-        Number.isFinite(Number(e.priority)) ? Number(e.priority) : 50,
-        e.constant ? 1 : 0,
-        e.enabled === false ? 0 : 1,
-        i,
-      );
-    });
-    d.exec('COMMIT');
-  } catch (err) {
-    d.exec('ROLLBACK');
-    throw err;
-  }
-  return countLore(worldId);
-}
-
-export function countLore(worldId) {
-  return getDb().prepare(`SELECT COUNT(*) AS c FROM lore_entries WHERE world_id=?`).get(worldId)?.c || 0;
-}
-
-export function getLore(worldId, { enabledOnly = true } = {}) {
-  let sql = `SELECT * FROM lore_entries WHERE world_id=?`;
-  if (enabledOnly) sql += ` AND enabled=1`;
-  sql += ` ORDER BY sort ASC, id ASC`;
-  return getDb().prepare(sql).all(worldId).map((r) => ({
-    ...r,
-    keys: JSON.parse(r.keys_json || '[]'),
-    secondary: JSON.parse(r.secondary_json || '[]'),
-    constant: !!r.constant,
-    enabled: !!r.enabled,
-  }));
-}
-
-export function addLore(worldId, entry) {
-  const info = getDb().prepare(`
-    INSERT INTO lore_entries (world_id, keys_json, secondary_json, title, content, category, priority, constant, enabled, sort)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(
-    worldId,
-    JSON.stringify(entry.keys || []),
-    JSON.stringify(entry.secondary || []),
-    entry.title || '',
-    String(entry.content || ''),
-    entry.category || 'setting',
-    Number(entry.priority) || 50,
-    entry.constant ? 1 : 0,
-    entry.enabled === false ? 0 : 1,
-    999,
-  );
-  return Number(info.lastInsertRowid);
-}
-
-export function updateLore(worldId, id, patch = {}) {
-  const row = getDb().prepare(`SELECT * FROM lore_entries WHERE id=? AND world_id=?`).get(id, worldId);
-  if (!row) return false;
-  getDb().prepare(`
-    UPDATE lore_entries SET keys_json=?, secondary_json=?, title=?, content=?, category=?, priority=?, constant=?, enabled=?
-    WHERE id=?
-  `).run(
-    JSON.stringify(patch.keys ?? JSON.parse(row.keys_json || '[]')),
-    JSON.stringify(patch.secondary ?? JSON.parse(row.secondary_json || '[]')),
-    patch.title ?? row.title,
-    patch.content ?? row.content,
-    patch.category ?? row.category,
-    patch.priority ?? row.priority,
-    patch.constant == null ? row.constant : (patch.constant ? 1 : 0),
-    patch.enabled == null ? row.enabled : (patch.enabled ? 1 : 0),
-    id,
-  );
-  return true;
-}
-
-export function deleteLore(worldId, id) {
-  return Number(getDb().prepare(`DELETE FROM lore_entries WHERE id=? AND world_id=?`).run(id, worldId).changes) > 0;
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Sessions                                                              */
-/* ══════════════════════════════════════════════════════════════════════ */
-
 export function createSession({ id, worldId = null, title, settings = {} }) {
   const d = getDb();
   const now = Date.now();
@@ -451,7 +447,8 @@ export function deleteSession(id) {
   const d = getDb();
   d.exec('BEGIN');
   try {
-    for (const t of ['turns', 'summaries', 'entities', 'facts', 'states', 'notes', 'relations', 'threads', 'reflections']) {
+    for (const t of ['turns', 'states', 'notes', 'relations', 'threads',
+      'scenes', 'assertions', 'character_states', 'voices', 'patches', 'branches']) {
       d.prepare(`DELETE FROM ${t} WHERE session_id=?`).run(id);
     }
     d.prepare(`DELETE FROM sessions WHERE id=?`).run(id);
@@ -498,12 +495,13 @@ export function addTurn(sessionId, turn) {
   const d = getDb();
   const tokenCount = turn.token_count ?? estimateTokens(turn.content);
   const info = d.prepare(`
-    INSERT INTO turns (session_id, turn_no, kind, content, images_json, reasoning, branch_choice_json, token_count, usage_json, meta_json, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO turns (session_id, turn_no, kind, content, images_json, reasoning, branch_choice_json, token_count, usage_json, meta_json, branch_id, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(session_id, turn_no, kind) DO UPDATE SET
       content=excluded.content, images_json=excluded.images_json, reasoning=excluded.reasoning,
       branch_choice_json=excluded.branch_choice_json, token_count=excluded.token_count,
-      usage_json=excluded.usage_json, meta_json=excluded.meta_json
+      usage_json=excluded.usage_json, meta_json=excluded.meta_json,
+      branch_id=excluded.branch_id
   `).run(
     sessionId, turn.turn_no, turn.kind, turn.content,
     turn.images ? JSON.stringify(turn.images) : null,
@@ -512,6 +510,7 @@ export function addTurn(sessionId, turn) {
     tokenCount,
     turn.usage ? JSON.stringify(turn.usage) : null,
     turn.meta ? JSON.stringify(turn.meta) : null,
+    turn.branch_id || 'main',
     Date.now(),
   );
   return { id: Number(info.lastInsertRowid), token_count: tokenCount };
@@ -525,24 +524,6 @@ function decorateTurn(row) {
     usage: row.usage_json ? JSON.parse(row.usage_json) : null,
     meta: row.meta_json ? JSON.parse(row.meta_json) : null,
   };
-}
-
-export function getTurns(sessionId, { from = 1, to = Number.MAX_SAFE_INTEGER, kinds = null } = {}) {
-  let sql = `SELECT * FROM turns WHERE session_id=? AND turn_no BETWEEN ? AND ?`;
-  const params = [sessionId, from, to];
-  if (kinds?.length) {
-    sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`;
-    params.push(...kinds);
-  }
-  sql += ` ORDER BY turn_no ASC, id ASC`;
-  return getDb().prepare(sql).all(...params).map(decorateTurn);
-}
-
-export function getRecentTurns(sessionId, n) {
-  const rows = getDb().prepare(`
-    SELECT * FROM turns WHERE session_id=? ORDER BY turn_no DESC, id DESC LIMIT ?
-  `).all(sessionId, Math.max(1, n) * 2 + 4);
-  return rows.reverse().map(decorateTurn);
 }
 
 export function getMaxTurnNo(sessionId) {
@@ -563,210 +544,6 @@ export function updateTurnContent(sessionId, turnNo, kind, content) {
   ).run(content, estimateTokens(content), sessionId, turnNo, kind);
   return Number(info.changes) > 0;
 }
-
-/** 取最近 n 轮的原文文本，用于词条触发扫描。 */
-export function getRecentText(sessionId, turnsBack = 8) {
-  const max = getMaxTurnNo(sessionId);
-  if (!max) return '';
-  const from = Math.max(1, max - turnsBack + 1);
-  const rows = getDb().prepare(`
-    SELECT content FROM turns WHERE session_id=? AND turn_no>=? AND kind IN ('player','narrator')
-    ORDER BY turn_no ASC, id ASC
-  `).all(sessionId, from);
-  return rows.map((r) => r.content || '').join('\n');
-}
-
-/**
- * 回滚到第 n 轮（含）：删除其后所有回合与派生记忆。
- */
-export function truncateSession(sessionId, turnNo) {
-  const d = getDb();
-  d.exec('BEGIN');
-  try {
-    const t = d.prepare(`DELETE FROM turns WHERE session_id=? AND turn_no>?`).run(sessionId, turnNo);
-    const s = d.prepare(`DELETE FROM summaries WHERE session_id=? AND turn_to>?`).run(sessionId, turnNo);
-    const st = d.prepare(`DELETE FROM states WHERE session_id=? AND turn_no>?`).run(sessionId, turnNo);
-    const f = d.prepare(`DELETE FROM facts WHERE session_id=? AND turn_no>?`).run(sessionId, turnNo);
-    const r = d.prepare(`DELETE FROM relations WHERE session_id=? AND turn_no>?`).run(sessionId, turnNo);
-    const th = d.prepare(`DELETE FROM threads WHERE session_id=? AND planted_turn>?`).run(sessionId, turnNo);
-    const rf = d.prepare(`DELETE FROM reflections WHERE session_id=? AND turn_to>?`).run(sessionId, turnNo);
-    // 该轮之后实体的最后出现位置需要修正，否则会指向已删除的回合
-    d.prepare(`UPDATE entities SET last_turn=? WHERE session_id=? AND last_turn>?`).run(turnNo, sessionId, turnNo);
-    d.prepare(`UPDATE threads SET resolved_turn=NULL, status='open' WHERE session_id=? AND resolved_turn>?`)
-      .run(sessionId, turnNo);
-    d.exec('COMMIT');
-    touchSession(sessionId, Math.max(getMaxTurnNo(sessionId), 0));
-    return {
-      turns: t.changes, summaries: s.changes, states: st.changes, facts: f.changes,
-      relations: r.changes, threads: th.changes, reflections: rf.changes,
-    };
-  } catch (err) {
-    d.exec('ROLLBACK');
-    throw err;
-  }
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Summaries                                                             */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-export function addSummary(sessionId, { level, turnFrom, turnTo, content }) {
-  const tokenCount = estimateTokens(content);
-  const info = getDb().prepare(`
-    INSERT INTO summaries (session_id, level, turn_from, turn_to, content, token_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(sessionId, level, turnFrom, turnTo, content, tokenCount, Date.now());
-  return { id: Number(info.lastInsertRowid), token_count: tokenCount };
-}
-
-export function getSummaries(sessionId, { level, archived = 0, limit } = {}) {
-  let sql = `SELECT * FROM summaries WHERE session_id=?`;
-  const params = [sessionId];
-  if (level != null) { sql += ` AND level=?`; params.push(level); }
-  if (archived != null) { sql += ` AND archived=?`; params.push(archived); }
-  sql += ` ORDER BY turn_from ASC`;
-  if (limit) { sql += ` LIMIT ?`; params.push(limit); }
-  return getDb().prepare(sql).all(...params);
-}
-
-export function getLatestSummaries(sessionId, level, n) {
-  return getDb().prepare(`
-    SELECT * FROM summaries WHERE session_id=? AND level=? AND archived=0
-    ORDER BY turn_from DESC LIMIT ?
-  `).all(sessionId, level, n).reverse();
-}
-
-export function archiveSummaries(ids) {
-  if (!ids?.length) return;
-  const d = getDb();
-  const stmt = d.prepare(`UPDATE summaries SET archived=1 WHERE id=?`);
-  for (const id of ids) stmt.run(id);
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Entities                                                              */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-export function upsertEntity(sessionId, entity) {
-  const d = getDb();
-  const existing = d.prepare(
-    `SELECT * FROM entities WHERE session_id=? AND type=? AND name=?`,
-  ).get(sessionId, entity.type, entity.name);
-  if (existing) {
-    d.prepare(`
-      UPDATE entities SET summary=?, attributes_json=?, last_turn=?, importance=?, mention_count=?, updated_at=?
-      WHERE id=?
-    `).run(
-      entity.summary || existing.summary,
-      entity.attributes
-        ? JSON.stringify({ ...JSON.parse(existing.attributes_json || '{}'), ...entity.attributes })
-        : existing.attributes_json,
-      Math.max(entity.last_turn ?? existing.last_turn, existing.last_turn),
-      entity.importance ?? existing.importance,
-      existing.mention_count + 1,
-      Date.now(),
-      existing.id,
-    );
-    return existing.id;
-  }
-  const info = d.prepare(`
-    INSERT INTO entities (session_id, type, name, summary, attributes_json, first_turn, last_turn, importance, mention_count, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?)
-  `).run(
-    sessionId, entity.type, entity.name, entity.summary || '',
-    JSON.stringify(entity.attributes || {}),
-    entity.first_turn ?? entity.last_turn ?? 0,
-    entity.last_turn ?? entity.first_turn ?? 0,
-    entity.importance ?? 0.5,
-    Date.now(),
-  );
-  return Number(info.lastInsertRowid);
-}
-
-export function getEntities(sessionId, { types = null, limit = 60 } = {}) {
-  let sql = `SELECT * FROM entities WHERE session_id=?`;
-  const params = [sessionId];
-  if (types?.length) { sql += ` AND type IN (${types.map(() => '?').join(',')})`; params.push(...types); }
-  sql += ` ORDER BY pinned DESC, importance DESC, last_turn DESC LIMIT ?`;
-  params.push(limit);
-  return getDb().prepare(sql).all(...params).map((e) => ({ ...e, attributes: JSON.parse(e.attributes_json || '{}') }));
-}
-
-export function setEntityPinned(sessionId, entityId, pinned) {
-  const info = getDb().prepare(`UPDATE entities SET pinned=? WHERE session_id=? AND id=?`)
-    .run(pinned ? 1 : 0, sessionId, entityId);
-  return Number(info.changes) > 0;
-}
-
-export function updateEntity(sessionId, entityId, patch = {}) {
-  const row = getDb().prepare(`SELECT * FROM entities WHERE session_id=? AND id=?`).get(sessionId, entityId);
-  if (!row) return false;
-  getDb().prepare(
-    `UPDATE entities SET name=?, summary=?, importance=?, attributes_json=?, updated_at=? WHERE id=?`,
-  ).run(
-    patch.name ?? row.name,
-    patch.summary ?? row.summary,
-    patch.importance ?? row.importance,
-    patch.attributes
-      ? JSON.stringify({ ...JSON.parse(row.attributes_json || '{}'), ...patch.attributes })
-      : row.attributes_json,
-    Date.now(),
-    entityId,
-  );
-  return true;
-}
-
-export function deleteEntity(sessionId, entityId) {
-  return Number(getDb().prepare(`DELETE FROM entities WHERE session_id=? AND id=?`).run(sessionId, entityId).changes) > 0;
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Facts                                                                 */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-export function addFact(sessionId, fact) {
-  const existing = getDb().prepare(`
-    SELECT id FROM facts WHERE session_id=? AND subject=? AND predicate=? AND object=?
-  `).get(sessionId, fact.subject, fact.predicate, fact.object);
-  if (existing) return existing.id;
-  const info = getDb().prepare(`
-    INSERT INTO facts (session_id, subject, predicate, object, turn_no, confidence, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(sessionId, fact.subject, fact.predicate, fact.object, fact.turn_no, fact.confidence ?? 1, Date.now());
-  return Number(info.lastInsertRowid);
-}
-
-export function getFacts(sessionId, { limit = 200, subject = null, includeRetracted = false } = {}) {
-  let sql = `SELECT * FROM facts WHERE session_id=?`;
-  const params = [sessionId];
-  if (!includeRetracted) sql += ` AND status='active'`;
-  if (subject) { sql += ` AND subject=?`; params.push(subject); }
-  sql += ` ORDER BY pinned DESC, turn_no DESC, id DESC LIMIT ?`;
-  params.push(limit);
-  return getDb().prepare(sql).all(...params);
-}
-
-export function setFactPinned(sessionId, factId, pinned) {
-  const info = getDb().prepare(`UPDATE facts SET pinned=? WHERE session_id=? AND id=?`)
-    .run(pinned ? 1 : 0, sessionId, factId);
-  return Number(info.changes) > 0;
-}
-
-export function deleteFact(sessionId, factId, { hard = false } = {}) {
-  const info = hard
-    ? getDb().prepare(`DELETE FROM facts WHERE session_id=? AND id=?`).run(sessionId, factId)
-    : getDb().prepare(`UPDATE facts SET status='retracted' WHERE session_id=? AND id=?`).run(sessionId, factId);
-  return Number(info.changes) > 0;
-}
-
-export function addManualFact(sessionId, { subject, predicate, object, turn_no = 0, confidence = 1 }) {
-  return addFact(sessionId, { subject, predicate, object, turn_no, confidence });
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Notes                                                                 */
-/* ══════════════════════════════════════════════════════════════════════ */
-
 export function addNote(sessionId, { content, kind = 'note', turn_no = 0 }) {
   const info = getDb().prepare(`
     INSERT INTO notes (session_id, content, kind, turn_no, active, created_at)
@@ -818,17 +595,6 @@ export function getState(sessionId) {
   return row ? { turn_no: row.turn_no, state: JSON.parse(row.state_json) } : null;
 }
 
-export function getStateAt(sessionId, turnNo) {
-  const row = getDb().prepare(
-    `SELECT * FROM states WHERE session_id=? AND turn_no<=? ORDER BY turn_no DESC LIMIT 1`,
-  ).get(sessionId, turnNo);
-  return row ? { turn_no: row.turn_no, state: JSON.parse(row.state_json) } : null;
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Relations（关系账本）                                                   */
-/* ══════════════════════════════════════════════════════════════════════ */
-
 export function upsertRelation(sessionId, rel) {
   const now = Date.now();
   const existing = getDb().prepare(
@@ -863,14 +629,6 @@ export function getRelations(sessionId, { limit = 60 } = {}) {
     SELECT * FROM relations WHERE session_id=? ORDER BY ABS(sentiment) DESC, turn_no DESC LIMIT ?
   `).all(sessionId, limit);
 }
-
-export function deleteRelation(sessionId, id) {
-  return Number(getDb().prepare(`DELETE FROM relations WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Threads（线索 / 伏笔账本）                                              */
-/* ══════════════════════════════════════════════════════════════════════ */
 
 export function upsertThread(sessionId, t) {
   const now = Date.now();
@@ -912,40 +670,490 @@ export function getThreads(sessionId, { status = null, limit = 40 } = {}) {
   return getDb().prepare(sql).all(...params);
 }
 
-export function deleteThread(sessionId, id) {
-  return Number(getDb().prepare(`DELETE FROM threads WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
+const jsonOf = (v) => JSON.stringify(v ?? []);
+
+/**
+ * 保存整张世界卡：card_json 是唯一真源，codex / timeline / anchors 表是
+ * 它的可查询投影（供「按实体/按 canon 查」这类 SQL 查询使用）。
+ */
+export function saveWorld(world) {
+  const card = world.card || {};
+  upsertWorld(world);
+  const w = getWorld(world.id);
+  replaceCodex(w.id, card.codex || []);
+  replaceTimeline(w.id, card.timeline || []);
+  replaceAnchors(w.id, card.anchors || []);
+  return w;
 }
 
-/* ══════════════════════════════════════════════════════════════════════ */
-/* Reflections（反思洞察）                                                 */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-export function addReflection(sessionId, { turn_from, turn_to, kind = 'insight', content }) {
-  const tokenCount = estimateTokens(content);
-  const info = getDb().prepare(`
-    INSERT INTO reflections (session_id, turn_from, turn_to, kind, content, token_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).run(sessionId, turn_from, turn_to, kind, content, tokenCount, Date.now());
-  return { id: Number(info.lastInsertRowid), token_count: tokenCount };
-}
-
-export function getReflections(sessionId, { limit = 12 } = {}) {
-  return getDb().prepare(`
-    SELECT * FROM reflections WHERE session_id=? ORDER BY turn_to DESC LIMIT ?
-  `).all(sessionId, limit).reverse();
-}
-
-export function deleteReflection(sessionId, id) {
-  return Number(getDb().prepare(`DELETE FROM reflections WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
-}
-
-/* ══════════════════════════════════════════════════════════════════════ */
-/* misc                                                                  */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-export function closeDb() {
-  if (db) {
-    try { db.close(); } catch { /* already closed */ }
-    db = null;
+function replaceCodex(worldId, entries = []) {
+  const d = getDb();
+  d.exec('BEGIN');
+  try {
+    d.prepare(`DELETE FROM codex_entries WHERE world_id=?`).run(worldId);
+    const stmt = d.prepare(`
+      INSERT INTO codex_entries (world_id, codex_id, type, name, aliases_json, tags_json, summary,
+        facets_json, links_json, reveal, canon_from, detail, pinned, sort)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    entries.forEach((e, i) => {
+      if (!e?.name && !e?.summary) return;
+      stmt.run(
+        worldId, String(e.id || ''), String(e.type || 'custom'), String(e.name || ''),
+        jsonOf(e.aliases), jsonOf(e.tags), String(e.summary || ''),
+        jsonOf(e.facets || {}), jsonOf(e.links), String(e.reveal || 'public'),
+        String(e.canon_from || ''), String(e.detail || ''), e.pinned ? 1 : 0, i,
+      );
+    });
+    d.exec('COMMIT');
+  } catch (err) {
+    d.exec('ROLLBACK');
+    throw err;
   }
+  return getCodex(worldId);
+}
+
+export function getCodex(worldId) {
+  return getDb().prepare(`SELECT * FROM codex_entries WHERE world_id=? ORDER BY pinned DESC, sort ASC, id ASC`)
+    .all(worldId)
+    .map((r) => ({
+      ...r,
+      aliases: JSON.parse(r.aliases_json || '[]'),
+      tags: JSON.parse(r.tags_json || '[]'),
+      facets: JSON.parse(r.facets_json || '{}'),
+      links: JSON.parse(r.links_json || '[]'),
+      pinned: !!r.pinned,
+    }));
+}
+
+export function setCodexPinned(worldId, codexId, pinned) {
+  const info = getDb().prepare(`UPDATE codex_entries SET pinned=? WHERE world_id=? AND codex_id=?`)
+    .run(pinned ? 1 : 0, worldId, codexId);
+  return Number(info.changes) > 0;
+}
+
+function replaceTimeline(worldId, events = []) {
+  const d = getDb();
+  d.exec('BEGIN');
+  try {
+    d.prepare(`DELETE FROM timeline_events WHERE world_id=?`).run(worldId);
+    const stmt = d.prepare(`
+      INSERT INTO timeline_events (world_id, event_id, when_label, where_label, what, who_json, source, canon, sort)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `);
+    events.forEach((e, i) => {
+      if (!e?.what) return;
+      stmt.run(
+        worldId, String(e.id || `evt-${i + 1}`), String(e.when || ''), String(e.where || ''),
+        String(e.what), jsonOf(e.who), String(e.source || ''),
+        ['past', 'future', 'branch'].includes(e.canon) ? e.canon : 'future', i,
+      );
+    });
+    d.exec('COMMIT');
+  } catch (err) {
+    d.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+function replaceAnchors(worldId, anchors = []) {
+  const d = getDb();
+  d.exec('BEGIN');
+  try {
+    d.prepare(`DELETE FROM anchors WHERE world_id=?`).run(worldId);
+    const stmt = d.prepare(`
+      INSERT INTO anchors (world_id, anchor_id, label, after_event, snapshot_json, opening_seed, note)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `);
+    anchors.forEach((a) => {
+      if (!a?.label) return;
+      stmt.run(
+        worldId, String(a.id || a.label), String(a.label), String(a.after_event || ''),
+        JSON.stringify(a.snapshot || {}), String(a.opening_seed || ''), String(a.note || ''),
+      );
+    });
+    d.exec('COMMIT');
+  } catch (err) {
+    d.exec('ROLLBACK');
+    throw err;
+  }
+}
+
+export function getAnchors(worldId) {
+  return getDb().prepare(`SELECT * FROM anchors WHERE world_id=? ORDER BY id ASC`).all(worldId).map((r) => ({
+    ...r, snapshot: JSON.parse(r.snapshot_json || '{}'),
+  }));
+}
+
+export function getAnchor(worldId, anchorId) {
+  const row = getDb().prepare(`SELECT * FROM anchors WHERE world_id=? AND anchor_id=?`).get(worldId, anchorId);
+  return row ? { ...row, snapshot: JSON.parse(row.snapshot_json || '{}') } : null;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：分支（回滚 = 开新分支，历史不删）                                    */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+export function createBranch(sessionId, { branchId, parentBranch = '', forkTurn = 0, note = '' }) {
+  getDb().prepare(`
+    INSERT INTO branches (session_id, branch_id, parent_branch, fork_turn, status, note, created_at)
+    VALUES (?, ?, ?, ?, 'active', ?, ?)
+    ON CONFLICT(session_id, branch_id) DO UPDATE SET status='active', note=excluded.note
+  `).run(sessionId, branchId, parentBranch, forkTurn, note, Date.now());
+  return getBranch(sessionId, branchId);
+}
+
+export function getBranch(sessionId, branchId) {
+  return getDb().prepare(`SELECT * FROM branches WHERE session_id=? AND branch_id=?`).get(sessionId, branchId) || null;
+}
+
+export function listBranches(sessionId) {
+  return getDb().prepare(`SELECT * FROM branches WHERE session_id=? ORDER BY id ASC`).all(sessionId);
+}
+
+export function setBranchStatus(sessionId, branchId, status) {
+  getDb().prepare(`UPDATE branches SET status=? WHERE session_id=? AND branch_id=?`).run(status, sessionId, branchId);
+}
+
+export function setSessionBranch(sessionId, branchId, anchorId = null) {
+  getDb().prepare(`UPDATE sessions SET branch_id=?, anchor_id=COALESCE(?, anchor_id), updated_at=? WHERE id=?`)
+    .run(branchId, anchorId, Date.now(), sessionId);
+}
+
+/** 设置会话的当前起点锚点。 */
+export function setSessionAnchor(sessionId, anchorId, branchId = null) {
+  getDb().prepare(`UPDATE sessions SET anchor_id=?, branch_id=COALESCE(?, branch_id), updated_at=? WHERE id=?`)
+    .run(anchorId, branchId, Date.now(), sessionId);
+  return getSession(sessionId);
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：场次                                                               */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+export function addScene(sessionId, scene) {
+  const d = getDb();
+  const existing = d.prepare(`SELECT id FROM scenes WHERE session_id=? AND branch_id=? AND scene_id=?`)
+    .get(sessionId, scene.branch_id || 'main', scene.scene_id);
+  if (existing) {
+    d.prepare(`
+      UPDATE scenes SET turn_to=?, question=?, outcome=?, cast_json=?, threads_json=?, state_json=?, token_count=?
+      WHERE id=?
+    `).run(
+      scene.turn_to, scene.question || '', scene.outcome || '',
+      JSON.stringify(scene.cast || []), JSON.stringify(scene.threads || []),
+      JSON.stringify(scene.state || {}),
+      estimateTokens(`${scene.question || ''}${scene.outcome || ''}`), existing.id,
+    );
+    return existing.id;
+  }
+  const info = d.prepare(`
+    INSERT INTO scenes (session_id, branch_id, scene_id, level, turn_from, turn_to, when_label, place, place_id,
+      cast_json, question, outcome, threads_json, state_json, token_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sessionId, scene.branch_id || 'main', scene.scene_id, scene.level || 1,
+    scene.turn_from, scene.turn_to, scene.when_label || '', scene.place || '', scene.place_id || '',
+    JSON.stringify(scene.cast || []), scene.question || '', scene.outcome || '',
+    JSON.stringify(scene.threads || []), JSON.stringify(scene.state || {}),
+    estimateTokens(`${scene.question || ''}${scene.outcome || ''}`), Date.now(),
+  );
+  return Number(info.lastInsertRowid);
+}
+
+function decorateScene(row) {
+  if (!row) return null;
+  return {
+    ...row,
+    cast: JSON.parse(row.cast_json || '[]'),
+    threads: JSON.parse(row.threads_json || '[]'),
+    state: JSON.parse(row.state_json || '{}'),
+  };
+}
+
+export function getScenes(sessionId, { branchId = null, level = null, limit = 100 } = {}) {
+  let sql = `SELECT * FROM scenes WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (level != null) { sql += ` AND level=?`; params.push(level); }
+  sql += ` ORDER BY turn_from ASC, id ASC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params).map(decorateScene);
+}
+
+export function getSceneAt(sessionId, turnNo, branchId = null) {
+  let sql = `SELECT * FROM scenes WHERE session_id=? AND turn_from<=? AND turn_to>=?`;
+  const params = [sessionId, turnNo, turnNo];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  sql += ` ORDER BY turn_from DESC LIMIT 1`;
+  return decorateScene(getDb().prepare(sql).get(...params));
+}
+
+export function latestScene(sessionId, branchId = null) {
+  let sql = `SELECT * FROM scenes WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  sql += ` ORDER BY turn_from DESC, id DESC LIMIT 1`;
+  return decorateScene(getDb().prepare(sql).get(...params));
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：断言（带有效期，冲突失效不删除）                                     */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+export function addAssertion(sessionId, a) {
+  const info = getDb().prepare(`
+    INSERT INTO assertions (session_id, branch_id, subject, predicate, object, valid_from, valid_to,
+      asserted_turn, source_turn, confidence, visibility, status, superseded_by, evidence, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'active', NULL, ?, ?)
+  `).run(
+    sessionId, a.branch_id || 'main', String(a.subject || ''), String(a.predicate || ''),
+    String(a.object || ''), Number(a.valid_from) || 0, Number(a.asserted_turn) || 0,
+    Number(a.source_turn) || 0, Number.isFinite(Number(a.confidence)) ? Number(a.confidence) : 0.9,
+    String(a.visibility || 'public'), String(a.evidence || ''), Date.now(),
+  );
+  return Number(info.lastInsertRowid);
+}
+
+/** 旧断言失效（不是删除）：「她曾经相信过什么」本身就是剧情资产。 */
+export function invalidateAssertion(sessionId, id, { validTo, supersededBy = null }) {
+  getDb().prepare(`
+    UPDATE assertions SET status='invalidated', valid_to=?, superseded_by=COALESCE(?, superseded_by)
+    WHERE session_id=? AND id=?
+  `).run(validTo, supersededBy, sessionId, id);
+}
+
+export function retractAssertion(sessionId, id) {
+  getDb().prepare(`UPDATE assertions SET status='retracted' WHERE session_id=? AND id=?`).run(sessionId, id);
+}
+
+export function getAssertions(sessionId, {
+  branchId = null, subject = null, predicate = null, atTurn = null,
+  includeInvalid = false, visibility = null, limit = 500,
+} = {}) {
+  let sql = `SELECT * FROM assertions WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (subject) { sql += ` AND subject=?`; params.push(subject); }
+  if (predicate) { sql += ` AND predicate=?`; params.push(predicate); }
+  if (visibility) { sql += ` AND visibility=?`; params.push(visibility); }
+  if (atTurn != null) {
+    // 按时间点回溯：看当时还有效的。后来才失效的断言在那时仍然成立，
+    // 所以不过滤 status，只按有效期窗口筛。
+    sql += ` AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?) AND status<>'retracted'`;
+    params.push(atTurn, atTurn);
+  } else if (!includeInvalid) {
+    sql += ` AND status='active'`;
+  }
+  sql += ` ORDER BY valid_from DESC, id DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params);
+}
+
+/** 找出与待写入断言冲突的旧断言：同主同谓、对象不同、有效期重叠。 */
+export function findConflictingAssertions(sessionId, { branchId, subject, predicate, object, validFrom }) {
+  if (!subject || !predicate || !object) return [];
+  const rows = getDb().prepare(`
+    SELECT * FROM assertions
+    WHERE session_id=? AND branch_id=? AND subject=? AND predicate=? AND status='active'
+      AND object<>? AND valid_from<=?
+  `).all(sessionId, branchId || 'main', subject, predicate, object, validFrom || 0);
+  return rows.filter((r) => r.valid_to == null || r.valid_to >= (validFrom || 0));
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：人物状态（按字段可寻址）                                            */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+export function setCharState(sessionId, { branchId, who, field, value, turn }) {
+  const d = getDb();
+  d.prepare(`
+    UPDATE character_states SET valid_to=?
+    WHERE session_id=? AND branch_id=? AND who=? AND field=? AND valid_to IS NULL
+  `).run(turn, sessionId, branchId || 'main', who, field);
+  const info = d.prepare(`
+    INSERT INTO character_states (session_id, branch_id, who, field, value, valid_from, valid_to, updated_turn, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?)
+  `).run(sessionId, branchId || 'main', who, field, String(value ?? ''), turn, turn, Date.now());
+  return Number(info.lastInsertRowid);
+}
+
+export function getCharStates(sessionId, { branchId = null, who = null, atTurn = null } = {}) {
+  let sql = `SELECT * FROM character_states WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (who) { sql += ` AND who=?`; params.push(who); }
+  if (atTurn != null) sql += ` AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)`;
+  if (atTurn != null) params.push(atTurn, atTurn);
+  sql += ` ORDER BY who ASC, field ASC, valid_from DESC`;
+  return getDb().prepare(sql).all(...params);
+}
+
+/** 取每个 (who, field) 在 atTurn 时刻的最新值，组装成 {who: {field: value}}。 */
+export function getCharStateMap(sessionId, { branchId = null, atTurn = null } = {}) {
+  const rows = getCharStates(sessionId, { branchId, atTurn });
+  const out = {};
+  for (const r of rows) {
+    out[r.who] = out[r.who] || {};
+    if (!(r.field in out[r.who])) out[r.who][r.field] = r.value;
+  }
+  return out;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：原声（台词样本）                                                    */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+export function addVoice(sessionId, v) {
+  const info = getDb().prepare(`
+    INSERT INTO voices (session_id, branch_id, who, text, turn_no, kind, pinned, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sessionId, v.branch_id || 'main', String(v.who || ''), String(v.text || ''),
+    Number(v.turn_no) || 0, String(v.kind || 'line'), v.pinned ? 1 : 0, Date.now(),
+  );
+  return Number(info.lastInsertRowid);
+}
+
+export function getVoices(sessionId, { branchId = null, who = null, limit = 40, pinnedOnly = false } = {}) {
+  let sql = `SELECT * FROM voices WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (who) { sql += ` AND who=?`; params.push(who); }
+  if (pinnedOnly) sql += ` AND pinned=1`;
+  sql += ` ORDER BY pinned DESC, turn_no DESC, id DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params);
+}
+
+export function setVoicePinned(sessionId, id, pinned) {
+  getDb().prepare(`UPDATE voices SET pinned=? WHERE session_id=? AND id=?`).run(pinned ? 1 : 0, sessionId, id);
+}
+
+export function deleteVoice(sessionId, id) {
+  return Number(getDb().prepare(`DELETE FROM voices WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
+}
+
+/** 每个 who 取最近 n 条原声，组装成 {who: [text]}。 */
+export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
+  const rows = getVoices(sessionId, { branchId, limit: 400 });
+  const out = {};
+  for (const r of rows) {
+    if (!r.who) continue;
+    out[r.who] = out[r.who] || [];
+    if (out[r.who].length < perWho) out[r.who].push(r.text);
+  }
+  return out;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：提案审计                                                           */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+export function addPatch(sessionId, p) {
+  const info = getDb().prepare(`
+    INSERT INTO patches (session_id, branch_id, agent, kind, payload_json, evidence, status, severity, turn_no, applied_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    sessionId, p.branch_id || 'main', String(p.agent || ''), String(p.kind || ''),
+    JSON.stringify(p.payload ?? {}), String(p.evidence || ''), String(p.status || 'proposed'),
+    String(p.severity || 'info'), Number(p.turn_no) || 0,
+    p.status === 'applied' ? Date.now() : null, Date.now(),
+  );
+  return Number(info.lastInsertRowid);
+}
+
+export function listPatches(sessionId, { branchId = null, status = null, limit = 50 } = {}) {
+  let sql = `SELECT * FROM patches WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  sql += ` ORDER BY id DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params).map((r) => ({ ...r, payload: JSON.parse(r.payload_json || '{}') }));
+}
+
+export function setPatchStatus(sessionId, id, status) {
+  getDb().prepare(`UPDATE patches SET status=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END WHERE session_id=? AND id=?`)
+    .run(status, status, Date.now(), sessionId, id);
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* v4：分支可见的回合与原文检索                                            */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 取某分支可见的回合：分支自己的回合 + 分叉点之前继承来的回合。
+ * 回合编号全局递增，回rollback只是换分支，不是删历史。
+ */
+export function getTurnsForBranch(sessionId, branchId, forkTurn, { from = 0, to = Number.MAX_SAFE_INTEGER, kinds = null } = {}) {
+  let sql = `SELECT * FROM turns WHERE session_id=? AND turn_no BETWEEN ? AND ?
+             AND (branch_id=? OR turn_no<=?)`;
+  const params = [sessionId, from, to, branchId, forkTurn];
+  if (kinds?.length) { sql += ` AND kind IN (${kinds.map(() => '?').join(',')})`; params.push(...kinds); }
+  sql += ` ORDER BY turn_no ASC, id ASC`;
+  return getDb().prepare(sql).all(...params).map(decorateTurn);
+}
+
+/**
+ * 分支内最近 n 个**回合**的原文（含继承部分），按时间正序。
+ * 一个回合 = 一条 player + 一条 narrator。
+ * 注意：跨分支继承时回合编号可能不连续（b2 从第 2 轮分叉，接着写第 4 轮），
+ * 所以按「实际出现的回合序号」取后 n 个，而不是按编号区间。
+ */
+export function getRecentTurnsForBranch(sessionId, branchId, forkTurn, turns = 1) {
+  const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { kinds: ['player', 'narrator'] });
+  if (!rows.length) return [];
+  const turnNos = [...new Set(rows.map((r) => r.turn_no))].sort((a, b) => a - b);
+  const keep = new Set(turnNos.slice(Math.max(0, turnNos.length - Math.max(1, turns))));
+  return rows.filter((r) => keep.has(r.turn_no));
+}
+
+/** 分支可见的原文纯文本（实体链接用）。 */
+export function getRecentTextForBranch(sessionId, branchId, forkTurn, turnsBack = 8) {
+  const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { kinds: ['player', 'narrator'] });
+  const max = rows.length ? rows[rows.length - 1].turn_no : 0;
+  const from = Math.max(1, max - turnsBack + 1);
+  return rows.filter((r) => r.turn_no >= from).map((r) => r.content || '').join('\n');
+}
+
+/**
+ * 在回合原文里做子串检索。中文没有词边界，LIKE 子串比分词更可靠。
+ * @returns {Array<{turn_no, kind, snippet}>}
+ */
+export function searchTurns(sessionId, query, { branchId = null, limit = 8, kinds = ['player', 'narrator'] } = {}) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+  let sql = `SELECT turn_no, kind, content, token_count FROM turns
+             WHERE session_id=? AND kind IN (${kinds.map(() => '?').join(',')}) AND content LIKE ? ESCAPE '\\'`;
+  const params = [sessionId, ...kinds, like];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  sql += ` ORDER BY turn_no DESC, id DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params).map((r) => ({
+    turn_no: r.turn_no,
+    kind: r.kind,
+    snippet: truncate(r.content, 400),
+    token_count: r.token_count,
+  }));
+}
+
+/** 在断言里按主/谓/对象文本检索。 */
+export function searchAssertions(sessionId, query, { branchId = null, limit = 20 } = {}) {
+  const q = String(query || '').trim();
+  if (!q) return [];
+  const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+  let sql = `SELECT * FROM assertions WHERE session_id=? AND status='active'
+             AND (subject LIKE ? ESCAPE '\\' OR predicate LIKE ? ESCAPE '\\' OR object LIKE ? ESCAPE '\\')`;
+  const params = [sessionId, like, like, like];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  sql += ` ORDER BY valid_from DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params);
+}
+
+function truncate(s, n) {
+  const t = String(s || '');
+  return t.length <= n ? t : `${t.slice(0, n)}…`;
 }

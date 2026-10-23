@@ -2,7 +2,7 @@
  * views/worlds.js — 世界卡总览
  */
 
-import { el, clear, formatTime } from '../util.js';
+import { el, clear } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, openActionSheet, confirmDialog } from '../app.js';
@@ -77,7 +77,7 @@ export default {
           el('div.empty-icon', {}, icon('book', { size: 20 })),
           el('div.empty-title', {}, '还没有世界卡'),
           el('div.empty-sub', {},
-            '世界卡承载这个世界的一切硬设定：宪章、人物、幕结构、词条。有了它，每一次开局都不必重写一遍。'),
+            '世界卡承载这个世界的一切：宪章、人物、辞书、时间线。有了它，每一次开局都不必重写一遍。'),
           el('button.btn.btn-primary', { type: 'button', onclick: () => navigate('#/new') },
             icon('plus', { size: 13 }), '创建第一张卡'),
         ));
@@ -89,7 +89,7 @@ export default {
       page.appendChild(list);
 
       page.appendChild(el('div.group-note', { style: 'padding-top:14px;' },
-        '提示：世界卡的「词条」只在被提到时才进入上下文，所以卡可以写得很细，却不会撑爆提示词。'));
+        '提示：世界卡的「辞书」靠实体在场、主题匹配或你手动钉选进入上下文，不靠关键词触发——所以卡可以写得很细，却不会撑爆提示词。'));
     }
 
     load();
@@ -111,7 +111,7 @@ function worldRow(w, reload) {
     ),
     el('div.world-facts', {},
       fact(w.session_count || 0, '剧情'),
-      fact(card.arc_count || 0, '幕'),
+      fact(card.codex_count || (card.codex || []).length, '辞书'),
       fact((card.cast || []).length, '人物'),
     ),
     el('span.icon-btn', {
@@ -138,7 +138,7 @@ function worldRow(w, reload) {
         } else if (action === 'delete') {
           const ok = await confirmDialog({
             title: '删除世界卡',
-            message: `「${w.title}」以及它的全部词条会被删除。已经开出的剧情会话会保留，但不再关联这张卡。`,
+            message: `「${w.title}」以及它的全部设定会被删除。已经开出的剧情会话会保留，但不再关联这张卡。`,
             confirmText: '删除', destructive: true,
           });
           if (!ok) return;

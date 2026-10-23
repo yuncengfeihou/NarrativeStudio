@@ -1,20 +1,15 @@
 /**
  * views/world.js — 世界卡详情
  *
- * 一屏看尽这张卡的骨架：宪章 / 主角 / 卡司 / 幕结构 / 词条。
+ * 一屏看尽这张卡的骨架：命题 / 宪章 / 卡司 / 辞书 / 时间线 / 可玩时间点。
  * 右侧是「开一局」与统计。
  */
 
 import { el, clear, formatTime } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
-import { navigate, toast, openSheet, openActionSheet, confirmDialog } from '../app.js';
+import { navigate, toast, openSheet } from '../app.js';
 import { hueTint, hueGlyph } from '../ui-kit.js';
-
-const LORE_CATEGORY_LABEL = {
-  setting: '设定', rule: '规则', location: '地点', institution: '制度',
-  faction: '势力', character: '人物', item: '物件', mystery: '悬念', foreshadow: '伏笔',
-};
 
 export default {
   id: 'world',
@@ -26,7 +21,7 @@ export default {
 
     let world = null;
     let loading = true;
-    let loreQuery = '';
+    let codexQuery = '';
     let activeTab = 'charter';
 
     const nav = el('header.topbar', {},
@@ -104,7 +99,7 @@ export default {
       }
 
       const card = world.card || {};
-      const lore = world.lore || [];
+      const codex = world.codex || [];
       const sessions = world.sessions || [];
 
       const grid = el('div.wk');
@@ -120,11 +115,11 @@ export default {
       const panes = el('div', {});
       panes.appendChild(pane('charter', charterPane(card)));
       panes.appendChild(pane('cast', castPane(card)));
-      panes.appendChild(pane('arcs', arcsPane(card)));
-      panes.appendChild(pane('lore', lorePane(lore)));
+      panes.appendChild(pane('timeline', timelinePane(card)));
+      panes.appendChild(pane('codex', codexPane(card, codex)));
       main.appendChild(panes);
 
-      side.appendChild(statsCard(world, card, lore, sessions));
+      side.appendChild(statsCard(world, card, codex, sessions));
       side.appendChild(sessionsCard(sessions));
       side.appendChild(sourceCard(world));
     }
@@ -145,11 +140,12 @@ export default {
     }
 
     function tabBar() {
+      const card = world.card || {};
       const items = [
         ['charter', '宪章', 'scroll'],
-        ['cast', `人物 ${(world.card?.cast || []).length}`, 'users'],
-        ['arcs', `幕 ${(world.card?.arcs || []).length}`, 'layers'],
-        ['lore', `词条 ${(world.lore || []).length}`, 'file'],
+        ['cast', `人物 ${(card.cast || []).length}`, 'users'],
+        ['timeline', `时间线 ${(card.timeline || []).length}`, 'layers'],
+        ['codex', `辞书 ${(world.codex || []).length}`, 'book'],
       ];
       const bar = el('div.editor-tabs');
       for (const [key, label, iconName] of items) {
@@ -212,13 +208,13 @@ export default {
       }
 
       // 文风
-      const style = card.style;
-      if (style) {
+      const prompt = card.prompt || {};
+      if (prompt) {
         const rows = [];
-        if (style.pov) rows.push(['视角', style.pov]);
-        if (style.voice) rows.push(['文风', style.voice]);
-        if (style.length) rows.push(['篇幅', style.length]);
-        if (style.tense) rows.push(['时态', style.tense]);
+        if (prompt.pov) rows.push(['视角', prompt.pov]);
+        if (prompt.style_guide) rows.push(['文风', prompt.style_guide]);
+        if (prompt.length) rows.push(['篇幅', prompt.length]);
+        if (prompt.tense) rows.push(['时态', prompt.tense]);
         if (rows.length) {
           wrap.appendChild(section('演出范式',
             el('div.group-card', {}, ...rows.map(([k, v]) => el('div.li', { style: 'align-items:flex-start;padding:10px 14px;' },
@@ -230,7 +226,7 @@ export default {
       }
 
       // 禁令
-      const bans = card.bans || [];
+      const bans = prompt.bans || [];
       if (bans.length) {
         wrap.appendChild(section('绝对禁止',
           el('div.group-card', {}, ...bans.map((b, i) => el('div.li', { style: 'align-items:flex-start;padding:9px 14px;' },
@@ -256,9 +252,17 @@ export default {
       const grid = el('div.cast-grid');
       cast.forEach((c) => grid.appendChild(castCell(c)));
 
-      // 开场种子
-      const seed = String(card.opening_seed || '').trim();
+      // 开场种子（v4：每个可玩时间点各有一份）
+      const anchor = (card.anchors || [])[0];
+      const seed = String(anchor?.opening_seed || '').trim();
+      const premise = String(card.prompt?.premise || '').trim();
       const wrap = el('div', {}, section('卡司', grid));
+      if (premise) {
+        wrap.appendChild(section('命题',
+          el('div.premise-block', {}, premise),
+          el('p.sect-desc', {}, '这是这个故事要往哪去。它是方向，不是剧本——剧情具体怎么走由玩家和角色决定。'),
+        ));
+      }
       if (seed) {
         wrap.appendChild(section('开场种子',
           el('div', { style: 'border:1px solid var(--line);border-radius:var(--r-lg);background:var(--paper-raised);padding:14px;' },
@@ -278,11 +282,11 @@ export default {
         type: 'button',
         onclick: () => openCastDetail(c),
       },
-        el('div.cast-face', { style: hueGlyph(c.avatar_hue) }, [...(c.name || '?')][0]),
+        el('div.cast-face', { style: hueGlyph(world?.cover_hue) }, [...(c.name || '?')][0]),
         el('div.cast-info', {},
           el('div.cast-name', {},
             c.name,
-            c.always ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '常驻') : null,
+            c.always_present ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '常驻') : null,
           ),
           el('div.cast-role', {}, c.role || ''),
           c.one_line ? el('div.cast-line', {}, c.one_line) : null,
@@ -291,15 +295,38 @@ export default {
     }
 
     function openCastDetail(c) {
+      const identity = c.identity || {};
+      const voice = c.voice || {};
+      const psyche = c.psyche || {};
+      const knowledge = c.knowledge || {};
       const rows = [];
       const push = (k, v) => { if (v) rows.push([k, v]); };
+      const list = (arr) => (Array.isArray(arr) ? arr.filter(Boolean).join('；') : '');
+
       push('定位', c.role);
-      push('性格', c.personality);
-      push('口吻', c.voice);
-      push('与主角', c.relation);
-      push('背景', c.background);
-      push('习惯', c.manner);
-      push('隐秘动机', c.secret);
+      push('年龄', identity.age);
+      push('外貌', identity.appearance);
+      push('身份', identity.station);
+      push('背景', identity.background);
+      push('口吻', voice.rhythm);
+      push('常用词', list(voice.lexicon));
+      push('绝不说', list(voice.never));
+      push('原声', list(voice.exemplars));
+      push('想要', list(psyche.wants));
+      push('害怕', list(psyche.fears));
+      push('藏着', list(psyche.hides));
+      push('在意', list(psyche.values));
+      push('知道', list(knowledge.knows));
+      push('不知道', list(knowledge.does_not_know));
+      push('误信', list(knowledge.believes_falsely));
+      const agenda = (c.agenda || [])
+        .map((a) => [a.goal, a.method].filter(Boolean).join('——'))
+        .filter(Boolean);
+      push('私心', agenda.join('；'));
+      const relations = (c.relations || [])
+        .map((r) => [`${r.to}`, r.kind, r.note].filter(Boolean).join('｜'))
+        .filter(Boolean);
+      push('关系', relations.join('；'));
 
       openSheet({
         title: c.name,
@@ -314,12 +341,12 @@ export default {
             },
               el('div', { style: 'flex:none;width:60px;font-size:var(--fs-caption);font-weight:600;color:var(--ink-4);padding-top:2px;' }, k),
               el('div', {
-                style: `flex:1;min-width:0;font-size:var(--fs-label);line-height:1.8;color:${k === '隐秘动机' ? 'var(--warn)' : 'var(--ink-2)'};`,
+                style: `flex:1;min-width:0;font-size:var(--fs-label);line-height:1.8;color:${k === '藏着' ? 'var(--warn)' : 'var(--ink-2)'};`,
               }, v),
             )),
-            (c.alias || []).length
+            (c.aliases || []).length
               ? el('div', { style: 'margin-top:14px;display:flex;gap:4px;flex-wrap:wrap;' },
-                ...c.alias.map((a) => el('span.chip.is-plain', {}, a)))
+                ...c.aliases.map((a) => el('span.chip.is-plain', {}, a)))
               : null,
           ));
         },
@@ -327,230 +354,141 @@ export default {
     }
 
     function openSeedViewer(card) {
+      const anchor = (card.anchors || [])[0];
       openSheet({
-        title: '开场种子',
+        title: `开场种子 · ${anchor?.label || '序章'}`,
         cancelText: '关闭',
         render(body) {
-          body.appendChild(el('div.prose', {}, card.opening_seed || ''));
+          body.appendChild(el('div.prose', {}, anchor?.opening_seed || ''));
         },
       });
     }
 
-    /* ---- 幕 ---- */
-    function arcsPane(card) {
-      const arcs = card.arcs || [];
-      if (!arcs.length) {
-        return el('div.empty', {},
-          el('div.empty-icon', {}, icon('layers', { size: 20 })),
-          el('div.empty-title', {}, '还没有幕结构'),
-          el('div.empty-sub', {}, '幕结构决定剧情推进的节奏——没有它，演绎容易原地打转。'),
-        );
-      }
-      const list = el('div.arc-list');
-      let cursor = 1;
-      const defaultTurns = Number(card.arc_turns) || 8;
+    /* ---- 时间线 ---- */
+    function timelinePane(card) {
+      const events = card.timeline || [];
+      const past = events.filter((e) => e.canon === 'past');
+      const future = events.filter((e) => e.canon === 'future');
+      const anchors = card.anchors || [];
 
-      arcs.forEach((a, i) => {
-        const span = Number(a.turns) || defaultTurns;
-        const from = cursor;
-        const to = cursor + span - 1;
-        cursor = to + 1;
-
-        const beats = el('div.arc-beats');
-        (a.beats || []).forEach((b) => beats.appendChild(el('div.arc-beat', {}, b)));
-        (a.avoid || []).forEach((b) => beats.appendChild(el('div.arc-beat', { style: 'color:var(--danger);' }, `忌：${b}`)));
-
-        list.appendChild(el('div.arc-row', {},
-          el('div.arc-index', {}, String(i + 1).padStart(2, '0')),
-          el('div.arc-body', {},
-            el('div.arc-title', {},
-              a.title || `第 ${i + 1} 幕`,
-              el('span.arc-span', {}, `第 ${from}–${to} 轮`),
-            ),
-            a.goal ? el('div.arc-goal', {}, a.goal) : null,
-            beats.children.length ? beats : null,
-          ),
-        ));
-      });
-      return section('幕结构', list,
-        el('span.sect-action', {}, `${arcs.length} 幕 · 约 ${cursor - 1} 轮`));
-    }
-
-    /* ---- 词条 ---- */
-    function lorePane(lore) {
       const wrap = el('div', {});
 
-      const searchInput = el('input.field', {
-        type: 'text', placeholder: '搜索词条标题或触发词…', value: loreQuery,
-        oninput: (e) => { loreQuery = e.target.value; paintLore(); },
-      });
-
-      const toolbar = el('div.lore-toolbar', {},
-        searchInput,
-        el('button.btn.btn-secondary.btn-sm', {
-          type: 'button', onclick: () => addLoreEntry(),
-        }, icon('plus', { size: 12 }), '新增'),
-      );
-      wrap.appendChild(toolbar);
-
-      const listEl = el('div.lore-list');
-      wrap.appendChild(listEl);
-
-      wrap.appendChild(el('div.group-note', { style: 'padding-top:10px;' },
-        '词条只在它的触发词出现在「本轮输入 / 最近若干轮 / 场景账本」里时才进入上下文。常驻词条（如世界骨架）每轮都在。'));
-
-      function paintLore() {
-        clear(listEl);
-        const q = loreQuery.trim().toLowerCase();
-        const items = q
-          ? lore.filter((e) => (e.title || '').toLowerCase().includes(q)
-            || (e.keys || []).some((k) => String(k).toLowerCase().includes(q))
-            || (e.content || '').toLowerCase().includes(q))
-          : lore;
-
-        if (!items.length) {
-          listEl.appendChild(el('div.empty', { style: 'padding:28px 20px;' },
-            el('div.empty-sub', {}, q ? '没有匹配的词条' : '还没有词条'),
-          ));
-          return;
-        }
-
-        items.forEach((e) => {
-          const item = el('div.lore-item');
-          const head = el('button.lore-head', { type: 'button' },
-            e.constant ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '常驻') : null,
-            el('span.lore-title', {}, e.title || (e.content || '').slice(0, 20)),
-            el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' },
-              LORE_CATEGORY_LABEL[e.category] || e.category || '设定'),
-            el('span.lore-keys', {}, ...(e.keys || []).slice(0, 3).map((k) => el('span.lore-key', {}, k))),
-            el('span', { style: 'display:flex;color:var(--ink-4);' }, icon('chevronDown', { size: 12 })),
-          );
-          head.addEventListener('click', () => item.classList.toggle('is-open'));
-
-          const body = el('div.lore-body', {},
-            el('div.lore-content', {}, e.content),
-            el('div', { style: 'display:flex;gap:5px;margin-top:10px;' },
-              el('button.btn.btn-ghost.btn-sm', {
-                type: 'button', onclick: (ev) => { ev.stopPropagation(); editLoreEntry(e); },
-              }, '编辑'),
-              el('button.btn.btn-ghost.btn-sm', {
-                type: 'button', style: 'color:var(--danger);',
-                onclick: async (ev) => {
-                  ev.stopPropagation();
-                  const ok = await confirmDialog({
-                    title: '删除词条', message: `「${e.title || '该词条'}」会被删除。`,
-                    confirmText: '删除', destructive: true,
-                  });
-                  if (!ok) return;
-                  await api.deleteLore(worldId, e.id);
-                  await load();
-                },
-              }, '删除'),
-            ),
-          );
-
-          item.appendChild(head);
-          item.appendChild(body);
-          listEl.appendChild(item);
-        });
+      if (anchors.length) {
+        wrap.appendChild(el('div.sect', {},
+          el('h3.sect-title', {}, '可玩时间点'),
+          el('p.sect-desc', {}, '从哪个时间点开局。默认第一个（通常是序章）。'),
+          el('div.anchor-list', {}, ...anchors.map((a, i) => el('div.anchor', {},
+            el('span.anchor-label', {}, a.label + (i === 0 ? ' · 默认' : '')),
+            a.note ? el('span.anchor-note', {}, a.note) : null,
+          ))),
+        ));
       }
 
-      paintLore();
-      return section('世界词条', wrap,
-        el('span.sect-action', {}, `共 ${lore.length} 条`));
+      wrap.appendChild(el('div.sect', {},
+        el('h3.sect-title', {}, '起点之前 · 既定事实'),
+        el('p.sect-desc', {}, '开局时这些事已经发生过，剧情必须与之自洽。'),
+        past.length
+          ? el('div.tl-list', {}, ...past.map((e) => el('div.tl-item', {},
+              el('span.tl-when', {}, e.when || '—'),
+              el('span.tl-what', {}, e.what),
+              e.source ? el('span.tl-src', {}, e.source) : null,
+            )))
+          : el('p.muted', {}, '（原创世界：起点之前没有既定事实，一切从开局开始长。）'),
+      ));
+
+      wrap.appendChild(el('div.sect', {},
+        el('h3.sect-title', {}, '原著后续 · 参考'),
+        el('p.sect-desc', {}, '这些是原著里后来发生的事。它们只作校勘参考，不会注入提示词，也不作为演绎目标——玩家把剧情带偏是正常玩法。'),
+        future.length
+          ? el('div.tl-list.is-future', {}, ...future.map((e) => el('div.tl-item', {},
+              el('span.tl-when', {}, e.when || '—'),
+              el('span.tl-what', {}, e.what),
+              e.source ? el('span.tl-src', {}, e.source) : null,
+            )))
+          : el('p.muted', {}, '（无）'),
+      ));
+
+      return wrap;
     }
 
-    async function addLoreEntry() {
-      const draft = { title: '', keys: [], secondary: [], content: '', category: 'setting', constant: false };
-      openLoreEditor(draft, async (payload) => {
-        await api.addLore(worldId, payload);
-        toast('已添加', { type: 'success' });
-        await load();
-      });
-    }
+    /* ---- 辞书 ---- */
+    const CODEX_TYPE_LABEL = {
+      place: '地点', institution: '机构', item: '物品',
+      faction: '势力', concept: '概念', character: '角色', custom: '其他',
+    };
 
-    function editLoreEntry(entry) {
-      openLoreEditor(entry, async (payload) => {
-        await api.updateLore(worldId, entry.id, payload);
-        toast('已保存', { type: 'success' });
-        await load();
-      });
-    }
+    function codexPane(card, codex) {
+      const q = codexQuery.trim();
+      const list = q
+        ? codex.filter((e) => (e.name + ' ' + (e.aliases || []).join(' ') + ' ' + (e.summary || '')).includes(q))
+        : codex;
 
-    function openLoreEditor(draft, onSave) {
-      const titleInput = el('input.field', { value: draft.title || '', placeholder: '标题（如「司楼」）' });
-      const keysInput = el('input.field', {
-        value: (draft.keys || []).join('、'),
-        placeholder: '触发词，用顿号分隔（如：司楼、青楼、卖进去）',
-      });
-      const secondaryInput = el('input.field', {
-        value: (draft.secondary || []).join('、'),
-        placeholder: '（可选）二次触发词：必须同时命中其中之一才生效',
-      });
-      const contentInput = el('textarea.field', { rows: 7 });
-      contentInput.value = draft.content || '';
+      const wrap = el('div', {});
+      wrap.appendChild(el('div.sect-head', {},
+        el('h3.sect-title', {}, '辞书'),
+        el('span.sect-action', {}, `${codex.length} 条`),
+      ));
+      wrap.appendChild(el('p.sect-desc', {},
+        '类型化的世界实体。它们不靠关键词触发——进场靠「实体在场 / 主题匹配 / 你钉选」，由引擎按当前场景渲染。'),
+      );
 
-      const catSel = el('select.field', { style: 'height:32px;' },
-        ...Object.entries(LORE_CATEGORY_LABEL).map(([v, l]) =>
-          el('option', { value: v, selected: draft.category === v || undefined }, l)));
-
-      const constSw = el('div.switch', {
-        role: 'switch', 'aria-checked': String(!!draft.constant), tabindex: '0',
-      }, el('div.switch-knob'));
-      let isConst = !!draft.constant;
-      constSw.addEventListener('click', () => {
-        isConst = !isConst;
-        constSw.setAttribute('aria-checked', String(isConst));
+      const searchInput = el('input.field', {
+        type: 'text', placeholder: '搜索名称或别名…', value: codexQuery,
+        oninput: (e) => { codexQuery = e.target.value; render(); },
       });
+      wrap.appendChild(el('div.sect-search', {}, searchInput));
 
-      openSheet({
-        title: draft.id ? '编辑词条' : '新增词条',
-        confirmText: '保存',
-        async onConfirm() {
-          const content = contentInput.value.trim();
-          if (!content) { toast('内容不能为空'); return false; }
-          await onSave({
-            title: titleInput.value.trim(),
-            keys: splitKeys(keysInput.value),
-            secondary: splitKeys(secondaryInput.value),
-            content,
-            category: catSel.value,
-            constant: isConst,
-            priority: Number(draft.priority) || 50,
-          });
-          return true;
-        },
-        render(body) {
-          body.appendChild(el('div', { style: 'display:flex;flex-direction:column;gap:12px;' },
-            field('标题', titleInput),
-            field('触发词', keysInput, '任一触发词出现在最近的文本里，这条词条就会进入上下文。'),
-            field('二次触发词（可选）', secondaryInput, '用于过滤误触发，比如「凌」太泛，配「玉佩」才生效。'),
-            field('内容', contentInput),
-            el('div', { style: 'display:flex;gap:10px;' },
-              el('div', { style: 'flex:1;' }, field('分类', catSel)),
-              el('div', { style: 'flex:none;padding-top:20px;' },
-                el('div', { style: 'display:flex;align-items:center;gap:8px;' },
-                  constSw,
-                  el('span', { style: 'font-size:var(--fs-caption);color:var(--ink-2);' }, '常驻'),
-                ),
-              ),
+      if (!list.length) {
+        wrap.appendChild(el('p.muted', {}, q ? '没有匹配的条目。' : '还没有辞书条目。'));
+        return wrap;
+      }
+
+      const grouped = {};
+      for (const e of list) {
+        const t = e.type || 'custom';
+        grouped[t] = grouped[t] || [];
+        grouped[t].push(e);
+      }
+
+      for (const [type, items] of Object.entries(grouped)) {
+        wrap.appendChild(el('div.codex-group', {},
+          el('div.codex-group-head', {}, CODEX_TYPE_LABEL[type] || type, el('span', {}, `${items.length}`)),
+          ...items.map((e) => el('div.codex-item', {},
+            el('div.codex-item-head', {},
+              el('span.codex-item-name', {}, e.name),
+              e.pinned ? el('span.codex-item-pin', {}, '钉选') : null,
+              e.reveal === 'secret' ? el('span.codex-item-secret', {}, '未解') : null,
             ),
-          ));
-        },
-      });
+            e.summary ? el('div.codex-item-summary', {}, e.summary) : null,
+            (e.facets && (e.facets.rules || e.facets.consequences))
+              ? el('div.codex-item-facets', {},
+                  e.facets.rules?.length ? el('span', {}, `规则：${e.facets.rules.join('；')}`) : null,
+                  e.facets.consequences?.length ? el('span', {}, `后果：${e.facets.consequences.join('；')}`) : null,
+                )
+              : null,
+            e.links?.length ? el('div.codex-item-links', {}, `关联：${e.links.join('、')}`) : null,
+          )),
+        ));
+      }
+
+      return wrap;
     }
+
 
     /* ---- 侧栏 ---- */
-    function statsCard(w, card, lore, sessions) {
+    function statsCard(w, card, codex, sessions) {
       const turns = sessions.reduce((s, x) => s + (x.turn_count || 0), 0);
+      const past = (card.timeline || []).filter((e) => e.canon === 'past').length;
+      const future = (card.timeline || []).filter((e) => e.canon === 'future').length;
       return el('div.side-card', {},
         el('div.side-card-head', {}, '概览'),
         el('div.side-card-body', {},
           el('div.side-stats', {},
             stat(`${card.cast?.length || 0}`, '人物'),
-            stat(`${card.arcs?.length || 0}`, '幕'),
-            stat(`${lore.length}`, '词条'),
-            stat(`${lore.filter((e) => e.constant).length}`, '常驻'),
+            stat(`${codex.length}`, '辞书'),
+            stat(`${codex.filter((e) => e.pinned).length}`, '钉选'),
+            stat(`${past}`, '既定事实'),
+            stat(`${future}`, '原著参考'),
             stat(`${sessions.length}`, '剧情'),
             stat(`${turns}`, '轮次'),
           ),
@@ -625,24 +563,9 @@ export default {
       );
     }
 
-    function field(label, input, hint) {
-      return el('div', {},
-        el('label.field-label', {}, label),
-        input,
-        hint ? el('div.field-hint', {}, hint) : null,
-      );
-    }
-
     load();
     return {
       unmount() { document.title = '叙事台'; },
     };
   },
 };
-
-function splitKeys(text) {
-  return String(text || '')
-    .split(/[、,，\n]/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-}

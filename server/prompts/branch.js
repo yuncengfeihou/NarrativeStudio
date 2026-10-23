@@ -1,8 +1,8 @@
 /**
- * server/prompts/branch.js — 剧情分支 Agent 提示词
+ * server/prompts/branch.js — 走向 Agent 提示词
  *
- * 分支的作用不是「给四个选项」，而是**把剧情往不同方向推**。
- * 所以每个分支必须写清：这一步具体做什么、会撞上谁的意志、赌注是什么。
+ * v4：走向来自「此刻的压力与在场者的私心」，不来自幕结构。
+ * 没有「本幕必达节拍」这种东西——剧情往哪走由玩家选，不由卡预设。
  */
 
 export const BRANCH_TONES = ['激进', '谨慎', '探索', '情感', '智取', '诡道'];
@@ -14,9 +14,6 @@ function tailOf(text, maxChars) {
   return `……（前略）\n${t.slice(-maxChars)}`;
 }
 
-/**
- * @param {object|null} world 世界卡（取 card.cast 做人物口吻提示）
- */
 export function branchSystemPrompt(world) {
   const card = world?.card || {};
   const title = card.title || '未命名剧情';
@@ -27,6 +24,7 @@ export function branchSystemPrompt(world) {
 
   return `# 身份
 你是互动剧情的「走向设计者」。你不写正文，你只设计**玩家此刻可以走的路**。
+你的依据是场记单里的压力、私心与未回收线索——不是任何预设的剧情路线。
 
 # 作品
 《${title}》${genre ? `｜${genre}` : ''}
@@ -59,10 +57,10 @@ ${cast ? `主要人物：${cast}` : ''}
 不要在描述里剧透后续会如何，只写「他打算做什么」。`;
 }
 
-export function branchUserPrompt({ sceneSummary, lastNarrative, state, present, director }) {
+export function branchUserPrompt({ sceneSummary, lastNarrative, state, present, sceneSheet }) {
   const parts = [];
-  if (director) {
-    parts.push(`【本幕】${director.title}${director.goal ? `｜要达成：${director.goal}` : ''}`);
+  if (sceneSheet) {
+    parts.push(`【场记单】（此刻世界的既定事实：在场者、私心、关系、未回收线索、压力）\n${sceneSheet}`);
   }
   if (sceneSummary) parts.push(`【此刻局势】${sceneSummary}`);
   if (present?.length) {
@@ -71,9 +69,11 @@ export function branchUserPrompt({ sceneSummary, lastNarrative, state, present, 
   if (state && typeof state === 'object') {
     const bits = [];
     if (state.time) bits.push(`时间 ${state.time}`);
-    if (state.location) bits.push(`地点 ${state.location}`);
+    if (state.place) bits.push(`地点 ${state.place}`);
     if (typeof state.tension === 'number') bits.push(`张力 ${state.tension.toFixed(2)}`);
-    if (Array.isArray(state.inventory) && state.inventory.length) bits.push(`随身 ${state.inventory.slice(0, 8).join('、')}`);
+    if (Array.isArray(state.inventory) && state.inventory.length) {
+      bits.push(`随身 ${state.inventory.slice(0, 8).map((i) => (typeof i === 'string' ? i : i.name)).join('、')}`);
+    }
     if (bits.length) parts.push(`【状态】${bits.join('｜')}`);
   }
   const tail = tailOf(lastNarrative, 1400);

@@ -15,12 +15,20 @@
   color-scheme: light;
 
   /* ---- 字体 ---- */
-  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+  /* 界面字体：除演绎正文外的所有 UI 文字（标题、按钮、表单、列表）。
+     设置 → 字体 → 界面字体会在根节点覆盖 --font-ui。 */
+  --font-ui-base: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
-  /* 阅读正文沿用 UI 字体：中文衬线在 Windows 上会回退成很重的宋体，
-     长时间阅读反而更累。行高与行宽才是阅读舒适度的主要来源。 */
-  --font-read: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
+  --font-ui: var(--font-ui-base);
+  /* 标题默认跟随界面字体；保留独立变量是为了让标题规则集中在一处。 */
+  --font-title: var(--font-ui);
+  /* 阅读正文默认沿用 UI 字体：中文衬线在 Windows 上会回退成很重的宋体，
+     长时间阅读反而更累。行高与行宽才是阅读舒适度的主要来源。
+     分成两层：--font-read-base 是出厂默认栈，--font-read 是用户可覆盖的那层
+     （设置 → 字体 → 正文内容）。两个变量分开才不会自引用成环。 */
+  --font-read-base: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  --font-read: var(--font-read-base);
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* ---- 字号 ---- */
@@ -76,8 +84,12 @@
 
   /* ---- 动效（克制，不弹跳） ---- */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
-  --dur: 0.15s;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-soft: cubic-bezier(0.32, 0.72, 0, 1);
+  --dur-fast: 0.12s;
+  --dur: 0.16s;
   --dur-slow: 0.24s;
+  --dur-enter: 0.32s;
 
   /* ---- 布局 ---- */
   --sidebar-w: 232px;

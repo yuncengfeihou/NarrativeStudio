@@ -36,7 +36,7 @@ export class LlmError extends Error {
  * @param {object|null} raw
  * @returns {{prompt_tokens:number, completion_tokens:number, total_tokens:number, cached_tokens:number, reasoning_tokens:number}|null}
  */
-export function normalizeUsage(raw) {
+function normalizeUsage(raw) {
   if (!raw || typeof raw !== 'object') return null;
   const prompt = num(raw.prompt_tokens ?? raw.input_tokens);
   const completion = num(raw.completion_tokens ?? raw.output_tokens);
@@ -268,4 +268,3 @@ async function withRetry(fn) {
   throw lastErr;
 }
 
-export const UPSTREAM_MODEL = config.upstream.model;

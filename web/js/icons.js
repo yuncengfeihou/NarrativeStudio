@@ -104,9 +104,5 @@ export function icon(name, opts = {}) {
   return svg;
 }
 
-/** 是否存在该图标（便于调用方降级） */
-export function hasIcon(name) {
-  return Boolean(PATHS[name]);
-}
-
-export default { icon, hasIcon };
+/** 图标查询入口：icon('user', {size: 13}) */
+export default { icon };

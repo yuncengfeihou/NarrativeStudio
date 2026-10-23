@@ -74,8 +74,7 @@
 }
 
 .prose {
-  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
-    "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  font-family: var(--font-read);
   font-size: var(--fs-read);
   line-height: 1.9;
   color: var(--ink);

@@ -2,11 +2,10 @@
 /**
  * _work/seed-worlds.mjs — 把 presets/*.json 的世界卡导入数据库
  *
- * 用法：
  *   node _work/seed-worlds.mjs            # 导入全部预设
  *   node _work/seed-worlds.mjs --reset    # 先清空世界卡与剧情会话，再导入
  *
- * 幂等：同 id 的卡会被覆盖更新；lore 词条整批替换。
+ * 幂等：同 id 的卡被覆盖更新。只接受 v4 形状的卡。
  */
 import '../server/load-env.js';
 import fs from 'node:fs';
@@ -19,71 +18,48 @@ const PRESETS_DIR = path.join(ROOT, 'presets');
 
 const reset = process.argv.includes('--reset');
 
-const { getDb, upsertWorld, replaceLore, getWorld, listWorlds, listSessions } = await import('../server/memory/store.js');
+const { getDb, listSessions, listWorlds, saveWorld, getCodex } = await import('../server/memory/store.js');
+const { normalizeCard } = await import('../server/world/schema.js');
 
 const db = getDb();
 
 if (reset) {
   console.log('· 清空剧情会话与世界卡…');
   for (const s of listSessions()) {
-    db.prepare(`DELETE FROM turns WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM summaries WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM entities WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM facts WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM states WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM notes WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM relations WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM threads WHERE session_id=?`).run(s.id);
-    db.prepare(`DELETE FROM reflections WHERE session_id=?`).run(s.id);
+    for (const t of ['turns', 'scenes', 'assertions', 'character_states', 'voices', 'patches', 'branches', 'notes', 'states', 'relations', 'threads']) {
+      db.prepare(`DELETE FROM ${t} WHERE session_id=?`).run(s.id);
+    }
     db.prepare(`DELETE FROM sessions WHERE id=?`).run(s.id);
   }
-  db.prepare(`DELETE FROM lore_entries`).run();
-  db.prepare(`DELETE FROM worlds`).run();
-  console.log('  已清空。');
+  for (const w of listWorlds()) {
+    db.prepare(`DELETE FROM codex_entries WHERE world_id=?`).run(w.id);
+    db.prepare(`DELETE FROM timeline_events WHERE world_id=?`).run(w.id);
+    db.prepare(`DELETE FROM anchors WHERE world_id=?`).run(w.id);
+    db.prepare(`DELETE FROM worlds WHERE id=?`).run(w.id);
+  }
 }
 
-const files = fs.readdirSync(PRESETS_DIR).filter((f) => f.endsWith('.json'));
-if (!files.length) {
-  console.log('presets/ 下没有 json 文件。');
-  process.exit(0);
-}
-
-for (const file of files) {
-  const full = path.join(PRESETS_DIR, file);
-  let data;
+let count = 0;
+for (const file of fs.readdirSync(PRESETS_DIR)) {
+  if (!file.endsWith('.json')) continue;
   try {
-    data = JSON.parse(fs.readFileSync(full, 'utf8'));
+    const raw = JSON.parse(fs.readFileSync(path.join(PRESETS_DIR, file), 'utf8'));
+    const card = normalizeCard(raw.card || {});
+    const id = raw.id || file.replace(/\.json$/, '');
+    saveWorld({
+      id,
+      title: card.title,
+      subtitle: card.subtitle,
+      tags: raw.tags || card.tags || [],
+      card,
+      source: raw.source || card.source || null,
+    });
+    const codex = getCodex(id);
+    console.log(`  ✓ ${id} — ${card.title}｜卡司 ${card.cast.length}｜辞书 ${codex.length}｜`
+      + `时间线 ${card.timeline.length}｜锚点 ${card.anchors.length}`);
+    count++;
   } catch (err) {
-    console.warn(`✕ ${file} 解析失败：${err.message}`);
-    continue;
+    console.warn(`  ✗ ${file}: ${err.message}`);
   }
-  const card = data.card || {};
-  if (!card.title) {
-    console.warn(`✕ ${file} 缺少 card.title，跳过`);
-    continue;
-  }
-  const id = data.id || file.replace(/\.json$/, '');
-
-  upsertWorld({
-    id,
-    title: card.title,
-    subtitle: data.subtitle || card.subtitle || '',
-    coverHue: data.cover_hue ?? card.cover_hue ?? 210,
-    tags: data.tags || card.genre || [],
-    card,
-    source: data.source || null,
-  });
-  const loreCount = replaceLore(id, Array.isArray(data.lore) ? data.lore : []);
-
-  const w = getWorld(id);
-  const castCount = Array.isArray(card.cast) ? card.cast.length : 0;
-  const arcCount = Array.isArray(card.arcs) ? card.arcs.length : 0;
-  console.log(`✓ ${card.title}`);
-  console.log(`    id=${id}  卡司 ${castCount} 人 · 幕 ${arcCount} 段 · 词条 ${loreCount} 条`);
 }
-
-console.log('\n当前世界卡：');
-for (const w of listWorlds()) {
-  const sessions = listSessions({ worldId: w.id });
-  console.log(`  · ${w.title}  (${sessions.length} 段剧情)`);
-}
+console.log(`\n导入了 ${count} 张世界卡。`);

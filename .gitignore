@@ -17,3 +17,15 @@ tests/*.txt
 # OS
 .DS_Store
 Thumbs.db
+
+# 系统锁定的临时文件（无法读取/删除，忽略）
+_work/db-dump.mjs
+
+# 内部开发文档与素材（不入公开仓库）
+/AGENTS.md
+/README.md
+/素材/
+/sillytarven MVU变量机制报告.md
+
+# 内部脚本说明
+/_work/README.md

@@ -31,7 +31,8 @@
   border-left: 1px solid var(--line);
   box-shadow: var(--sh-lg);
   transform: translateX(100%);
-  transition: transform var(--dur-slow) var(--ease);
+  transition: transform var(--dur-enter) var(--ease-soft);
+  will-change: transform;
 }
 .sheet.is-open { transform: none; }
 
@@ -147,7 +148,7 @@
   box-shadow: var(--sh-lg);
   transform: translate(-50%, -50%) scale(0.97);
   opacity: 0;
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-out);
 }
 .dialog.is-open { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .dialog-title {
@@ -180,6 +181,12 @@
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   box-shadow: var(--sh-lg);
+  transform-origin: top right;
+  animation: pop-in var(--dur) var(--ease-out);
+}
+@keyframes pop-in {
+  from { opacity: 0; transform: translateY(-3px) scale(0.98); }
+  to { opacity: 1; transform: none; }
 }
 .pop-item {
   display: flex;
@@ -215,13 +222,13 @@
   font-size: var(--fs-label);
   font-weight: 500;
   box-shadow: var(--sh-lg);
-  transform: translate(-50%, 10px);
+  transform: translate(-50%, 10px) scale(0.98);
   opacity: 0;
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-out);
   pointer-events: none;
   max-width: calc(100vw - 40px);
 }
-.toast.is-visible { opacity: 1; transform: translate(-50%, 0); }
+.toast.is-visible { opacity: 1; transform: translate(-50%, 0) scale(1); }
 .toast[data-type="error"] { background: var(--danger); color: #fff; }
 .toast[data-type="success"] { background: var(--ok); color: #fff; }
 
@@ -247,7 +254,7 @@
   box-shadow: var(--sh-lg);
   transform: translate(-50%, -50%) scale(0.97);
   opacity: 0;
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease);
+  transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-out);
   pointer-events: none;
 }
 .loading.is-visible { opacity: 1; transform: translate(-50%, -50%) scale(1); }
@@ -705,3 +712,163 @@
 }
 .session-usage-fill { height: 100%; border-radius: 2px; background: var(--ok); opacity: 0.7; }
 .session-usage-note { margin-top: 6px; font-size: 10px; color: var(--ink-4); line-height: 1.6; }
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 记忆面板 v4：概览 / 分支 / 场次 / 断言 / 状态 / 线索 / 原声 / 校勘 / 笔记 */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+.mem-overview {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 8px;
+  margin-bottom: 18px;
+}
+.mem-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--paper-sunken);
+}
+.mem-card-value {
+  font-size: 20px;
+  font-weight: 650;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  line-height: 1.15;
+}
+.mem-card-label { font-size: 11px; font-weight: 600; color: var(--ink-2); }
+.mem-card-hint { font-size: 10px; color: var(--ink-4); line-height: 1.5; }
+
+.mem-world {
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border-radius: 10px;
+  background: var(--paper-sunken);
+  border-left: 3px solid var(--accent, var(--ink-3));
+}
+.mem-world h4 { margin: 0 0 4px; font-size: 13px; }
+.mem-world-note { margin: 6px 0 0; font-size: 11px; color: var(--ink-3); line-height: 1.6; }
+
+.mem-branches, .mem-scenes, .mem-assertions, .mem-states,
+.mem-threads, .mem-voices, .mem-patches, .mem-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 18px;
+}
+.mem-branch {
+  display: grid;
+  grid-template-columns: minmax(120px, auto) 1fr;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-branch.is-current { outline: 1px solid var(--ok); }
+.mem-branch-id { font-weight: 600; color: var(--ink); }
+.mem-branch-meta, .mem-branch-note { color: var(--ink-4); }
+
+.mem-scene {
+  display: grid;
+  grid-template-columns: auto auto 1fr;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-scene-id { font-weight: 600; color: var(--ink); }
+.mem-scene-range, .mem-scene-place { color: var(--ink-4); }
+.mem-scene-q { color: var(--ink-2); }
+.mem-scene-outcome { grid-column: 1 / -1; color: var(--ink-3); font-size: 10px; }
+
+.mem-assertion {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-assertion-main { color: var(--ink); }
+.mem-assertion-meta, .mem-assertion-ev { color: var(--ink-4); font-size: 10px; }
+
+.mem-state {
+  display: grid;
+  grid-template-columns: minmax(70px, auto) 1fr;
+  gap: 2px 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-state-who { font-weight: 600; color: var(--ink); }
+.mem-state-fields { color: var(--ink-3); }
+
+.mem-thread {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-thread-status { font-size: 10px; font-weight: 600; }
+.mem-thread-status.is-open { color: var(--warn, #b45309); }
+.mem-thread-status.is-done { color: var(--ok); }
+.mem-thread-title { color: var(--ink); }
+.mem-thread-meta, .mem-thread-note { color: var(--ink-4); font-size: 10px; }
+
+.mem-voice {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-voice-who { font-weight: 600; color: var(--ink); white-space: nowrap; }
+.mem-voice-text { color: var(--ink-2); }
+.mem-voice-turn, .mem-voice-pin { color: var(--ink-4); font-size: 10px; }
+
+.mem-patch {
+  display: grid;
+  grid-template-columns: auto auto auto 1fr;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-patch.is-pending { outline: 1px dashed var(--ink-4); }
+.mem-patch-kind { font-weight: 600; color: var(--ink); }
+.mem-patch-sev { font-size: 10px; color: var(--ink-4); }
+.mem-patch-agent { font-size: 10px; color: var(--ink-4); }
+.mem-patch-claim { color: var(--ink-2); }
+.mem-patch-ev, .mem-patch-status { grid-column: 1 / -1; color: var(--ink-4); font-size: 10px; }
+.mem-patch-actions { grid-column: 1 / -1; display: flex; gap: 6px; margin-top: 4px; }
+
+.mem-note {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 2px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--paper-sunken);
+  font-size: 11px;
+}
+.mem-note-kind { font-size: 10px; font-weight: 600; color: var(--ink-4); }
+.mem-note-text { color: var(--ink-2); }
+
+.mem-add-note { display: flex; gap: 8px; margin-top: 4px; }
+.mem-add-note .input { flex: 1; }
+
+@media (max-width: 720px) {
+  .mem-overview { grid-template-columns: repeat(2, 1fr); }
+}

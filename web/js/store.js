@@ -3,8 +3,9 @@
  */
 
 import { $ } from './util.js';
+import { fontStack } from './fonts.js';
 
-const PREF_KEY = 'narra.prefs.v3';
+const PREF_KEY = 'narra.prefs.v4';
 
 /* ------------------------------------------------------------------ */
 
@@ -31,6 +32,8 @@ export const ui = createStore({
   theme: 'system',
   readingWidth: 'normal',   // compact | normal | wide
   readingSize: 17,          // 正文字号
+  uiFont: '',               // 界面字体：除正文外的所有 UI 文字
+  readingFont: '',          // 正文内容字体：'' = 跟随系统默认
   showReasoning: false,
   showTurnMarks: true,
   showUsage: true,          // 显示 token 遥测
@@ -58,21 +61,14 @@ export function setPref(key, value) {
   writePrefs({ [key]: value });
 }
 
-export function getPref(key, fallback = null) {
-  const v = ui.get()[key];
-  return v === undefined ? fallback : v;
-}
-
-/* ------------------------------------------------------------------ */
-
 const mq = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
 
-export function resolveTheme(theme = ui.get().theme) {
+function resolveTheme(theme = ui.get().theme) {
   if (theme === 'system') return mq && mq.matches ? 'dark' : 'light';
   return theme === 'dark' ? 'dark' : 'light';
 }
 
-export function applyTheme(theme = ui.get().theme) {
+function applyTheme(theme = ui.get().theme) {
   const resolved = resolveTheme(theme);
   const root = document.documentElement;
   root.setAttribute('data-theme', resolved);
@@ -108,21 +104,36 @@ const WIDTH_MAP = {
   wide: '50em',
 };
 
-export function applyReadingPrefs() {
+/** 把偏好写进对应的 CSS 变量。空值 = 回到 tokens.css 的出厂默认。 */
+function applyFontVar(name, value, fallback) {
+  const stack = fontStack(value, fallback);
+  if (stack) document.documentElement.style.setProperty(name, stack);
+  else document.documentElement.style.removeProperty(name);
+}
+
+export function applyAppearancePrefs() {
   const s = ui.get();
   const root = document.documentElement;
   root.style.setProperty('--read-max', WIDTH_MAP[s.readingWidth] || WIDTH_MAP.normal);
   if (typeof s.readingSize === 'number') {
     root.style.setProperty('--fs-read', `${s.readingSize}px`);
   }
+  applyFontVar('--font-ui', s.uiFont, 'var(--font-ui-base)');
+  applyFontVar('--font-read', s.readingFont, 'var(--font-read-base)');
 }
 
 /* ------------------------------------------------------------------ */
 
 export function initStore() {
   const prefs = readPrefs();
+  // beta 期间 UI 偏好从「界面标题」扩成了「界面字体」，把旧键读过来即可。
+  if (prefs.uiFont == null && prefs.titleFont != null) prefs.uiFont = prefs.titleFont;
+  if ('titleFont' in prefs) {
+    delete prefs.titleFont;
+    try { localStorage.setItem(PREF_KEY, JSON.stringify(prefs)); } catch { /* 忽略 */ }
+  }
   ui.set(prefs);
   applyTheme(ui.get().theme);
-  applyReadingPrefs();
+  applyAppearancePrefs();
   return ui.get();
 }

@@ -4,7 +4,6 @@
  */
 
 export const $ = (sel, root = document) => root.querySelector(sel);
-export const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
 
 /**
  * 创建 DOM 元素。
@@ -60,7 +59,7 @@ export function el(tag, attrs = {}, ...children) {
   return node;
 }
 
-export function appendChildren(parent, children) {
+function appendChildren(parent, children) {
   for (const child of children.flat(Infinity)) {
     if (child == null || child === false || child === '') continue;
     parent.appendChild(child instanceof Node ? child : document.createTextNode(String(child)));
@@ -81,66 +80,7 @@ export function escapeHtml(str) {
     .replace(/'/g, '&#39;');
 }
 
-export function hashString(str) {
-  let h = 2166136261 >>> 0;
-  const s = String(str ?? '');
-  for (let i = 0; i < s.length; i++) {
-    h ^= s.charCodeAt(i);
-    h = Math.imul(h, 16777619) >>> 0;
-  }
-  return h >>> 0;
-}
-
-export function hueFromString(seed) {
-  return hashString(seed) % 360;
-}
-
-export function hueToColor(hue, s = 68, l = 50) {
-  const h = ((hue % 360) + 360) % 360;
-  return `hsl(${h.toFixed(0)} ${s}% ${l}%)`;
-}
-
-/**
- * 由 hue 派生一组和谐渐变（用于封面/头像）。
- * 两个 stop 相隔 36°，明度略微下沉，追求 iOS 风格的柔和而非高饱和。
- */
-export function hueToGradient(hue, { s = 68, l = 56 } = {}) {
-  const h = ((hue % 360) + 360) % 360;
-  const h2 = (h + 36) % 360;
-  return `linear-gradient(140deg, hsl(${h} ${s}% ${l}%), hsl(${h2} ${Math.min(100, s + 6)}% ${Math.max(28, l - 14)}%))`;
-}
-
-/** 头像/封面的背景（字符串种子或 hue） */
-export function avatarBackground(seedOrHue) {
-  const hue = typeof seedOrHue === 'number' ? seedOrHue : hueFromString(seedOrHue);
-  return hueToGradient(hue);
-}
-
-export function debounce(fn, wait = 200) {
-  let t = null;
-  return function debounced(...args) {
-    if (t != null) clearTimeout(t);
-    t = setTimeout(() => { t = null; fn.apply(this, args); }, wait);
-  };
-}
-
-export function throttle(fn, wait = 200) {
-  let last = 0;
-  let timer = null;
-  return function throttled(...args) {
-    const now = Date.now();
-    const remain = wait - (now - last);
-    if (remain <= 0) {
-      if (timer) { clearTimeout(timer); timer = null; }
-      last = now;
-      fn.apply(this, args);
-    } else if (!timer) {
-      timer = setTimeout(() => { timer = null; last = Date.now(); fn.apply(this, args); }, remain);
-    }
-  };
-}
-
-export function toDate(ts) {
+function toDate(ts) {
   if (ts instanceof Date) return ts;
   if (typeof ts === 'number') return new Date(ts);
   if (typeof ts === 'string') {
@@ -213,14 +153,6 @@ export function fmtNumber(n) {
   return (Number(n) || 0).toLocaleString('zh-CN');
 }
 
-export function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
-export function uid(prefix = 'id') {
-  return `${prefix}-${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36).slice(-4)}`;
-}
-
 export function firstChar(str) {
   const s = String(str || '').trim();
   return s ? [...s][0] : '?';
@@ -249,18 +181,6 @@ export async function copyToClipboard(str) {
   }
 }
 
-export function haptic(ms = 8) {
-  try {
-    if (typeof navigator !== 'undefined' && typeof navigator.vibrate === 'function') navigator.vibrate(ms);
-  } catch { /* 忽略 */ }
-}
-
-/**
- * 触发文件下载。
- * @param {string} filename
- * @param {string} content
- * @param {string} [mime]
- */
 export function downloadFile(filename, content, mime = 'text/plain;charset=utf-8') {
   const blob = new Blob([content], { type: mime });
   const url = URL.createObjectURL(blob);
@@ -290,30 +210,6 @@ export function charCount(str) {
     n += /[\u4E00-\u9FFF\u3400-\u4DBF]/.test(ch) ? 1 : 0.5;
   }
   return Math.round(n);
-}
-
-/** 安全 JSON 解析 */
-export function tryParse(str, fallback = null) {
-  try { return JSON.parse(str); } catch { return fallback; }
-}
-
-/** 数组分组 */
-export function groupBy(list, keyFn) {
-  const map = new Map();
-  for (const item of list || []) {
-    const k = keyFn(item);
-    if (!map.has(k)) map.set(k, []);
-    map.get(k).push(item);
-  }
-  return map;
-}
-
-/** 只在可见时滚动到底部 */
-export function scrollToBottom(node, smooth = true) {
-  if (!node) return;
-  requestAnimationFrame(() => {
-    node.scrollTo({ top: node.scrollHeight, behavior: smooth ? 'smooth' : 'auto' });
-  });
 }
 
 export function isNearBottom(node, threshold = 120) {

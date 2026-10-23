@@ -1,18 +1,21 @@
 /**
- * server/routes/sessions.js — 剧情会话接口
+ * server/routes/sessions.js — 剧情会话接口（v4）
  *
- * 会话属于一张世界卡（world_id）。设定主要活在世界卡里，会话只存运行期参数与进度。
+ * 会话属于一张世界卡（world_id）。设定活在世界卡里，会话只存运行期参数与进度。
+ * 记忆相关的读写全部走 v4 的表：scenes / assertions / character_states / voices / patches / branches。
  */
 import { Router } from 'express';
 import { config } from '../config.js';
 import {
-  createSessionWithSettings, getMemoryStats, getSessionSnapshot, runTurn,
+  auditSession, createSessionWithSettings, forkSession, getMemoryStats, getSessionSnapshot,
+  recallSession, runTurn,
 } from '../agents/orchestrator.js';
 import {
-  addManualFact, addNote, deleteEntity, deleteFact, deleteNote, deleteSession, getDb,
-  getEntities, getMaxTurnNo, getNotes, getSession, getState, getTurn, getTurns, getWorld,
-  listSessions, setEntityPinned, setFactPinned, setState, truncateSession, updateEntity,
-  updateNote, updateSession, updateTurnContent, deleteRelation, deleteThread, deleteReflection,
+  addAssertion, addNote, deleteNote, deleteSession, deleteVoice, getAssertions,
+  getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
+  getTurnsForBranch, getTurn, getVoices, getWorld, listBranches, listPatches, listSessions,
+  retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
+  updateTurnContent,
 } from '../memory/store.js';
 
 export const sessionsRouter = Router();
@@ -32,13 +35,11 @@ sessionsRouter.get('/config', (req, res) => {
     },
     defaults: {
       narrator_effort: config.agents.narrator.reasoningEffort,
+      archivist_effort: config.agents.archivist.reasoningEffort,
       branch_effort: config.agents.branch.reasoningEffort,
-      memory_effort: config.agents.memory.reasoningEffort,
-      arc_every: config.context.arcEvery,
-      saga_every: config.context.sagaEvery,
-      chronicle_every: config.context.chronicleEvery,
-      reflect_every: config.context.reflectEvery,
       recent_raw_turns: config.context.recentRawTurns,
+      continuity_every: config.context.continuityEvery,
+      world_tick_every: config.context.worldTickEvery,
     },
     limits: {
       context_max_tokens: config.context.maxTokens,
@@ -57,7 +58,7 @@ sessionsRouter.get('/sessions', (req, res) => {
 });
 
 sessionsRouter.post('/sessions', (req, res) => {
-  const { title, settings, world_id: worldId, worldId: worldId2 } = req.body || {};
+  const { title, settings, world_id: worldId, worldId: worldId2, anchor_id } = req.body || {};
   const wid = worldId || worldId2 || null;
   const world = wid ? getWorld(wid) : null;
   if (wid && !world) return res.status(404).json({ error: { message: 'world not found' } });
@@ -65,6 +66,7 @@ sessionsRouter.post('/sessions', (req, res) => {
   const session = createSessionWithSettings({
     title: title || card.title || '未命名剧情',
     worldId: wid,
+    anchorId: anchor_id || null,
     settings: {
       title: title || card.title || '未命名剧情',
       narrator_effort: 'high',
@@ -83,9 +85,13 @@ sessionsRouter.get('/sessions/:id', (req, res) => {
 });
 
 sessionsRouter.patch('/sessions/:id', (req, res) => {
-  const { title, settings, world_id: worldId } = req.body || {};
+  const { title, settings, world_id: worldId, scene_directive } = req.body || {};
   const patch = { title, settings };
   if (worldId !== undefined) patch.worldId = worldId;
+  if (scene_directive !== undefined) {
+    const cur = getSession(req.params.id);
+    patch.settings = { ...(cur?.settings || {}), scene_directive: String(scene_directive || '') };
+  }
   const session = updateSession(req.params.id, patch);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
   res.json(session);
@@ -105,12 +111,12 @@ sessionsRouter.get('/sessions/:id/turns', (req, res) => {
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
   const from = intOr(req.query.from, 1);
   const to = intOr(req.query.to, Number.MAX_SAFE_INTEGER);
-  const kinds = typeof req.query.kinds === 'string'
-    ? req.query.kinds.split(',').map((s) => s.trim()).filter(Boolean)
-    : null;
   const limit = Math.min(intOr(req.query.limit, 400), 2000);
-  const rows = getTurns(session.id, { from, to, kinds });
-  res.json({ turns: rows.slice(-limit), total: rows.length, from, to });
+  const branchId = session.branch_id || 'main';
+  const branch = getDb().prepare(`SELECT * FROM branches WHERE session_id=? AND branch_id=?`).get(session.id, branchId);
+  const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
+  const rows = getTurnsForBranch(session.id, branchId, forkTurn, { from, to });
+  res.json({ turns: rows.slice(-limit), total: rows.length, from, to, branch: branchId });
 });
 
 sessionsRouter.get('/sessions/:id/search', (req, res) => {
@@ -155,7 +161,7 @@ sessionsRouter.post('/sessions/:id/turn', async (req, res) => {
 
   const {
     playerText = '', images = null, branchChoice = null,
-    generateBranches = true, isOpening = false,
+    generateBranches = true, isOpening = false, directive = '',
   } = req.body || {};
 
   sseHead(res);
@@ -163,13 +169,13 @@ sessionsRouter.post('/sessions/:id/turn', async (req, res) => {
   const heartbeat = setInterval(() => send({ type: 'ping' }), 15000);
 
   const aborter = new AbortController();
-  // 只监听 res 的 close：req 的 close 在请求体读完后就会触发，会误杀长回合
   res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
 
   try {
     await runTurn({
       sessionId: session.id,
       playerText, images, branchChoice, generateBranches, isOpening,
+      options: directive ? { directive } : {},
       onEvent: send,
       signal: aborter.signal,
     });
@@ -197,6 +203,7 @@ sessionsRouter.post('/sessions/:id/opening', async (req, res) => {
       playerText: '', images: null, branchChoice: null,
       generateBranches: req.body?.generateBranches !== false,
       isOpening: true,
+      options: req.body?.directive ? { directive: req.body.directive } : {},
       onEvent: send,
       signal: aborter.signal,
     });
@@ -213,16 +220,20 @@ sessionsRouter.post('/sessions/:id/branches', async (req, res) => {
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
   try {
     const { runBranchAgent } = await import('../agents/branch.js');
-    const { getRecentTurns, getWorld } = await import('../memory/store.js');
+    const { getRecentTurnsForBranch, getBranch } = await import('../memory/store.js');
     const world = session.world_id ? getWorld(session.world_id) : null;
-    const recent = getRecentTurns(session.id, 1).filter((t) => t.kind === 'narrator').pop();
+    const branchId = session.branch_id || 'main';
+    const branch = getBranch(session.id, branchId);
+    const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
+    const recent = getRecentTurnsForBranch(session.id, branchId, forkTurn, 2)
+      .filter((t) => t.kind === 'narrator').pop();
     const st = getState(session.id);
     const result = await runBranchAgent({
       world,
       state: st?.state || null,
       recentNarrative: recent?.content || '',
       present: [],
-      director: null,
+      sceneSheet: '',
     });
     res.json(result);
   } catch (err) {
@@ -239,9 +250,7 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
   }
   const playerRow = getTurn(session.id, turnNo, 'player');
   const narratorRow = getTurn(session.id, turnNo, 'narrator');
-  if (!playerRow && !narratorRow) {
-    return res.status(404).json({ error: { message: 'turn not found' } });
-  }
+  if (!playerRow && !narratorRow) return res.status(404).json({ error: { message: 'turn not found' } });
 
   sseHead(res);
   const send = (evt) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(evt)}\n\n`); };
@@ -250,8 +259,9 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
   res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
 
   try {
-    const removed = truncateSession(session.id, turnNo - 1);
-    send({ type: 'rollback', turn_no: turnNo - 1, removed });
+    // 重写 = 从这一轮开新分支，旧线保留为「如果当时那么写」
+    const fork = forkSession({ sessionId: session.id, toTurn: turnNo - 1, note: `重写第 ${turnNo} 轮` });
+    send({ type: 'fork', branch: fork.branch_id, fork_turn: fork.fork_turn });
     const guidance = String(req.body?.guidance || '').trim();
     await runTurn({
       sessionId: session.id,
@@ -271,6 +281,7 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
   }
 });
 
+/** 回滚 = 开新分支。旧分支标 abandoned，历史不删。 */
 sessionsRouter.post('/sessions/:id/rollback', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
@@ -278,8 +289,40 @@ sessionsRouter.post('/sessions/:id/rollback', (req, res) => {
   if (!Number.isInteger(turnNo) || turnNo < 0) {
     return res.status(400).json({ error: { message: 'turn_no must be a non-negative integer' } });
   }
-  const removed = truncateSession(session.id, turnNo);
-  res.json({ ...removed, turn_no: turnNo, memoryStats: getMemoryStats(session.id) });
+  const fork = forkSession({ sessionId: session.id, toTurn: turnNo, note: `回到第 ${turnNo} 轮` });
+  res.json({ ...fork, turn_no: turnNo, memoryStats: getMemoryStats(session.id) });
+});
+
+sessionsRouter.get('/sessions/:id/branches', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  res.json({ branches: listBranches(session.id), current: session.branch_id || 'main' });
+});
+
+/* --------------------------- 检索与校勘 --------------------------- */
+
+sessionsRouter.post('/sessions/:id/recall', async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const question = String(req.body?.question || '').trim();
+  if (!question) return res.status(400).json({ error: { message: 'question is required' } });
+  try {
+    const result = await recallSession({ sessionId: session.id, question });
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+sessionsRouter.post('/sessions/:id/audit', async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  try {
+    const report = await auditSession({ sessionId: session.id });
+    res.json(report);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
 
 /* ------------------------------ 记忆 ------------------------------ */
@@ -289,6 +332,117 @@ sessionsRouter.get('/sessions/:id/memory', (req, res) => {
   if (!stats) return res.status(404).json({ error: { message: 'session not found' } });
   res.json(stats);
 });
+
+sessionsRouter.get('/sessions/:id/assertions', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const branchId = session.branch_id || 'main';
+  res.json({
+    assertions: getAssertions(session.id, {
+      branchId,
+      subject: req.query.subject ? String(req.query.subject) : null,
+      includeInvalid: req.query.all === '1',
+      limit: 300,
+    }),
+  });
+});
+
+sessionsRouter.post('/sessions/:id/assertions', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const { subject, predicate, object, visibility } = req.body || {};
+  if (!subject || !predicate || !object) {
+    return res.status(400).json({ error: { message: 'subject/predicate/object are required' } });
+  }
+  const id = addAssertion(session.id, {
+    branch_id: session.branch_id || 'main',
+    subject, predicate, object,
+    visibility: visibility || 'public',
+    valid_from: getMaxTurnNo(session.id),
+    asserted_turn: getMaxTurnNo(session.id),
+    source_turn: getMaxTurnNo(session.id),
+    confidence: 1,
+    evidence: '作者手工添加',
+  });
+  res.status(201).json({ id, assertions: getAssertions(session.id, { branchId: session.branch_id || 'main', limit: 300 }) });
+});
+
+sessionsRouter.delete('/sessions/:id/assertions/:assertionId', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  retractAssertion(session.id, Number(req.params.assertionId));
+  res.json({ ok: true });
+});
+
+sessionsRouter.get('/sessions/:id/states', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  res.json({ states: getCharStates(session.id, { branchId: session.branch_id || 'main' }) });
+});
+
+sessionsRouter.put('/sessions/:id/state', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const next = req.body?.state;
+  if (!next || typeof next !== 'object') return res.status(400).json({ error: { message: 'state object is required' } });
+  const turnNo = req.body?.turn_no ?? getMaxTurnNo(session.id);
+  setState(session.id, Number(turnNo), next);
+  res.json({ state: next, turn_no: Number(turnNo) });
+});
+
+sessionsRouter.get('/sessions/:id/scenes', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  res.json({ scenes: getScenes(session.id, { branchId: session.branch_id || 'main', limit: 200 }) });
+});
+
+sessionsRouter.get('/sessions/:id/threads', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  res.json({ threads: getThreads(session.id, { limit: 100 }) });
+});
+
+sessionsRouter.get('/sessions/:id/voices', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  res.json({ voices: getVoices(session.id, { branchId: session.branch_id || 'main', limit: 100 }) });
+});
+
+sessionsRouter.post('/sessions/:id/voices/:voiceId/pin', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  setVoicePinned(session.id, Number(req.params.voiceId), !!req.body?.pinned);
+  res.json({ voices: getVoices(session.id, { branchId: session.branch_id || 'main', limit: 100 }) });
+});
+
+sessionsRouter.delete('/sessions/:id/voices/:voiceId', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  deleteVoice(session.id, Number(req.params.voiceId));
+  res.json({ voices: getVoices(session.id, { branchId: session.branch_id || 'main', limit: 100 }) });
+});
+
+sessionsRouter.get('/sessions/:id/patches', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  res.json({
+    patches: listPatches(session.id, {
+      branchId: session.branch_id || 'main',
+      status: req.query.status ? String(req.query.status) : null,
+      limit: 100,
+    }),
+  });
+});
+
+sessionsRouter.post('/sessions/:id/patches/:patchId/resolve', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const status = ['applied', 'dismissed'].includes(req.body?.status) ? req.body.status : 'dismissed';
+  setPatchStatus(session.id, Number(req.params.patchId), status);
+  res.json({ ok: true, status });
+});
+
+/* ------------------------------ 作者笔记 ------------------------------ */
 
 sessionsRouter.get('/sessions/:id/notes', (req, res) => {
   const session = getSession(req.params.id);
@@ -320,83 +474,6 @@ sessionsRouter.delete('/sessions/:id/notes/:noteId', (req, res) => {
   res.json({ notes: getNotes(session.id, { activeOnly: false }) });
 });
 
-sessionsRouter.patch('/sessions/:id/entities/:entityId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  const id = Number(req.params.entityId);
-  const body = req.body || {};
-  if (body.pinned != null) setEntityPinned(session.id, id, !!body.pinned);
-  if (body.name != null || body.summary != null || body.importance != null) {
-    updateEntity(session.id, id, body);
-  }
-  res.json({ entities: getEntities(session.id, { limit: 200 }) });
-});
-
-sessionsRouter.delete('/sessions/:id/entities/:entityId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  deleteEntity(session.id, Number(req.params.entityId));
-  res.json({ entities: getEntities(session.id, { limit: 200 }) });
-});
-
-sessionsRouter.post('/sessions/:id/facts', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  const { subject, predicate, object } = req.body || {};
-  if (!subject || !predicate || !object) {
-    return res.status(400).json({ error: { message: 'subject/predicate/object are required' } });
-  }
-  const id = addManualFact(session.id, { subject, predicate, object, turn_no: getMaxTurnNo(session.id) });
-  res.status(201).json({ id, facts: getMemoryStats(session.id)?.facts || [] });
-});
-
-sessionsRouter.patch('/sessions/:id/facts/:factId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  if (req.body?.pinned != null) setFactPinned(session.id, Number(req.params.factId), !!req.body.pinned);
-  res.json({ facts: getMemoryStats(session.id)?.facts || [] });
-});
-
-sessionsRouter.delete('/sessions/:id/facts/:factId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  deleteFact(session.id, Number(req.params.factId), { hard: req.query.hard === '1' });
-  res.json({ facts: getMemoryStats(session.id)?.facts || [] });
-});
-
-sessionsRouter.put('/sessions/:id/state', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  const next = req.body?.state;
-  if (!next || typeof next !== 'object') return res.status(400).json({ error: { message: 'state object is required' } });
-  const turnNo = req.body?.turn_no ?? getMaxTurnNo(session.id);
-  setState(session.id, Number(turnNo), next);
-  res.json({ state: next, turn_no: Number(turnNo) });
-});
-
-/* --------------------------- 关系/线索/反思 --------------------------- */
-
-sessionsRouter.delete('/sessions/:id/relations/:relId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  deleteRelation(session.id, Number(req.params.relId));
-  res.json({ ok: true });
-});
-
-sessionsRouter.delete('/sessions/:id/threads/:threadId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  deleteThread(session.id, Number(req.params.threadId));
-  res.json({ ok: true });
-});
-
-sessionsRouter.delete('/sessions/:id/reflections/:refId', (req, res) => {
-  const session = getSession(req.params.id);
-  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  deleteReflection(session.id, Number(req.params.refId));
-  res.json({ ok: true });
-});
-
 /* ------------------------------ 编辑 ------------------------------ */
 
 sessionsRouter.patch('/sessions/:id/turns/:turnNo', async (req, res) => {
@@ -408,25 +485,5 @@ sessionsRouter.patch('/sessions/:id/turns/:turnNo', async (req, res) => {
   if (!content.trim()) return res.status(400).json({ error: { message: 'content is required' } });
   if (!getTurn(session.id, turnNo, kind)) return res.status(404).json({ error: { message: 'turn not found' } });
   updateTurnContent(session.id, turnNo, kind, content);
-
-  let rememorized = false;
-  if (kind === 'narrator' && req.body?.rememorize !== false) {
-    try {
-      const { updateMemory } = await import('../agents/memory-agent.js');
-      const playerRow = getTurn(session.id, turnNo, 'player');
-      getDb().prepare(`DELETE FROM summaries WHERE session_id=? AND level=1 AND turn_from=? AND turn_to=?`)
-        .run(session.id, turnNo, turnNo);
-      const world = session.world_id ? getWorld(session.world_id) : null;
-      await updateMemory({
-        session, world, turnNo,
-        playerText: playerRow?.content || '(开场)',
-        narrative: content,
-        branchChoice: playerRow?.branch_choice || null,
-      });
-      rememorized = true;
-    } catch (err) {
-      console.warn(`[turns] 重建记忆失败（第 ${turnNo} 轮）：${err.message}`);
-    }
-  }
-  res.json({ turn: getTurn(session.id, turnNo, kind), rememorized });
+  res.json({ turn: getTurn(session.id, turnNo, kind) });
 });

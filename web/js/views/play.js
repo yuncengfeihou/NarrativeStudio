@@ -6,8 +6,8 @@
  */
 
 import {
-  $, el, clear, formatClock, fmtTokens, fmtPercent, isNearBottom, readAsDataURL,
-  copyToClipboard, fmtDuration,
+  el, clear, formatClock, fmtTokens, fmtPercent, isNearBottom, readAsDataURL,
+  copyToClipboard,
 } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
@@ -245,7 +245,7 @@ export default {
 
     function renderEmpty(card2) {
       const host = scroll.querySelector('.play-body');
-      const seed = String(card2?.opening_seed || '').trim();
+      const seed = String(card2?.anchors?.[0]?.opening_seed || '').trim();
       if (seed) {
         appendNarrator(seed, '', 1, { label: '序幕', host, noUsage: true });
         showStartButtons();
@@ -457,6 +457,23 @@ export default {
             assemblerBudget = evt.budget;
             contextMeta = evt.meta;
             paintCtxMeter();
+            if (evt.scene_sheet) showSceneSheet(evt.scene_sheet);
+            break;
+          }
+          case 'scene': {
+            appendSceneCard(evt);
+            break;
+          }
+          case 'world_tick': {
+            if (evt.events?.length) appendWorldTick(evt.events);
+            break;
+          }
+          case 'continuity': {
+            const issues = evt.report?.issues || [];
+            if (issues.length) {
+              const hasBlocker = issues.some((i) => i.severity === 'blocker');
+              toast(`校勘发现 ${issues.length} 处问题${hasBlocker ? '（含阻断级）' : ''}`, { type: 'warn' });
+            }
             break;
           }
           case 'reasoning': {
@@ -823,7 +840,7 @@ export default {
         confirmText: '重写',
         render(body) {
           body.appendChild(el('div', {}, ta,
-            el('div.field-hint', {}, '重写会先删掉这一轮及其之后的内容，再用同样的行动重新演绎。'),
+            el('div.field-hint', {}, '重写会从这一轮之前开一条新分支，旧线保留为「如果当时那么写」。再用同样的行动重新演绎。'),
           ));
           setTimeout(() => ta.focus(), 200);
         },
@@ -831,7 +848,7 @@ export default {
           const guidance = ta.value.trim();
           const ok = await confirmDialog({
             title: '确认重写',
-            message: `第 ${turnNo} 轮之后的内容都会重来。`,
+            message: `会从第 ${turnNo} 轮之前开一条新分支，当前分支标为 abandoned（历史不删）。`,
             confirmText: '重写', destructive: true,
           });
           if (!ok) return false;
@@ -902,17 +919,17 @@ export default {
         confirmText: '保存',
         render(body) {
           body.appendChild(el('div', {}, ta,
-            el('div.field-hint', {}, '保存后会以新文本重新归档这一轮的记忆，让记忆与正文保持一致。'),
+            el('div.field-hint', {}, '只改这一轮的正文。已经写进记忆账本的内容不会自动重算——需要时用「重写」重跑这一轮。'),
           ));
         },
         async onConfirm() {
           const v = ta.value.trim();
           if (!v) { toast('内容不能为空'); return false; }
           try {
-            await api.updateTurn(sessionId, turnNo, { kind, content: v, rememorize: kind === 'narrator' });
+            await api.updateTurn(sessionId, turnNo, { kind, content: v });
             detail = await api.getSession(sessionId);
             renderTurns();
-            toast('已保存并更新记忆', { type: 'success' });
+            toast('已保存', { type: 'success' });
           } catch (err) {
             toast(err.message, { type: 'error' });
             return false;
@@ -926,7 +943,7 @@ export default {
       if (streaming) return toast('正在演绎中');
       const ok = await confirmDialog({
         title: `回到第 ${turnNo} 轮`,
-        message: `第 ${turnNo} 轮之后的剧情与记忆都会被删除。你可以在这一轮重新选择走向。`,
+        message: `会从第 ${turnNo} 轮开一条新分支。当前这条线标为 abandoned，历史不删，随时可以回去看。`,
         confirmText: '回滚', destructive: true,
       });
       if (!ok) return;
@@ -957,7 +974,9 @@ export default {
           { label: '接着演绎', value: 'continue', icon: 'sparkles' },
           { label: '换一批走向', value: 'branches', icon: 'compass' },
           { label: '搜索本段剧情', value: 'search', icon: 'search' },
+          { label: '回忆旧事', value: 'recall', icon: 'rewind' },
           { label: '记忆与上下文', value: 'memory', icon: 'memory' },
+          { label: '跑一次校勘', value: 'audit', icon: 'check' },
           { label: '导出', value: 'export', icon: 'download' },
           { label: '世界卡', value: 'world', icon: 'book' },
           { label: '删除这段剧情', value: 'delete', icon: 'trash', destructive: true },
@@ -966,7 +985,21 @@ export default {
       if (action === 'continue') send({ silent: true, generateBranches: true });
       else if (action === 'branches') regenerateBranches();
       else if (action === 'search') openSearch();
+      else if (action === 'recall') openRecall();
       else if (action === 'memory') openMemory();
+      else if (action === 'audit') {
+        try {
+          const report = await api.audit(sessionId);
+          const issues = report.issues || [];
+          if (!issues.length) toast('校勘通过：没有发现矛盾');
+          else {
+            toast(`发现 ${issues.length} 处问题，详见记忆面板`);
+            openMemory();
+          }
+        } catch (err) {
+          toast(err.message, { type: 'error' });
+        }
+      }
       else if (action === 'export') {
         const { exportMarkdown } = await import('../export.js');
         exportMarkdown(sessionId).catch((e) => toast(e.message, { type: 'error' }));
@@ -1085,12 +1118,99 @@ export default {
           paintRing();
           paintCtxMeter();
         },
-        onReset: async () => {
-          detail = await api.getSession(sessionId);
-          renderTurns();
-          updateSub();
+      });
+    }
+
+    /* =====================================================================
+     * 场记单 / 切场 / 世界呼吸 / 回忆
+     *
+     * 这四个东西是 v4 的「世界在呼吸」的可视化：
+     *   - 场记单：这一刻世界的既定事实（引擎据此接续）
+     *   - 切场卡片：一场戏结束时发生了什么变化
+     *   - 世界呼吸：玩家看不见的地方，人物按自己的私心动了
+     *   - 回忆：按需去原文里找旧事，带出处
+     * ===================================================================== */
+
+    /** 在场记单位置展示本轮的场记单（可折叠）。 */
+    function showSceneSheet(text) {
+      let host = scroll.querySelector('.scene-sheet-slot');
+      if (!host) {
+        host = el('div.scene-sheet-slot');
+        const body = scroll.querySelector('.play-body');
+        if (body) body.appendChild(host);
+      }
+      clear(host);
+      const box = el('details.scene-sheet', {},
+        el('summary', {}, '本场场记单'),
+        el('pre.scene-sheet-text', {}, text),
+      );
+      host.appendChild(box);
+    }
+
+    /** 切场时在正文流里插一张场次卡。 */
+    function appendSceneCard(evt) {
+      const body = scroll.querySelector('.play-body');
+      if (!body) return;
+      const card = el('div.scene-card', {},
+        el('div.scene-card-head', {},
+          el('span.scene-card-id', {}, evt.scene_id || ''),
+          el('span.scene-card-range', {}, `第 ${evt.turn_from}-${evt.turn_to} 轮`),
+        ),
+        evt.question ? el('div.scene-card-q', {}, `本场在问：${evt.question}`) : null,
+        evt.outcome ? el('div.scene-card-outcome', {}, evt.outcome) : null,
+      );
+      body.appendChild(card);
+    }
+
+    /** 世界呼吸：幕后事件以流言形式出现，不直接告诉玩家「发生了什么」。 */
+    function appendWorldTick(events) {
+      const body = scroll.querySelector('.play-body');
+      if (!body) return;
+      const visible = events.filter((e) => e.visibility !== 'hidden');
+      if (!visible.length) return;
+      const card = el('div.world-tick', {},
+        el('div.world-tick-head', {}, '此刻别处'),
+        ...visible.map((e) => el('div.world-tick-item', {},
+          el('span.world-tick-who', {}, (e.who || []).join('、')),
+          el('span.world-tick-what', {}, e.what),
+        )),
+      );
+      body.appendChild(card);
+    }
+
+    /** 回忆：问一句旧事，检索 Agent 去原文里找，带出处。 */
+    async function openRecall() {
+      const q = window.prompt('想问哪件旧事？');
+      if (!q || !q.trim()) return;
+      const sheet = openSheet({
+        title: '回忆',
+        width: 560,
+        render(b) {
+          clear(b);
+          b.appendChild(el('p.muted', {}, '检索中…'));
         },
       });
+      try {
+        const r = await api.recall(sessionId, q.trim());
+        clear(sheet.body);
+        if (!r.found) {
+          sheet.body.appendChild(el('p.muted', {}, '正文里没有写过这个。'));
+          return;
+        }
+        sheet.body.appendChild(el('p.recall-answer', {}, r.answer));
+        if (r.citations?.length) {
+          sheet.body.appendChild(el('h4', {}, '出处'));
+          for (const c of r.citations) {
+            sheet.body.appendChild(el('div.recall-cite', {},
+              el('span.recall-cite-turn', {}, `第 ${c.turn_no} 轮`),
+              el('span.recall-cite-text', {}, c.quote),
+            ));
+          }
+        }
+      } catch (err) {
+        clear(sheet.body);
+        sheet.body.appendChild(el('p.muted', {}, `检索失败：${err.message}`));
+      }
     }
 
     /* =====================================================================

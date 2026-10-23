@@ -34,10 +34,6 @@ export function estimateMessageTokens(msg) {
   return estimateTokens(msg.content) + role + 4;
 }
 
-export function estimateMessagesTokens(messages) {
-  return (messages || []).reduce((s, m) => s + estimateMessageTokens(m), 0);
-}
-
 /** Truncate text to approximately N tokens (keeps the head). */
 export function truncateToTokens(text, maxTokens) {
   if (!text) return '';

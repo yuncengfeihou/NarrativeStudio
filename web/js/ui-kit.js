@@ -2,11 +2,10 @@
  * ui-kit.js — 复用的 UI 片段
  *
  * 这里只放「多个视图都要用」的东西：token 遥测条、环形进度、区块标题、
- * 空状态、色相工具。视图专属的 DOM 留在各自文件里。
+ * 键值行、开关行、色相工具。视图专属的 DOM 留在各自文件里。
  */
 
 import { el, fmtTokens, fmtPercent, fmtNumber, fmtDuration } from './util.js';
-import { icon } from './icons.js';
 
 /* =========================================================================
  * 色相工具
@@ -137,79 +136,9 @@ function stat(label, value, cls = '') {
   );
 }
 
-/**
- * 会话级遥测汇总。用户要求的「整个剧情会话的 tokens + 缓存率」。
- * @param {object|null} usage sessions.usage_json
- */
-export function sessionUsageSummary(usage) {
-  if (!usage || !usage.requests) {
-    return el('div.session-usage', {},
-      el('div.session-usage-empty', {}, '还没有完成任何一轮演绎。'),
-    );
-  }
-  const totalIn = usage.prompt_tokens || 0;
-  const totalOut = usage.completion_tokens || 0;
-  const cached = usage.cached_tokens || 0;
-  const cacheRate = totalIn > 0 ? cached / totalIn : 0;
-  const avgTtft = usage.requests > 0 ? usage.first_token_ms / usage.requests : null;
-  const avgTps = usage.total_ms > 0
-    ? Math.round(((totalOut - (usage.reasoning_tokens || 0)) / (usage.total_ms / 1000)) * 10) / 10
-    : null;
-
-  return el('div.session-usage', {},
-    el('div.session-usage-grid', {},
-      big('总请求', fmtNumber(usage.requests), '轮'),
-      big('总输入', fmtTokens(totalIn), 'tok'),
-      big('总输出', fmtTokens(totalOut), 'tok'),
-      big('平均首字', avgTtft != null ? fmtDuration(avgTtft) : '—', ''),
-      big('平均速度', avgTps != null ? `${avgTps}` : '—', 'tok/s'),
-      big('缓存命中率', fmtPercent(cacheRate, 1), ''),
-    ),
-    el('div.session-usage-bar', {},
-      el('div.session-usage-fill', { style: `width:${Math.min(100, cacheRate * 100).toFixed(1)}%;` }),
-    ),
-    el('div.session-usage-note', {},
-      `缓存命中 ${fmtNumber(cached)} / ${fmtNumber(totalIn)} tok`,
-      usage.reasoning_tokens ? ` · 其中推理过程占用 ${fmtNumber(usage.reasoning_tokens)} tok` : '',
-      ` · 累计生成 ${fmtNumber(usage.output_chars || 0)} 字`,
-    ),
-  );
-}
-
-function big(label, value, unit) {
-  return el('div.session-usage-cell', {},
-    el('div.session-usage-label', {}, label),
-    el('div.session-usage-value', {},
-      value,
-      unit ? el('span.session-usage-unit', {}, unit) : null,
-    ),
-  );
-}
-
 /* =========================================================================
  * 小部件
  * ========================================================================= */
-
-/** 带标题的区块 */
-export function section(title, children, action = null) {
-  return el('div.sect-wrap', {},
-    el('div.sect', {},
-      el('span.sect-title', {}, title),
-      action,
-    ),
-    ...(Array.isArray(children) ? children : [children]),
-  );
-}
-
-/** 空态 */
-export function emptyState({ iconName = 'info', title = '', sub = '', action = null } = {}) {
-  return el('div.empty', {},
-    el('div.empty-icon', {}, icon(iconName, { size: 18 })),
-    title ? el('div.empty-title', {}, title) : null,
-    sub ? el('div.empty-sub', {}, sub) : null,
-    action,
-  );
-}
 
 /** 键值对列表项 */
 export function infoRow(label, value, sub = null) {
@@ -243,18 +172,4 @@ export function toggleRow(label, desc, initial, onChange) {
     ),
     sw,
   );
-}
-
-/** 色调标签 */
-export const TONE = {
-  激进: 'is-danger',
-  谨慎: 'is-accent',
-  探索: 'is-ok',
-  情感: 'is-warn',
-  智取: 'is-plain',
-  诡道: 'is-plain',
-};
-
-export function toneChip(tone) {
-  return el('span.chip', { class: TONE[tone] || 'is-plain' }, tone || '行动');
 }

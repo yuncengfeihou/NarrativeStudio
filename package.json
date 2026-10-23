@@ -1,14 +1,13 @@
 {
   "name": "ai-roleplay",
   "version": "1.0.0",
-  "description": "AI Roleplaying Studio — character.ai alternative with multi-agent memory system, OpenAI-compatible API, iOS-style UI",
+  "description": "叙事台 — 世界卡驱动的长篇剧情演绎工作台（v4 上下文引擎 + 多 Agent 记忆）",
   "type": "module",
   "main": "server/index.js",
   "scripts": {
     "start": "node server/index.js",
     "dev": "node --watch server/index.js",
-    "test": "node tests/run-all.js",
-    "simulate": "node tests/simulate-memory.js"
+    "test": "node tests/run-all.js"
   },
   "engines": {
     "node": ">=22.5.0"

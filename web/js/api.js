@@ -203,6 +203,11 @@ export const api = {
     return request('/api/config', { signal });
   },
 
+  /** GET /api/fonts -> { fonts: string[], source }（服务端本机字体，浏览器 API 的兜底） */
+  getFonts(signal) {
+    return request('/api/fonts', { signal });
+  },
+
   /* ---------------- 世界卡 ---------------- */
 
   /** GET /api/worlds -> [{id,title,subtitle,cover_hue,tags,card,session_count}] */
@@ -210,12 +215,12 @@ export const api = {
     return request('/api/worlds', { signal });
   },
 
-  /** GET /api/worlds/:id -> {…world, lore, sessions} */
+  /** GET /api/worlds/:id -> {…world, codex, sessions} */
   getWorld(id, signal) {
     return request(`/api/worlds/${encodeURIComponent(id)}`, { signal });
   },
 
-  /** POST /api/worlds  body:{id?, title?, card, lore?, tags?, cover_hue?} */
+  /** POST /api/worlds  body:{id?, title?, card, tags?, cover_hue?} */
   saveWorld(body, signal) {
     return request('/api/worlds', { method: 'POST', body, signal });
   },
@@ -229,20 +234,37 @@ export const api = {
     return request(`/api/worlds/${encodeURIComponent(id)}`, { method: 'DELETE', signal });
   },
 
-  /* 词条 */
-  addLore(worldId, body, signal) {
-    return request(`/api/worlds/${encodeURIComponent(worldId)}/lore`, { method: 'POST', body, signal });
-  },
-  updateLore(worldId, entryId, body, signal) {
-    return request(`/api/worlds/${encodeURIComponent(worldId)}/lore/${entryId}`, { method: 'PATCH', body, signal });
-  },
-  deleteLore(worldId, entryId, signal) {
-    return request(`/api/worlds/${encodeURIComponent(worldId)}/lore/${entryId}`, { method: 'DELETE', signal });
-  },
-
-  /** POST /api/worlds/:id/sessions -> session（开一局） */
+  /** POST /api/worlds/:id/sessions -> session（开一局，可带 anchor_id） */
   createWorldSession(worldId, body = {}, signal) {
     return request(`/api/worlds/${encodeURIComponent(worldId)}/sessions`, { method: 'POST', body, signal });
+  },
+
+  /** GET /api/worlds/:id/export -> 纯文本卡 */
+  exportWorld(id, signal) {
+    return fetch(`/api/worlds/${encodeURIComponent(id)}/export`, { signal }).then((r) => r.text());
+  },
+
+  /** POST /api/worlds/:id/codex/:codexId/pin  body:{pinned} */
+  pinCodex(worldId, codexId, pinned, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/codex/${encodeURIComponent(codexId)}/pin`,
+      { method: 'POST', body: { pinned }, signal });
+  },
+
+  /* ---------------- 制卡 ---------------- */
+
+  /** GET /api/smith/materials -> [{name,chapters,chars,first,last}] */
+  listMaterials(signal) {
+    return request('/api/smith/materials', { signal });
+  },
+
+  /** POST /api/smith/preview（SSE）body:{dir,title,premise,max_chapters,…} */
+  previewSmith(body, handlers = {}) {
+    return runStream('/api/smith/preview', body, handlers);
+  },
+
+  /** POST /api/smith/save  body:{id?,card,tags?,source?} */
+  saveSmith(body, signal) {
+    return request('/api/smith/save', { method: 'POST', body, signal });
   },
 
   /* ---------------- 剧情会话 ---------------- */
@@ -276,10 +298,9 @@ export const api = {
 
   /* ---------------- 分页 / 检索 ---------------- */
 
-  getTurns(id, { from = 1, to = '', kinds = '' } = {}, signal) {
+  getTurns(id, { from = 1, to = '' } = {}, signal) {
     const qs = new URLSearchParams({ from: String(from), limit: '400' });
     if (to !== '' && to != null) qs.set('to', String(to));
-    if (kinds) qs.set('kinds', kinds);
     return request(`/api/sessions/${encodeURIComponent(id)}/turns?${qs}`, { signal });
   },
 
@@ -287,7 +308,7 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/search?q=${encodeURIComponent(q)}`, { signal });
   },
 
-  /* ---------------- 记忆编辑 ---------------- */
+  /* ---------------- 记忆六表（v4） ---------------- */
 
   getNotes(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/notes`, { signal });
@@ -301,33 +322,59 @@ export const api = {
   deleteNote(id, noteId, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/notes/${noteId}`, { method: 'DELETE', signal });
   },
-  updateEntity(id, entityId, body, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/entities/${entityId}`, { method: 'PATCH', body, signal });
+  getAssertions(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/assertions`, { signal });
   },
-  deleteEntity(id, entityId, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/entities/${entityId}`, { method: 'DELETE', signal });
+  addAssertion(id, body, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/assertions`, { method: 'POST', body, signal });
   },
-  addFact(id, body, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/facts`, { method: 'POST', body, signal });
+  retractAssertion(id, assertionId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/assertions/${assertionId}`, { method: 'DELETE', signal });
   },
-  updateFact(id, factId, body, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/facts/${factId}`, { method: 'PATCH', body, signal });
-  },
-  deleteFact(id, factId, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/facts/${factId}`, { method: 'DELETE', signal });
+  getStates(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/states`, { signal });
   },
   putState(id, body, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/state`, { method: 'PUT', body, signal });
   },
-  deleteRelation(id, relId, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/relations/${relId}`, { method: 'DELETE', signal });
+  getScenes(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/scenes`, { signal });
   },
-  deleteThread(id, threadId, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/threads/${threadId}`, { method: 'DELETE', signal });
+  getThreads(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/threads`, { signal });
   },
-  deleteReflection(id, refId, signal) {
-    return request(`/api/sessions/${encodeURIComponent(id)}/reflections/${refId}`, { method: 'DELETE', signal });
+  getVoices(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/voices`, { signal });
   },
+  pinVoice(id, voiceId, pinned, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/voices/${voiceId}/pin`, { method: 'POST', body: { pinned }, signal });
+  },
+  deleteVoice(id, voiceId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/voices/${voiceId}`, { method: 'DELETE', signal });
+  },
+  getPatches(id, params = {}, signal) {
+    const qs = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
+    return request(`/api/sessions/${encodeURIComponent(id)}/patches${qs}`, { signal });
+  },
+  resolvePatch(id, patchId, status, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/patches/${patchId}/resolve`,
+      { method: 'POST', body: { status }, signal });
+  },
+
+  /* ---------------- 分支 / 校勘 / 回忆 ---------------- */
+
+  getBranches(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/branches`, { signal });
+  },
+  /** POST /api/sessions/:id/audit -> 立即跑一次校勘 */
+  audit(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/audit`, { method: 'POST', signal });
+  },
+  /** POST /api/sessions/:id/recall  body:{question} -> 检索 Agent 的结论 */
+  recall(id, question, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/recall`, { method: 'POST', body: { question }, signal });
+  },
+
 
   /* ---------------- 剧情编辑 ---------------- */
 

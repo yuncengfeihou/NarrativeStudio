@@ -8,6 +8,8 @@ import { openaiRouter } from './routes/openai.js';
 import { sessionsRouter } from './routes/sessions.js';
 import { worldsRouter } from './routes/worlds.js';
 import { presetsRouter } from './routes/presets.js';
+import { smithRouter } from './routes/smith.js';
+import { fontsRouter } from './routes/fonts.js';
 import { staticRouter } from './routes/static.js';
 import { getDb } from './memory/store.js';
 
@@ -51,6 +53,8 @@ app.use((req, res, next) => {
 app.use('/api', worldsRouter);
 app.use('/api', sessionsRouter);
 app.use('/api', presetsRouter);
+app.use('/api', smithRouter);
+app.use('/api', fontsRouter);
 app.use(openaiRouter);
 app.use(staticRouter);
 

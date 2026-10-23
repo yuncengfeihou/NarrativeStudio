@@ -29,7 +29,7 @@ const FALLBACK_BRANCHES = [
   },
 ];
 
-export function summarizeScene(state) {
+function summarizeScene(state) {
   if (!state || typeof state !== 'object') return '';
   const bits = [];
   if (state.time) bits.push(`时间：${state.time}`);
@@ -128,7 +128,7 @@ function reindex(list) {
   return list.map((b, i) => ({ ...b, id: `b${i + 1}` }));
 }
 
-export function parseBranchPayload(content) {
+function parseBranchPayload(content) {
   const text = typeof content === 'string' ? escapeRawControlCharsInStrings(content) : '';
   const parsed = tryParseJson(text);
   let rawList = parsed && Array.isArray(parsed.branches) ? parsed.branches : [];
@@ -157,7 +157,7 @@ export function parseBranchPayload(content) {
  * @returns {Promise<{branches, scene_summary, usage}>}
  */
 export async function runBranchAgent({
-  world, state, recentNarrative, present, director, options = {}, signal,
+  world, state, recentNarrative, present, sceneSheet, options = {}, signal,
 } = {}) {
   const cfg = config.agents.branch;
   const sceneSummary = summarizeScene(state);
@@ -167,7 +167,7 @@ export async function runBranchAgent({
     {
       role: 'user',
       content: branchUserPrompt({
-        sceneSummary, lastNarrative: recentNarrative || '', state, present, director,
+        sceneSummary, lastNarrative: recentNarrative || '', state, present, sceneSheet,
       }),
     },
   ];

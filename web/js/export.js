@@ -12,7 +12,7 @@ import { downloadFile, formatDate } from './util.js';
 import { toast } from './app.js';
 
 /** 组装 Markdown 文本 */
-export function buildMarkdown(detail) {
+function buildMarkdown(detail) {
   const s = detail.session || {};
   const settings = s.settings || {};
   const turns = detail.turns || [];
@@ -24,20 +24,6 @@ export function buildMarkdown(detail) {
   if (s.turn_count) meta.push(`回合：${s.turn_count}`);
   meta.push(`导出：${formatDate(Date.now())}`);
   lines.push(`> ${meta.join(' ｜ ')}`, '');
-
-  if (settings.player_role) {
-    lines.push('## 玩家身份', '', settings.player_role.trim(), '');
-  }
-  if (Array.isArray(settings.characters) && settings.characters.length) {
-    lines.push('## 登场角色', '');
-    for (const c of settings.characters) {
-      const bits = [c.name, c.role].filter(Boolean);
-      lines.push(`### ${bits.join(' · ')}`, '');
-      if (c.personality) lines.push(`- 性格：${c.personality}`);
-      if (c.voice) lines.push(`- 口吻：${c.voice}`);
-      lines.push('');
-    }
-  }
 
   lines.push('---', '');
 
@@ -62,13 +48,13 @@ export function buildMarkdown(detail) {
   const mem = detail.memoryStats;
   if (mem) {
     lines.push('---', '', '## 记忆存档', '');
-    if (Array.isArray(mem.entities) && mem.entities.length) {
-      lines.push('### 实体档案', '');
-      for (const e of mem.entities.slice(0, 60)) {
-        lines.push(`- **${e.name}**（${e.type}）${e.summary ? `：${e.summary}` : ''}`);
-      }
-      lines.push('');
-    }
+    const counts = [
+      mem.turn_count != null ? `回合 ${mem.turn_count}` : '',
+      mem.scene_count != null ? `场次 ${mem.scene_count}` : '',
+      mem.branch ? `分支 ${mem.branch}` : '',
+      mem.raw_tokens != null ? `原文 ${mem.raw_tokens} tok` : '',
+    ].filter(Boolean);
+    if (counts.length) lines.push(counts.join(' ｜ '), '');
     if (detail.state && typeof detail.state === 'object') {
       lines.push('### 最终状态快照', '', '```json', JSON.stringify(detail.state, null, 2), '```', '');
     }
@@ -78,7 +64,7 @@ export function buildMarkdown(detail) {
 }
 
 /** 纯正文（无任何标记，适合阅读器或投稿） */
-export function buildPlainText(detail) {
+function buildPlainText(detail) {
   const turns = detail.turns || [];
   const out = [];
   for (const t of turns) {

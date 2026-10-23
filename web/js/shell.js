@@ -13,7 +13,7 @@ import { icon } from './icons.js';
 import { api } from './api.js';
 import { navigate, matchRoute, openActionSheet, confirmDialog, toast, openPopover } from './app.js';
 import { ui, cycleTheme } from './store.js';
-import { hueGlyph, hueTint } from './ui-kit.js';
+import { hueGlyph } from './ui-kit.js';
 
 const railEl = $('#rail');
 const subbarEl = $('#subbar');
@@ -135,8 +135,9 @@ function buildWorldSubbar(worldId) {
   if (world) {
     subbarEl.appendChild(el('div.subbar-world-info', {},
       el('div.subbar-world-meta', {},
-        el('span.chip.is-plain', {}, `${world.card?.arc_count || 0} 幕`),
+        el('span.chip.is-plain', {}, `${world.card?.charter_count || 0} 条宪章`),
         el('span.chip.is-plain', {}, `${world.card?.cast?.length || 0} 人`),
+        el('span.chip.is-plain', {}, `${world.card?.codex_count || 0} 条辞书`),
       ),
     ));
   }
@@ -186,8 +187,8 @@ function paintWorlds() {
         el('div.sb-item-title', {}, w.title),
         el('div.sb-item-meta', {},
           el('span', {}, `${w.session_count || 0} 段`),
-          w.card?.arc_count ? el('span.dot') : null,
-          w.card?.arc_count ? el('span', {}, `${w.card.arc_count} 幕`) : null,
+          w.card?.codex_count ? el('span.dot') : null,
+          w.card?.codex_count ? el('span', {}, `${w.card.codex_count} 条辞书`) : null,
         ),
       ),
     ));
@@ -279,7 +280,7 @@ async function openWorldMenu(anchor, worldId) {
     const w = worlds.find((x) => x.id === worldId);
     const ok = await confirmDialog({
       title: '删除世界卡',
-      message: `「${w?.title || worldId}」以及它的全部词条会被删除。`,
+      message: `「${w?.title || worldId}」以及它的全部设定会被删除。`,
       confirmText: '删除', destructive: true,
     });
     if (!ok) return;

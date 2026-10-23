@@ -24,86 +24,79 @@ export const config = {
 
   // ---- Context / memory budget ----
   //
-  // 关键设计：每一层都有「与剧情长度无关的固定上限」。
-  // 剧情推进 1000 轮，装配出来的提示词体积也不会增长 —— 溢出的是
-  // 摘要密度，不是层数。硬上限 200K 只是安全网，实际软目标 ~35K。
+  // v4：提示词是「渲染」出来的，不是「检索」出来的。
+  //   系统层 = 契约 + 命题 + 宪章 + 世界索引（一个会话内几乎不变，吃前缀缓存）
+  //   原文层 = 最近若干轮逐字（只追加）
+  //   场记单 = 当前这一刻的世界状态（每场变一次，放在尾部注意力最强处）
+  // 没有词条配额、没有导演卡配额、没有检索配额——那三层在 v4 里不存在。
   context: {
     maxTokens: int(env.CONTEXT_MAX_TOKENS, 200000),
     softTokens: int(env.CONTEXT_SOFT_TOKENS, 52000),
 
     // 每层 token 配额（软上限）。装配器按此逐层裁剪，不会互相挤占。
     layerBudget: {
-      system: int(env.BUDGET_SYSTEM, 1500),      // 演绎契约（固定文本）
-      world: int(env.BUDGET_WORLD, 3000),        // 世界宪章 + 主角 + 卡司骨架
-      lore: int(env.BUDGET_LORE, 3000),          // 触发式世界词条
-      scene: int(env.BUDGET_SCENE, 900),         // 在场状态（时间/地点/人物/物品）
-      director: int(env.BUDGET_DIRECTOR, 700),   // 导演卡（当前节拍）
-      memory: int(env.BUDGET_MEMORY, 14000),     // 分层记忆总配额
-      recent: int(env.BUDGET_RECENT, 9000),      // 最近原文
-      retrieval: int(env.BUDGET_RETRIEVAL, 1500),// 检索召回
-      current: int(env.BUDGET_CURRENT, 2000),    // 本轮输入
-    },
-
-    // memory 层的内部再分配
-    memorySplit: {
-      reflections: 1400,   // 反思洞察（高阶结论）
-      summaries: 5600,     // 分层摘要
-      relations: 1600,     // 关系账本
-      threads: 900,        // 线索/伏笔账本
-      entities: 2600,      // 实体档案 + 事实
-      notes: 1900,         // 作者笔记（确定性记忆）
+      system: int(env.BUDGET_SYSTEM, 3200),      // 契约 + 命题 + 宪章 + 世界索引
+      recent: int(env.BUDGET_RECENT, 9000),      // 最近原文（逐字）
+      scene: int(env.BUDGET_SCENE, 2400),        // 场记单
+      current: int(env.BUDGET_CURRENT, 2000),    // 本轮输入 + 尾注
     },
 
     // 保留的原始回合数（还会按 recent 配额二次裁剪）
     recentRawTurns: int(env.RECENT_RAW_TURNS, 4),
-    // 摘要层保留多少条最新 L2
-    recentArcs: int(env.RECENT_ARCS, 6),
-    // L1 摘要保留条数
-    recentRounds: int(env.RECENT_ROUNDS, 6),
 
-    // 检索
-    retrievalTopK: int(env.RETRIEVAL_TOP_K, 5),
+    // 实体链接扫描最近几轮原文（只用于「玩家提到了谁」，不用于触发设定）
+    loreScanDepth: int(env.LORE_SCAN_DEPTH, 8),
 
-    // 词条触发扫描
-    loreScanDepth: int(env.LORE_SCAN_DEPTH, 8),        // 扫描最近几轮对话
-    // 递归 0 = 关闭（推荐）。开启后，被触发词条的内容会再次参与扫描，
-    // 容易让「称呼礼法」这类词条顺带把整张卡司都拉进上下文。
-    loreRecursion: int(env.LORE_RECURSION, 0),
-
-    // 压缩节奏
-    arcEvery: int(env.ARC_EVERY, 6),
-    sagaEvery: int(env.SAGA_EVERY, 4),
-    chronicleEvery: int(env.CHRONICLE_EVERY, 4),
-    reflectEvery: int(env.REFLECT_EVERY, 5),           // 每 N 轮生成一次反思
+    // 后台 Agent 节奏
+    continuityEvery: int(env.CONTINUITY_EVERY, 10),   // 每 N 轮跑一次校勘
+    worldTickEvery: int(env.WORLD_TICK_EVERY, 8),     // 每 N 轮跑一次世界呼吸
+    sceneEvery: int(env.SCENE_EVERY, 0),              // >0 时按固定轮数强制切场
   },
 
   // ---- Agent defaults (reasoning_effort: low | medium | high) ----
   // 注意：step-5-preview 的推理过程计入 max_tokens。
+  // 分工：narrator 只管正文，永远不输出 JSON；记账全部交给史官与校勘。
   agents: {
     narrator: {
       reasoningEffort: env.NARRATOR_EFFORT || 'high',
       temperature: float(env.NARRATOR_TEMPERATURE, 0.88),
       maxTokens: int(env.NARRATOR_MAX_TOKENS, 12000),
-      minTokens: int(env.NARRATOR_MIN_TOKENS, 1800),
+    },
+    archivist: {
+      reasoningEffort: env.ARCHIVIST_EFFORT || 'medium',
+      temperature: float(env.ARCHIVIST_TEMPERATURE, 0.3),
+      maxTokens: int(env.ARCHIVIST_MAX_TOKENS, 6000),
+    },
+    sceneKeeper: {
+      reasoningEffort: env.SCENE_KEEPER_EFFORT || 'medium',
+      temperature: float(env.SCENE_KEEPER_TEMPERATURE, 0.3),
+      maxTokens: int(env.SCENE_KEEPER_MAX_TOKENS, 4000),
+    },
+    continuity: {
+      reasoningEffort: env.CONTINUITY_EFFORT || 'medium',
+      temperature: float(env.CONTINUITY_TEMPERATURE, 0.2),
+      maxTokens: int(env.CONTINUITY_MAX_TOKENS, 5000),
+    },
+    librarian: {
+      reasoningEffort: env.LIBRARIAN_EFFORT || 'low',
+      temperature: float(env.LIBRARIAN_TEMPERATURE, 0.2),
+      maxTokens: int(env.LIBRARIAN_MAX_TOKENS, 3000),
+    },
+    worldTick: {
+      reasoningEffort: env.WORLD_TICK_EFFORT || 'medium',
+      temperature: float(env.WORLD_TICK_TEMPERATURE, 0.7),
+      maxTokens: int(env.WORLD_TICK_MAX_TOKENS, 4000),
     },
     branch: {
       reasoningEffort: env.BRANCH_EFFORT || 'medium',
       temperature: float(env.BRANCH_TEMPERATURE, 0.9),
       maxTokens: int(env.BRANCH_MAX_TOKENS, 5000),
     },
-    memory: {
-      reasoningEffort: env.MEMORY_EFFORT || 'low',
-      temperature: float(env.MEMORY_TEMPERATURE, 0.3),
-      maxTokens: int(env.MEMORY_MAX_TOKENS, 6000),
+    cardSmith: {
+      reasoningEffort: env.CARD_SMITH_EFFORT || 'medium',
+      temperature: float(env.CARD_SMITH_TEMPERATURE, 0.4),
+      maxTokens: int(env.CARD_SMITH_MAX_TOKENS, 8000),
     },
-  },
-
-  // ---- 可选：嵌入模型（用于语义检索）。留空则只用 BM25 + 实体图 ----
-  embed: {
-    enabled: Boolean(env.EMBED_API_KEY && env.EMBED_BASE_URL && env.EMBED_MODEL),
-    baseUrl: env.EMBED_BASE_URL || '',
-    apiKey: env.EMBED_API_KEY || '',
-    model: env.EMBED_MODEL || '',
   },
 
   storage: {
