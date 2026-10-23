@@ -10,7 +10,9 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  background: rgba(20, 19, 17, 0.28);
+  background: rgba(30, 24, 16, 0.32);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
   opacity: 0;
   transition: opacity var(--dur) var(--ease);
 }
@@ -41,13 +43,14 @@
   align-items: center;
   gap: 10px;
   flex: none;
-  padding: calc(12px + var(--safe-t)) 14px 12px 18px;
+  min-height: var(--nav-h);
+  padding: calc(12px + var(--safe-t)) 14px 12px 22px;
   border-bottom: 1px solid var(--line);
 }
 .sheet-title {
   flex: 1;
   min-width: 0;
-  font-size: var(--fs-body);
+  font-size: var(--fs-title);
   font-weight: 650;
   letter-spacing: -0.01em;
   color: var(--ink);
@@ -61,7 +64,7 @@
   flex: 1;
   min-height: 0;
   overflow-y: auto;
-  padding: 14px 18px calc(20px + var(--safe-b));
+  padding: 18px 22px calc(24px + var(--safe-b));
   overscroll-behavior-y: contain;
 }
 
@@ -116,9 +119,10 @@
 .action-item {
   display: flex;
   align-items: center;
-  gap: 9px;
+  gap: 10px;
   width: 100%;
-  padding: 10px 14px;
+  min-height: 46px;
+  padding: 11px 16px;
   text-align: left;
   transition: background-color var(--dur) var(--ease);
 }
@@ -140,8 +144,8 @@
   left: 50%;
   top: 50%;
   z-index: 101;
-  width: min(360px, calc(100vw - 40px));
-  padding: 18px;
+  width: min(390px, calc(100vw - 40px));
+  padding: 24px;
   background: var(--paper-raised);
   border: 1px solid var(--line);
   border-radius: var(--r-xl);
@@ -152,7 +156,7 @@
 }
 .dialog.is-open { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 .dialog-title {
-  font-size: var(--fs-body);
+  font-size: var(--fs-headline);
   font-weight: 650;
   color: var(--ink);
   margin-bottom: 6px;
@@ -215,10 +219,10 @@
   left: 50%;
   bottom: 26px;
   z-index: 200;
-  padding: 8px 15px;
+  padding: 10px 17px;
   background: var(--ink);
   color: var(--paper);
-  border-radius: var(--r-md);
+  border-radius: var(--r-pill);
   font-size: var(--fs-label);
   font-weight: 500;
   box-shadow: var(--sh-lg);
@@ -229,8 +233,8 @@
   max-width: calc(100vw - 40px);
 }
 .toast.is-visible { opacity: 1; transform: translate(-50%, 0) scale(1); }
-.toast[data-type="error"] { background: var(--danger); color: #fff; }
-.toast[data-type="success"] { background: var(--ok); color: #fff; }
+.toast[data-type="error"] { background: var(--danger); color: var(--on-accent); }
+.toast[data-type="success"] { background: var(--ok); color: var(--on-accent); }
 
 @media (max-width: 900px) {
   .toast { bottom: auto; top: calc(14px + var(--safe-t)); }
@@ -293,35 +297,34 @@
  * ---------------------------------------------------------------------- */
 .mem-tabs {
   display: flex;
-  gap: 0;
+  gap: 4px;
   border-bottom: 1px solid var(--line);
-  margin: -14px -18px 16px;
-  padding: 0 12px;
+  margin: -18px -22px 18px;
+  padding: 12px 16px 10px;
   overflow-x: auto;
   scrollbar-width: none;
   position: sticky;
-  top: -14px;
+  top: -18px;
   background: var(--paper);
   z-index: 2;
 }
 .mem-tabs::-webkit-scrollbar { display: none; }
 .mem-tab {
   position: relative;
-  padding: 9px 10px 10px;
+  flex: none;
+  padding: 6px 11px;
+  border-radius: var(--r-sm);
   font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--ink-3);
   white-space: nowrap;
-  transition: color var(--dur) var(--ease);
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
-.mem-tab:hover { color: var(--ink-2); }
-.mem-tab.is-active { color: var(--ink); font-weight: 600; }
-.mem-tab.is-active::after {
-  content: "";
-  position: absolute;
-  left: 6px; right: 6px; bottom: -1px;
-  height: 2px;
-  background: var(--ink);
+.mem-tab:hover { color: var(--ink-2); background: var(--paper-hover); }
+.mem-tab.is-active {
+  color: var(--accent-ink);
+  background: var(--accent-soft);
+  font-weight: 600;
 }
 
 .mem-pane { display: none; }
@@ -353,15 +356,16 @@
   display: flex;
   align-items: center;
   gap: 18px;
-  padding: 16px;
+  padding: 20px;
   border: 1px solid var(--line);
   border-radius: var(--r-lg);
   background: var(--paper-raised);
+  box-shadow: var(--sh-sm);
 }
 .mem-hero-info { flex: 1; min-width: 0; }
 .mem-hero-title {
-  font-size: var(--fs-body);
-  font-weight: 620;
+  font-size: var(--fs-headline);
+  font-weight: 650;
   color: var(--ink);
   letter-spacing: -0.01em;
 }

@@ -2,7 +2,7 @@
  * views/worlds.js — 世界卡总览
  */
 
-import { el, clear } from '../util.js';
+import { el, clear, firstChar } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, openActionSheet, confirmDialog } from '../app.js';
@@ -21,7 +21,7 @@ export default {
         type: 'button', 'aria-label': '目录',
         onclick: () => import('../shell.js').then((m) => m.openDrawer()),
       }, icon('sidebar', { size: 17 })),
-      el('div.topbar-title', {}, '世界卡'),
+      el('div.topbar-title', {}, '叙事台', el('span.topbar-sub', {}, '世界卡')),
       el('div.topbar-actions', {},
         el('button.btn.btn-secondary.btn-sm', {
           type: 'button', onclick: () => navigate('#/settings'),
@@ -99,15 +99,20 @@ export default {
 
 function worldRow(w, reload) {
   const card = w.card || {};
+  const tags = (w.tags || card.genre || []).slice(0, 4);
   return el('div.world-row', {
     role: 'button', tabindex: '0',
     onclick: () => navigate(`#/world/${w.id}`),
     onkeydown: (e) => { if (e.key === 'Enter') navigate(`#/world/${w.id}`); },
   },
-    el('div.world-spine', { style: `background:${hueTint(w.cover_hue, { s: 40, l: 45 })};` }),
+    el('div.world-cover', { style: `background:${hueTint(w.cover_hue, { s: 34, l: 38 })};` },
+      firstChar(w.title || '世')),
     el('div.world-body', {},
       el('div.world-name', {}, w.title || '未命名世界'),
       el('div.world-sub', {}, w.subtitle || card.subtitle || '还没有写简介'),
+      tags.length
+        ? el('div.world-tags', {}, ...tags.map((t) => el('span.chip.is-plain', {}, t)))
+        : null,
     ),
     el('div.world-facts', {},
       fact(w.session_count || 0, '剧情'),

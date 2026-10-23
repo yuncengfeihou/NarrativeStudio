@@ -1,140 +1,154 @@
 /* =========================================================================
  * tokens.css — 设计令牌
  *
- * 取向：中性纸墨 + 单一的靛蓝强调色。
- * 之前的版本偏「AI 产品」：紫蓝渐变、玻璃拟态、悬浮窗口、大量彩色徽章。
- * 这一版退回「工具」的质感——白纸、细线、留白、一处克制的强调色。
+ * 取向：纸墨书房。暖白纸面、深墨文字、一处朱砂强调色。
+ * 目标是「一张可以写很久的桌子」：低饱和、少投影、靠留白与细线分层；
+ * 所有颜色只从语义角色出发，组件里不出现裸色值。
  *
  * 三条规则：
- *   1. 只有一个强调色（--accent）。其他颜色只用于语义（成功/警告/危险），不做装饰。
- *   2. 阴影极浅。靠 0.5px 分隔线与留白分层，不靠投影。
- *   3. 圆角收小（6/8/10/12）。大圆角是「消费级 App」的语言，这里要的是「工作台」。
+ *   1. 只有一个强调色（--accent = 朱砂）。其余颜色只表达状态。
+ *   2. 阴影只给浮层和可抬起元素，正文区一律用 1px 分隔线。
+ *   3. 行高优先于字号：中文长文的舒适度来自行距与行宽。
  * ========================================================================= */
 
 :root {
   color-scheme: light;
 
   /* ---- 字体 ---- */
-  /* 界面字体：除演绎正文外的所有 UI 文字（标题、按钮、表单、列表）。
-     设置 → 字体 → 界面字体会在根节点覆盖 --font-ui。 */
+  /* 界面字体：除演绎正文外的所有 UI 文字。设置页可在根节点覆盖 --font-ui。 */
   --font-ui-base: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-ui: var(--font-ui-base);
-  /* 标题默认跟随界面字体；保留独立变量是为了让标题规则集中在一处。 */
   --font-title: var(--font-ui);
-  /* 阅读正文默认沿用 UI 字体：中文衬线在 Windows 上会回退成很重的宋体，
-     长时间阅读反而更累。行高与行宽才是阅读舒适度的主要来源。
-     分成两层：--font-read-base 是出厂默认栈，--font-read 是用户可覆盖的那层
-     （设置 → 字体 → 正文内容）。两个变量分开才不会自引用成环。 */
+  /* 阅读正文出厂沿用 UI 字体：Windows 中文衬线回退过重，长时间阅读更累。
+     --font-read-base 是出厂栈，--font-read 是用户覆盖层，两者分开避免自引用。 */
   --font-read-base: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC",
     "Hiragino Sans GB", "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
   --font-read: var(--font-read-base);
+  --font-serif: "Songti SC", "Noto Serif SC", "Source Han Serif SC", STSong, serif;
   --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
 
   /* ---- 字号 ---- */
-  --fs-title: 15px;          /* 面板标题 */
-  --fs-headline: 17px;       /* 页标题 */
-  --fs-body: 13.5px;         /* 正文 UI */
-  --fs-read: 17px;           /* 阅读正文 */
-  --fs-label: 12.5px;        /* 表单标签、列表副标题 */
-  --fs-caption: 11.5px;      /* 辅助信息 */
+  --fs-display: 28px;        /* 页面主标题 */
+  --fs-title: 16px;          /* 面板标题 */
+  --fs-headline: 19px;       /* 区块大标题 */
+  --fs-body: 14px;           /* 正文 UI */
+  --fs-read: 18px;           /* 阅读正文（用户可覆盖） */
+  --fs-label: 13px;          /* 表单标签、列表主标题 */
+  --fs-caption: 12px;        /* 辅助信息 */
+  --fs-micro: 11px;          /* 角标、计数 */
 
-  /* ---- 中性色（暖灰，不是冷灰） ---- */
-  --paper: #FCFCFB;            /* 主背景 */
-  --paper-sunken: #F6F6F4;     /* 次级背景 / 内嵌区 */
-  --paper-raised: #FFFFFF;     /* 卡片 */
-  --paper-hover: #F1F1EE;
+  /* ---- 间距 ---- */
+  --sp-1: 4px;
+  --sp-2: 8px;
+  --sp-3: 12px;
+  --sp-4: 16px;
+  --sp-5: 20px;
+  --sp-6: 24px;
+  --sp-8: 32px;
+  --sp-10: 40px;
 
-  --ink: #1C1B19;              /* 主文字 */
-  --ink-2: #5C5A55;            /* 次要文字 */
-  --ink-3: #8C8A84;            /* 弱化文字 */
-  --ink-4: #B8B6B0;            /* 占位 / 极弱 */
+  /* ---- 中性色：暖纸与墨 ---- */
+  --paper: #FBF9F4;            /* 主背景 */
+  --paper-sunken: #F3EFE6;     /* 次级背景 / 内嵌区 */
+  --paper-raised: #FFFDF9;     /* 卡片 */
+  --paper-hover: #F0EBE0;
 
-  --line: #E6E4DF;             /* 分隔线 */
-  --line-strong: #D5D2CB;      /* 输入框边框 */
-  --line-soft: #EFEDE9;        /* 更淡的分隔 */
+  --ink: #1E1B16;              /* 主文字 */
+  --ink-2: #575147;            /* 次要文字 */
+  --ink-3: #776F63;            /* 弱化文字（12px 也满足 4.5:1） */
+  --ink-4: #B3AA9A;            /* 占位 / 极弱 */
 
-  /* ---- 唯一的强调色：靛蓝 ---- */
-  --accent: #3D5A80;
-  --accent-hover: #32496A;
-  --accent-soft: #EDF1F6;
-  --accent-border: #C8D4E3;
+  --line: #E7E0D2;             /* 分隔线 */
+  --line-strong: #D6CCBA;      /* 输入框边框 */
+  --line-soft: #F0EADD;        /* 更淡的分隔 */
 
-  /* ---- 语义色（只用于状态，不做装饰） ---- */
-  --ok: #3F7A56;
-  --ok-soft: #EDF4EF;
-  --warn: #9A6B23;
-  --warn-soft: #FAF3E6;
-  --danger: #A8453C;
-  --danger-soft: #FBF0EE;
-  --info: #3D5A80;
-  --info-soft: #EDF1F6;
+  /* ---- 强调色：朱砂 ---- */
+  --accent: #A8442B;
+  --accent-hover: #8E3722;
+  --accent-soft: #F8ECE6;
+  --accent-border: #E4C6BA;
+  --accent-ink: #7E2F1C;
+  --on-accent: #FFF9F5;
+
+  /* ---- 语义色（只用于状态） ---- */
+  --ok: #3F7352;
+  --ok-soft: #EDF3ED;
+  --warn: #93641F;
+  --warn-soft: #FAF2E2;
+  --danger: #A33C35;
+  --danger-soft: #F9EBE9;
+  --info: #3E5B78;
+  --info-soft: #EDF1F5;
 
   /* ---- 圆角 ---- */
-  --r-sm: 5px;
-  --r-md: 8px;
-  --r-lg: 10px;
-  --r-xl: 12px;
+  --r-sm: 6px;
+  --r-md: 9px;
+  --r-lg: 12px;
+  --r-xl: 16px;
   --r-pill: 999px;
 
-  /* ---- 阴影（极浅，仅用于浮层） ---- */
-  --sh-sm: 0 1px 2px rgba(28, 27, 25, 0.05);
-  --sh-md: 0 2px 8px rgba(28, 27, 25, 0.07), 0 1px 2px rgba(28, 27, 25, 0.04);
-  --sh-lg: 0 8px 32px rgba(28, 27, 25, 0.12), 0 2px 8px rgba(28, 27, 25, 0.06);
+  /* ---- 阴影（暖色、极浅） ---- */
+  --sh-sm: 0 1px 2px rgba(46, 36, 20, 0.05);
+  --sh-md: 0 4px 14px rgba(46, 36, 20, 0.08), 0 1px 3px rgba(46, 36, 20, 0.04);
+  --sh-lg: 0 18px 48px rgba(46, 36, 20, 0.16), 0 4px 12px rgba(46, 36, 20, 0.06);
 
-  /* ---- 动效（克制，不弹跳） ---- */
+  /* ---- 动效 ---- */
   --ease: cubic-bezier(0.4, 0, 0.2, 1);
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --ease-soft: cubic-bezier(0.32, 0.72, 0, 1);
   --dur-fast: 0.12s;
-  --dur: 0.16s;
-  --dur-slow: 0.24s;
-  --dur-enter: 0.32s;
+  --dur: 0.18s;
+  --dur-slow: 0.26s;
+  --dur-enter: 0.34s;
 
   /* ---- 布局 ---- */
-  --sidebar-w: 232px;
-  --rail-w: 56px;
-  --nav-h: 48px;
+  --rail-w: 68px;
+  --sidebar-w: 264px;
+  --nav-h: 56px;
+  --page-max: 1120px;
   --read-max: 42em;
   --safe-t: env(safe-area-inset-top, 0px);
   --safe-b: env(safe-area-inset-bottom, 0px);
 }
 
 /* =========================================================================
- * 深色：同样中性，不用纯黑
+ * 深色：墨夜。不用纯黑，保留纸的暖意。
  * ========================================================================= */
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --paper: #171614;
-  --paper-sunken: #121110;
-  --paper-raised: #1E1D1A;
-  --paper-hover: #262420;
+  --paper: #14120F;
+  --paper-sunken: #0F0E0C;
+  --paper-raised: #1C1916;
+  --paper-hover: #252119;
 
-  --ink: #EDEBE6;
-  --ink-2: #A8A5A0;
-  --ink-3: #7B7872;
-  --ink-4: #57544F;
+  --ink: #EDE7DB;
+  --ink-2: #AFA79A;
+  --ink-3: #8A8275;
+  --ink-4: #5A544A;
 
-  --line: #2E2C28;
-  --line-strong: #3E3B36;
-  --line-soft: #262420;
+  --line: #2C2822;
+  --line-strong: #3D382F;
+  --line-soft: #24211B;
 
-  --accent: #8BABCE;
-  --accent-hover: #A3BEDC;
-  --accent-soft: #1E2A38;
-  --accent-border: #33465C;
+  --accent: #D98B72;
+  --accent-hover: #E7A188;
+  --accent-soft: #2B1D18;
+  --accent-border: #4A2E24;
+  --accent-ink: #F0BBA7;
+  --on-accent: #1C130E;
 
-  --ok: #7FB08F;
-  --ok-soft: #1A2620;
-  --warn: #C9A05C;
-  --warn-soft: #2A2218;
-  --danger: #D08B83;
-  --danger-soft: #2C1E1C;
-  --info: #8BABCE;
-  --info-soft: #1E2A38;
+  --ok: #83B295;
+  --ok-soft: #18241C;
+  --warn: #D0A45F;
+  --warn-soft: #292115;
+  --danger: #D98A82;
+  --danger-soft: #2B1B19;
+  --info: #8FA9C4;
+  --info-soft: #1B232D;
 
-  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-  --sh-md: 0 2px 10px rgba(0, 0, 0, 0.35);
-  --sh-lg: 0 10px 40px rgba(0, 0, 0, 0.5);
+  --sh-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
+  --sh-md: 0 4px 16px rgba(0, 0, 0, 0.4), 0 1px 3px rgba(0, 0, 0, 0.3);
+  --sh-lg: 0 18px 52px rgba(0, 0, 0, 0.58), 0 4px 14px rgba(0, 0, 0, 0.35);
 }
