@@ -32,9 +32,64 @@ import { isFunctionalPredicate } from './predicates.js';
 
 let db = null;
 
+/**
+ * 启动前的幂等迁移：旧库的 summaries 是「level / turn_from / turn_to / content」形状，
+ * 新代码在 CREATE INDEX 时就会引用 branch_id / covers_turn_to。必须在主 schema exec
+ * 之前把它重建成新形状，否则旧库会因为「no such column: branch_id」直接起不来。
+ */
+function ensureSummariesSchema(d) {
+  const exists = d.prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='summaries'`,
+  ).get();
+  if (!exists) return;
+  const cols = d.prepare(`PRAGMA table_info(summaries)`).all().map((c) => c.name);
+  const has = (c) => cols.includes(c);
+  if (has('branch_id') && has('covers_turn_to') && has('text')) return;
+
+  const branch = has('branch_id') ? 'branch_id' : "'main'";
+  const covers = has('covers_turn_to') ? 'covers_turn_to' : (has('turn_to') ? 'turn_to' : '0');
+  const text = has('text') ? 'text' : (has('content') ? 'content' : "''");
+  const prev = has('prev_id') ? 'prev_id' : 'NULL';
+  const token = has('token_count') ? 'token_count' : '0';
+  const created = has('created_at') ? 'created_at' : String(Date.now());
+
+  d.exec('PRAGMA foreign_keys = OFF');
+  d.exec('BEGIN');
+  try {
+    d.exec('ALTER TABLE summaries RENAME TO summaries_legacy');
+    d.exec(`
+      CREATE TABLE summaries (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+        branch_id TEXT NOT NULL DEFAULT 'main',
+        covers_turn_to INTEGER NOT NULL,
+        text TEXT NOT NULL,
+        prev_id INTEGER,
+        token_count INTEGER NOT NULL DEFAULT 0,
+        created_at INTEGER NOT NULL,
+        UNIQUE(session_id, branch_id, covers_turn_to)
+      )
+    `);
+    d.exec(`
+      INSERT OR REPLACE INTO summaries
+        (session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
+      SELECT session_id, ${branch}, ${covers}, ${text}, ${prev}, ${token}, ${created}
+      FROM summaries_legacy
+    `);
+    d.exec('DROP TABLE summaries_legacy');
+    d.exec('COMMIT');
+  } catch (err) {
+    d.exec('ROLLBACK');
+    throw err;
+  } finally {
+    d.exec('PRAGMA foreign_keys = ON');
+  }
+}
+
 export function getDb() {
   if (db) return db;
   db = new DatabaseSync(config.storage.dbPath);
+  ensureSummariesSchema(db);
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
