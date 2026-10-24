@@ -180,7 +180,7 @@ export async function runBranchAgent({
       temperature: options.temperature ?? cfg.temperature,
       maxTokens: options.maxTokens ?? cfg.maxTokens,
       reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
-      model: options.model,
+      model: options.model ?? cfg.model ?? undefined,
       responseFormat: { type: 'json_object' },
       signal,
     });

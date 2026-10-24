@@ -296,6 +296,16 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/memory`, { signal });
   },
 
+  /** 本局世界线的运行期变化（不是世界卡模板） */
+  getWorldState(id, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/world-state`, { signal });
+  },
+
+  /** 把当前世界线定稿为一张新世界卡（显式操作） */
+  canonizeSession(id, body = {}, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/canonize`, { method: 'POST', body, signal });
+  },
+
   /* ---------------- 分页 / 检索 ---------------- */
 
   getTurns(id, { from = 1, to = '' } = {}, signal) {

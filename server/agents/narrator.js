@@ -18,10 +18,22 @@ function lastUserIndex(messages) {
   return -1;
 }
 
+function insertBeforeLastUser(messages, content) {
+  const idx = lastUserIndex(messages);
+  const msg = { role: 'user', content };
+  // 用 user 而非 system：把额外的 system 插进对话中段会让上游把正文写进 reasoning。
+  if (idx >= 0) messages.splice(idx, 0, msg);
+  else messages.push(msg);
+  return messages;
+}
+
 /**
  * 组装最终 messages（纯函数，便于单测）。
+ * segmentedNote 只在分段模式传；它和 guidance 一样是尾部 user 指令，不新增 system。
  */
-function buildNarratorMessages({ session, world, context, guidance = '' } = {}) {
+export function buildNarratorMessages({
+  session, world, context, guidance = '', segmentedNote = '',
+} = {}) {
   const messages = Array.isArray(context?.messages)
     ? context.messages.map((m) => ({ ...m }))
     : [];
@@ -32,15 +44,14 @@ function buildNarratorMessages({ session, world, context, guidance = '' } = {}) 
 
   const note = String(guidance || '').trim();
   if (note) {
-    const idx = lastUserIndex(messages);
-    // 用 user 而非 system：把额外的 system 插进对话中段会让上游把正文写进 reasoning。
-    const msg = {
-      role: 'user',
-      content: `【本轮改稿要求】（作者对这一次演绎的额外要求，优先级高，但不得违背世界观与人物设定）\n${note}`,
-    };
-    if (idx >= 0) messages.splice(idx, 0, msg);
-    else messages.push(msg);
+    insertBeforeLastUser(
+      messages,
+      `【本轮改稿要求】（作者对这一次演绎的额外要求，优先级高，但不得违背世界观与人物设定）\n${note}`,
+    );
   }
+
+  const segmented = String(segmentedNote || '').trim();
+  if (segmented) insertBeforeLastUser(messages, segmented);
 
   return messages;
 }
@@ -63,7 +74,7 @@ export async function runNarrator({
 
   for await (const ev of chatStream({
     messages,
-    model: options.model,
+    model: options.model ?? cfg.model ?? undefined,
     temperature: options.temperature ?? cfg.temperature,
     maxTokens: options.maxTokens ?? cfg.maxTokens,
     reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,

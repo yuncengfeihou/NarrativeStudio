@@ -94,24 +94,46 @@ function withTiming(usage, { startedAt, firstTokenAt, endedAt, outputChars = 0 }
  * @returns {Promise<{content, reasoning, usage, model, finishReason, raw}>}
  */
 export async function chat(opts) {
-  const body = buildBody(opts, false);
-  const startedAt = Date.now();
-  const res = await withRetry(() => fetchJson(`${config.upstream.baseUrl}/chat/completions`, body, opts.signal));
-  const endedAt = Date.now();
-  const choice = res.choices?.[0];
-  const msg = choice?.message || {};
-  const content = msg.content || '';
-  const reasoning = pickReasoning(msg);
-  return {
-    content,
-    reasoning,
-    usage: withTiming(normalizeUsage(res.usage), {
-      startedAt, firstTokenAt: startedAt, endedAt, outputChars: content.length + reasoning.length,
-    }),
-    model: res.model,
-    finishReason: choice?.finish_reason,
-    raw: res,
+  const run = async (o) => {
+    const body = buildBody(o, false);
+    const startedAt = Date.now();
+    const res = await withRetry(() => fetchJson(`${config.upstream.baseUrl}/chat/completions`, body, o.signal));
+    const endedAt = Date.now();
+    const choice = res.choices?.[0];
+    const msg = choice?.message || {};
+    const content = msg.content || '';
+    const reasoning = pickReasoning(msg);
+    return {
+      content,
+      reasoning,
+      usage: withTiming(normalizeUsage(res.usage), {
+        startedAt, firstTokenAt: startedAt, endedAt, outputChars: content.length + reasoning.length,
+      }),
+      model: res.model,
+      finishReason: choice?.finish_reason,
+      raw: res,
+    };
   };
+
+  const first = await run(opts);
+  if (first.content.trim() || opts.signal?.aborted || opts.noEmptyRetry) return first;
+
+  // step-5-preview 的推理过程也计入 max_tokens：预算被推理耗尽时 content 会是空的。
+  // 这不能被当成「模型没有内容」——旁路 Agent 会把空 JSON 误读成「本轮无变化」。
+  const budget = Number(opts.maxTokens);
+  const used = Number(first.usage?.completion_tokens) || 0;
+  const exhausted = first.finishReason === 'length'
+    || (Number.isFinite(budget) && budget > 0 && used >= budget * 0.9);
+  if (!exhausted) return first;
+
+  console.warn(`[llm] 空内容且预算耗尽（${used}/${Number.isFinite(budget) ? budget : '?'}），降推理重试一次`);
+  const retry = await run({
+    ...opts,
+    reasoningEffort: 'low',
+    maxTokens: Math.max(8000, Math.min(64000, Number.isFinite(budget) && budget > 0 ? budget * 2 : 12000)),
+    noEmptyRetry: true,
+  });
+  return retry.content.trim() ? retry : first;
 }
 
 /**
@@ -202,6 +224,9 @@ function buildBody(opts, stream) {
   if (opts.reasoningEffort) body.reasoning_effort = opts.reasoningEffort;
   if (opts.reasoningFormat) body.reasoning_format = opts.reasoningFormat;
   if (opts.responseFormat) body.response_format = opts.responseFormat;
+  // 工具循环只用于分段演绎；工具结果由调用方自己管理，不进入 messages 的持久层。
+  if (Array.isArray(opts.tools) && opts.tools.length) body.tools = opts.tools;
+  if (opts.toolChoice) body.tool_choice = opts.toolChoice;
   // 请求上游在流末尾带上 usage，否则流式拿不到 token 统计
   if (stream) body.stream_options = { include_usage: true, ...(opts.streamOptions || {}) };
   return body;

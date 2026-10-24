@@ -29,13 +29,13 @@ const TYPE_GROUPS = [
  *
  * 超预算时的降级顺序：带摘要 → 只留名字 → 末尾省略。
  */
-export function renderWorldIndex(card, capTokens = 1200) {
+export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}) {
   const cast = card.cast || [];
-  const codex = card.codex || [];
+  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
   if (!cast.length && !codex.length) return '';
 
-  const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，';
-    + '不说明「此刻如何」——细节以场记单为准。不得发明索引之外的重要实体，';
+  const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
+    + '不说明「此刻如何」——细节以场记单为准。不得发明索引之外的重要实体，'
     + '不得改写这些名字。';
 
   const lines = [];
@@ -64,7 +64,11 @@ export function renderWorldIndex(card, capTokens = 1200) {
   const castItems = cast
     .slice()
     .sort((a, b) => (b.weight || 0) - (a.weight || 0))
-    .map((c) => ({ name: c.name, summary: c.role || c.one_line }));
+    .map((c) => {
+      // 索引只说「现在这个人是谁」，运行期状态由场记单负责细节。
+      const bits = [c.role, c.status && c.status !== c.role ? c.status : ''].filter(Boolean);
+      return { name: c.name, summary: bits.join(' · ') || c.one_line || c.status };
+    });
   pushGroup('人物', castItems);
 
   for (const g of TYPE_GROUPS) {
@@ -79,6 +83,85 @@ export function renderWorldIndex(card, capTokens = 1200) {
   return `${header}\n${lines.join('\n')}`;
 }
 
+/**
+ * 世界索引·树形版：有 parent_id 的卡按包含关系折叠。
+ * 远处实体只留名字，近处（有摘要）保留一句话；没有包含关系时退回平铺索引。
+ *
+ * @param {object} card
+ * @param {number} capTokens
+ * @param {{skipIds?:Set<string>, currentPlaceId?:string}} opts
+ */
+export function renderWorldTree(card, capTokens = 1200, { skipIds = null, currentPlaceId = '' } = {}) {
+  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
+  const hasParent = codex.some((e) => e.parent_id);
+  if (!hasParent) return renderWorldIndex(card, capTokens, { skipIds });
+
+  const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
+    + '不说明「此刻如何」——细节以场记单为准。不得发明索引之外的重要实体，'
+    + '不得改写这些名字。';
+
+  const byKey = new Map();
+  for (const e of codex) {
+    byKey.set(e.id, e);
+    byKey.set(e.name, e);
+    for (const a of e.aliases || []) byKey.set(a, e);
+  }
+  const children = new Map();
+  const roots = [];
+  for (const e of codex) {
+    const parent = e.parent_id ? byKey.get(e.parent_id) : null;
+    if (parent && parent !== e) {
+      if (!children.has(parent.id)) children.set(parent.id, []);
+      children.get(parent.id).push(e);
+    } else {
+      roots.push(e);
+    }
+  }
+
+  const treeTypes = new Set(['place', 'institution', 'faction']);
+  const isTree = (e) => treeTypes.has(e.type) || !!e.parent_id || children.has(e.id);
+  const label = (e) => {
+    const bits = [e.summary].filter(Boolean);
+    const mark = currentPlaceId && (e.id === currentPlaceId || e.name === currentPlaceId) ? '（当前）' : '';
+    return `${e.name}${mark}${bits.length ? `（${bits[0]}）` : ''}`;
+  };
+
+  const buildLines = (withSummary) => {
+    const lines = [];
+    const cast = (card.cast || []).slice().sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    if (cast.length) {
+      lines.push(`人物　${join(cast.map((c) => {
+        const bits = [c.role, c.status && c.status !== c.role ? c.status : ''].filter(Boolean);
+        const s = bits.join(' · ') || c.one_line || '';
+        return withSummary && s ? `${c.name}（${s}）` : c.name;
+      }), '｜')}`);
+    }
+
+    const walk = (e, depth) => {
+      const indent = depth === 0 ? '' : `${'  '.repeat(depth)}└ `;
+      lines.push(`${indent}${withSummary ? label(e) : e.name}`);
+      for (const child of (children.get(e.id) || []).sort((a, b) => a.name.localeCompare(b.name))) {
+        walk(child, depth + 1);
+      }
+    };
+    for (const e of roots.filter(isTree).sort((a, b) => a.name.localeCompare(b.name))) walk(e, 0);
+
+    for (const g of TYPE_GROUPS) {
+      if (g.key === 'character' || g.key === 'place' || g.key === 'institution' || g.key === 'faction') continue;
+      const items = codex.filter((e) => e.type === g.key && !isTree(e));
+      if (!items.length) continue;
+      lines.push(`${g.label}　${join(items.map((e) => (withSummary && e.summary ? `${e.name}（${e.summary}）` : e.name)), '｜')}`);
+    }
+    return lines;
+  };
+
+  let lines = buildLines(true);
+  if (estimateTokens(`${header}\n${lines.join('\n')}`) > capTokens) lines = buildLines(false);
+  let text = `${header}\n${lines.join('\n')}`;
+  if (estimateTokens(text) > capTokens) text = truncateToTokens(text, capTokens);
+  return text;
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 2. 辞书挑选（无关键词）                                                 */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -91,17 +174,29 @@ export function renderWorldIndex(card, capTokens = 1200) {
  *
  * @returns {Array<{entry, score, why:string[]}>}
  */
-export function selectCodex(card, { presentIds = [], mentionedIds = [], threadTags = [], pinnedIds = [] } = {}) {
+export function selectCodex(card, {
+  presentIds = [], mentionedIds = [], threadTags = [], pinnedIds = [], currentPlaceId = null,
+  skipIds = null,
+} = {}) {
   const linkSet = new Set([...presentIds, ...mentionedIds, ...pinnedIds]);
   const tagSet = new Set((threadTags || []).filter(Boolean));
   const out = [];
   for (const entry of card.codex || []) {
+    if (skipIds?.has(entry.id)) continue;
     const why = [];
     let score = 0;
     if (entry.pinned) { score += 100; why.push('钉选'); }
-    if (entry.links?.some((l) => linkSet.has(l))) { score += 60; why.push('实体在场'); }
+    // 实体连接 = 条目本身在场/被提及，或条目 links 指向在场实体。
+    // 后者让「司楼」因凌玥在场而进场，前者让剧情里新发现的地点能被点名带出。
+    if (linkSet.has(entry.id) || entry.links?.some((l) => linkSet.has(l))) {
+      score += 60;
+      why.push('实体在场');
+    }
     if (tagSet.size && entry.tags?.some((t) => tagSet.has(t))) { score += 30; why.push('本场主题'); }
-    if (entry.type === 'place' && presentIds.includes(entry.id)) { score += 20; why.push('当前地点'); }
+    if (entry.type === 'place' && currentPlaceId && entry.id === currentPlaceId) {
+      score += 20;
+      why.push('当前地点');
+    }
     if (score > 0) out.push({ entry, score, why });
   }
   out.sort((a, b) => b.score - a.score
@@ -116,8 +211,14 @@ export function selectCodex(card, { presentIds = [], mentionedIds = [], threadTa
 
 function renderCastLine(c, ledgerChar, voices) {
   const lines = [`· ${c.name}${c.role ? `（${c.role}）` : ''}`];
-  const state = [ledgerChar?.condition, ledgerChar?.mood, ledgerChar?.location ? `@${ledgerChar.location}` : '']
-    .filter(Boolean);
+  // 账本是这一场的最新状态；投影后的角色字段是会话级变化（例如长伤、死亡）。
+  const condition = ledgerChar?.condition || c.condition;
+  const mood = ledgerChar?.mood || c.mood;
+  const location = ledgerChar?.location || c.location;
+  const state = [
+    condition, mood, location ? `@${location}` : '',
+    c.status && c.status !== '临时登场' ? c.status : '',
+  ].filter(Boolean);
   if (state.length) lines.push(`  状态：${join(state, '｜')}`);
   if (c.voice.rhythm) lines.push(`  口吻：${c.voice.rhythm}`);
   if (c.agenda?.length) {
@@ -150,7 +251,23 @@ function renderCodexEntry(entry) {
   if (f.consequences?.length) lines.push(`  后果：${join(f.consequences, '；')}`);
   if (f.sensory) lines.push(`  质感：${f.sensory}`);
   if (history) lines.push(`  来历：${history}`);
+  // 运行态字段（world_state 投影到 effective world 后挂在这里），与定义分开渲染。
+  const now = [
+    entry.status ? `状态：${entry.status}` : '',
+    entry.condition ? `状况：${entry.condition}` : '',
+    entry.access ? `出入：${entry.access}` : '',
+    entry.owner_id ? `归属：${entry.owner_id}` : '',
+    entry.location_id ? `位置：${entry.location_id}` : '',
+    entry.open_to ? `开放：${entry.open_to}` : '',
+  ].filter(Boolean);
+  if (now.length) lines.push(`  此刻：${join(now, '｜')}`);
   return lines.join('\n');
+}
+
+/** T1 邻域：只给一句摘要与当前状态，不展开规则/来历。 */
+function renderCodexBrief(entry) {
+  const bits = [str(entry.summary), str(entry.status), str(entry.access)].filter(Boolean);
+  return `· ${entry.name}${bits.length ? `｜${join(bits, '；')}` : ''}`;
 }
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
@@ -171,11 +288,21 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  * @returns {{text:string, meta:object}}
  */
 export function renderSceneSheet({
-  ledger = {}, present = [], relations = [], threads = [], codex = [],
-  voices = {}, echoes = [], directive = '', capTokens = 2200,
+  ledger = {}, present = [], relations = [], threads = [], codex = [], codexBrief = [],
+  voices = {}, echoes = [], facts = [], worldRuntime = {}, directive = '', capTokens = 2200,
 } = {}) {
   const L = ledger || {};
-  const meta = { present: present.length, codex: codex.length, echoes: echoes.length };
+  const meta = {
+    present: present.length,
+    codex: codex.length,
+    codex_brief: codexBrief.length,
+    echoes: echoes.length,
+    facts: facts.length,
+    kept: [],
+    dropped: [],
+    codex_rendered: 0,
+    codex_brief_rendered: 0,
+  };
   if (!present.length && !L.place && !L.time) return { text: '', meta };
 
   const head = [];
@@ -188,6 +315,7 @@ export function renderSceneSheet({
   if (L.weather) bits.push(`天气 ${L.weather}`);
   if (typeof L.tension === 'number') bits.push(`张力 ${L.tension.toFixed(2)}`);
   const whenLine = bits.join('｜');
+  const runtimeLine = str(worldRuntime.status) ? `局势 ${str(worldRuntime.status)}` : '';
 
   const castBlock = present.map((c) => renderCastLine(c, L.characters?.[c.id], voices)).join('\n');
 
@@ -206,6 +334,10 @@ export function renderSceneSheet({
     .filter((t) => t.status === 'open')
     .slice(0, 8)
     .map((t) => `· ${t.title}${t.note ? `（${t.note}）` : ''}${t.weight >= 0.8 ? '［主线］' : ''}`);
+
+  const factLines = (facts || [])
+    .slice(0, 6)
+    .map((f) => `· ${f.subject} —${f.predicate}→ ${f.object}${f.visibility === 'secret' ? '［引擎掌握，不得说破］' : ''}`);
 
   const pressure = [];
   if (L.last_hook) pressure.push(`上一轮留下的钩子：${L.last_hook}`);
@@ -226,6 +358,7 @@ export function renderSceneSheet({
     });
 
   const codexBlock = (codex || []).map((c) => renderCodexEntry(c.entry || c)).join('\n');
+  const codexBriefBlock = (codexBrief || []).map((c) => renderCodexBrief(c.entry || c)).join('\n');
 
   const echoLines = (echoes || [])
     .slice(0, 4)
@@ -234,17 +367,20 @@ export function renderSceneSheet({
   /* ---- 分段装配，按配额从尾部开始砍 ---- */
   const sections = [];
   if (whenLine) sections.push({ key: 'when', text: whenLine, need: true });
+  if (runtimeLine) sections.push({ key: 'world', text: runtimeLine, need: true });
   if (castBlock) sections.push({ key: 'cast', text: `在场\n${castBlock}`, need: true });
   if (relLines.length) sections.push({ key: 'relations', text: `关系\n${relLines.join('\n')}` });
   if (threadLines.length) sections.push({ key: 'threads', text: `未回收的线索\n${threadLines.join('\n')}` });
+  if (factLines.length) sections.push({ key: 'facts', text: `已成立的事实\n${factLines.join('\n')}` });
   if (knowledgeLine.length) sections.push({ key: 'knowledge', text: `知识边界\n${knowledgeLine.join('；')}` });
   if (pressure.length) sections.push({ key: 'pressure', text: `压力\n${pressure.join('\n')}` });
   if (codexBlock) sections.push({ key: 'codex', text: `本场可用设定\n${codexBlock}` });
+  if (codexBriefBlock) sections.push({ key: 'codexBrief', text: `附近设定（只给一句，展开前先查辞书）\n${codexBriefBlock}` });
   if (echoLines.length) sections.push({ key: 'echoes', text: `回声（过去的原话，可自然带出，不要整段复述）\n${echoLines.join('\n')}` });
   if (directive) sections.push({ key: 'directive', text: `本场指令（作者钦定，优先级最高）\n${directive}` });
 
   const headerCost = estimateTokens(head.join('\n')) + 2;
-  const order = ['when', 'cast', 'pressure', 'threads', 'relations', 'knowledge', 'directive', 'codex', 'echoes'];
+  const order = ['when', 'world', 'cast', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'directive', 'echoes'];
   const kept = [];
   let used = headerCost;
   for (const key of order) {
@@ -254,14 +390,96 @@ export function renderSceneSheet({
     if (used + cost <= capTokens) { kept.push(sec); used += cost; continue; }
     // 超配额：按优先级砍——echoes/codex 先降级为截断，其余整段丢
     const room = capTokens - used - 2;
-    if (room > 60 && (key === 'codex' || key === 'echoes' || key === 'directive')) {
+    if (room > 60 && (key === 'codex' || key === 'codexBrief' || key === 'echoes' || key === 'directive')) {
       kept.push({ ...sec, text: truncateToTokens(sec.text, room) });
       used += estimateTokens(sec.text) + 2;
     }
   }
 
+  const keptKeys = new Set(kept.map((s) => s.key));
+  meta.kept = kept.map((s) => s.key);
+  meta.dropped = sections.filter((s) => !keptKeys.has(s.key)).map((s) => s.key);
+  const codexText = kept.find((s) => s.key === 'codex')?.text || '';
+  meta.codex_rendered = codexText
+    ? codexText.split('\n').filter((line) => line.startsWith('· ')).length
+    : 0;
+  const briefText = kept.find((s) => s.key === 'codexBrief')?.text || '';
+  meta.codex_brief_rendered = briefText
+    ? briefText.split('\n').filter((line) => line.startsWith('· ')).length
+    : 0;
+
   const body = kept.map((s) => s.text).join('\n\n');
   const text = body ? `${head.join('\n')}\n\n${body}` : '';
   meta.tokens = estimateTokens(text);
   return { text, meta };
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 4. 辞书检索（模型主动取证，不是关键词自动注入）                          */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+const norm = (s) => String(s || '').trim().toLowerCase();
+
+/**
+ * 按查询词在辞书里做确定性匹配，返回可渲染的条目。
+ *
+ * 这不是「关键词触发注入」：调用方是模型（检索预检/工具），返回结果只活在当拍；
+ * 代码不会因为文本里出现某个词就自动把条目塞进上下文。
+ *
+ * 打分：名字/别名精确 100；互相包含 60；摘要 30；标签 20；facets 10。
+ * @returns {Array<{entry: object, score: number, why: string[]}>}
+ */
+export function lookupCodex(card, queries, { limit = 3 } = {}) {
+  const qs = (Array.isArray(queries) ? queries : [queries])
+    .map(norm).filter(Boolean);
+  if (!qs.length) return [];
+  const out = [];
+  for (const entry of card?.codex || []) {
+    const names = [entry.name, ...(entry.aliases || [])].map(norm).filter(Boolean);
+    const summary = norm(entry.summary);
+    const detail = norm(entry.detail);
+    const tags = (entry.tags || []).map(norm);
+    const facets = entry.facets || {};
+    const facetText = [
+      facets.sensory, facets.history,
+      ...(facets.rules || []), ...(facets.consequences || []),
+    ].map(norm).filter(Boolean);
+
+    let score = 0;
+    const why = [];
+    for (const q of qs) {
+      if (names.some((n) => n === q)) { score = Math.max(score, 100); if (!why.includes('名称精确')) why.push('名称精确'); }
+      else if (names.some((n) => n.includes(q) || q.includes(n))) { score = Math.max(score, 60); if (!why.includes('名称相关')) why.push('名称相关'); }
+      if (summary.includes(q) || detail.includes(q)) { score = Math.max(score, Math.max(score, 30)); if (!why.includes('摘要命中')) why.push('摘要命中'); }
+      if (tags.some((t) => t.includes(q))) { score = Math.max(score, Math.max(score, 20)); if (!why.includes('标签命中')) why.push('标签命中'); }
+      if (facetText.some((t) => t.includes(q))) { score = Math.max(score, Math.max(score, 10)); if (!why.includes('细节命中')) why.push('细节命中'); }
+    }
+    if (score > 0) out.push({ entry, score, why });
+  }
+  out.sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name));
+  return out.slice(0, Math.max(1, limit));
+}
+
+/** 把一个辞书条目渲染成检索结果块（全文级，不是摘要）。 */
+export function renderCodexHit(entry) {
+  const lines = [`· ${entry.name}${entry.type ? `（${entry.type}）` : ''}`];
+  const seen = new Set();
+  // 同一段文字常同时出现在 summary / facets.history / detail 里；按归一化文本去重。
+  const push = (prefix, value) => {
+    const text = str(value);
+    if (!text) return;
+    const key = text.replace(/\s+/g, '');
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    lines.push(`${prefix}${text}`);
+  };
+  push('  ', entry.summary);
+  const f = entry.facets || {};
+  if (f.rules?.length) push('  规则：', join(f.rules, '；'));
+  if (f.consequences?.length) push('  后果：', join(f.consequences, '；'));
+  push('  质感：', f.sensory);
+  push('  来历：', f.history);
+  push('  细节：', entry.detail);
+  if (entry.reveal === 'secret') lines.push('  （引擎掌握，不得说破）');
+  return lines.join('\n');
 }

@@ -5,6 +5,7 @@ node_modules/
 data/*.db
 data/*.db-wal
 data/*.db-shm
+data/*.db.bak-*
 
 # Env
 .env
@@ -20,6 +21,14 @@ Thumbs.db
 
 # 系统锁定的临时文件（无法读取/删除，忽略）
 _work/db-dump.mjs
+
+# 真实模型冒烟测试的正文快照（运行时输出，不入库）
+_work/real-run-output.json
+_work/real-10turn-progress.json
+_work/real-10turn-report.json
+
+# 第三方参考实现（仅本地研究，不随仓库分发）
+/Liyuan-1.6.4/
 
 # 内部开发文档与素材（不入公开仓库）
 /AGENTS.md

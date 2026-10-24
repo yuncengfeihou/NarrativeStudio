@@ -20,7 +20,9 @@ process.env.DB_PATH = tmp;
 
 const store = await import('../server/memory/store.js');
 const arch = await import('../server/agents/archivist.js');
+const orch = await import('../server/agents/orchestrator.js');
 const schema = await import('../server/world/schema.js');
+const effective = await import('../server/world/effective.js');
 
 let pass = 0;
 let fail = 0;
@@ -68,6 +70,36 @@ console.log('\n=== 断言：冲突失效，不删除 ===');
 
   store.retractAssertion(sid, a2);
   eq(store.getAssertions(sid, { branchId: 'main' }).length, 1, '撤回后退出有效集');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 断言：多值谓词不误判冲突 ===');
+{
+  const sid = `s-many-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '知道', object: '玉佩在发光', valid_from: 1, source_turn: 1 });
+  const conflict = store.findConflictingAssertions(sid, {
+    branchId: 'main', subject: '伍卿', predicate: '知道', object: '凌玥在门外', validFrom: 2,
+  });
+  eq(conflict.length, 0, '知道 A 与知道 B 不冲突');
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '知道', object: '凌玥在门外', valid_from: 2, source_turn: 2 });
+  const knows = store.getAssertions(sid, { branchId: 'main', subject: '伍卿' })
+    .filter((a) => a.predicate === '知道');
+  eq(knows.length, 2, '多值事实可以并存');
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '拥有', object: '无纹玉佩', valid_from: 2, source_turn: 2 });
+  store.addAssertion(sid, { subject: '伍卿', predicate: '拥有', object: '牛车', valid_from: 3, source_turn: 3 });
+  eq(store.getAssertions(sid, { branchId: 'main', subject: '伍卿' })
+    .filter((a) => a.predicate === '拥有').length, 2, '拥有多个物品不冲突');
+
+  store.addAssertion(sid, { subject: '伍卿', predicate: '位于', object: '雨街', valid_from: 1, source_turn: 1 });
+  const move = store.findConflictingAssertions(sid, {
+    branchId: 'main', subject: '伍卿', predicate: '位于', object: '凌府', validFrom: 4,
+  });
+  eq(move.map((a) => a.object), ['雨街'], '单值谓词仍然判冲突');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -222,6 +254,18 @@ console.log('\n=== 史官：净化与合并 ===');
   eq(next.quests.length, 2, '目标新增');
   eq(next.quests.find((q) => q.goal === '弄清她是谁').progress, '还没问出口', '目标按 goal 更新');
   eq(next.last_hook, '她说出「以前认识」', 'last_hook 覆盖');
+
+  const noTension = arch.mergeLedger(old, { tension: null }, {});
+  eq(noTension.tension, 0.3, '缺省张力不清零');
+  const zeroTension = arch.mergeLedger(old, { tension: 0 }, {});
+  eq(zeroTension.tension, 0, '显式 0 可以写入');
+
+  const withPresent = arch.mergeLedger(old, { present: ['玥姐姐', '伍卿', '伍卿'] }, {
+    aliasIndex: schema.buildAliasIndex(card),
+  });
+  eq(withPresent.present, ['凌玥', '伍卿'], '在场名单按别名归一、去重');
+  const noPresent = arch.mergeLedger({ ...old, present: ['凌玥'] }, {}, {});
+  eq(noPresent.present, ['凌玥'], '缺省 present 不清空上场名单');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -248,6 +292,11 @@ console.log('\n=== 史官：解析容错 ===');
   const empty = arch.parseArchivistUpdate('');
   ok(empty.scene_change.changed === false, '空输入降级不抛错');
   eq(empty.assertions, [], '空输入给空数组');
+
+  const noTension = arch.parseArchivistUpdate('{"scene_change":{"changed":false}}');
+  eq(noTension.scene_change.tension, null, '缺省 tension 解析为 null，不是 0');
+  const withPresent = arch.parseArchivistUpdate('{"scene_change":{"present":["凌玥","伍卿"]}}');
+  eq(withPresent.scene_change.present, ['凌玥', '伍卿'], '解析在场名单');
 
   const truncated = arch.parseArchivistUpdate('{"assertions":[{"subject":"凌玥","predicate":"知');
   ok(Array.isArray(truncated.assertions), '截断 JSON 不抛错');
@@ -284,6 +333,9 @@ console.log('\n=== 史官：确定性落库 ===');
   eq(r.assertions, 1, '第一轮写入 1 条断言');
   eq(r.states, 2, '写入 2 条状态（伍卿 condition + 凌玥 mood，不同人不同字段）');
   eq(r.threads, 1, '埋下 1 条线索');
+  const st1 = store.getState(sid, { branchId: 'main', atTurn: 1 });
+  eq(st1.turn_no, 1, 'states 行记录正确轮次');
+  eq(st1.state.turn_no, 1, '账本对象内部轮次也同步');
 
   r = arch.applyArchivistUpdate({
     sessionId: sid, branchId: 'main', turnNo: 5,
@@ -311,6 +363,25 @@ console.log('\n=== 史官：确定性落库 ===');
   eq(r.threads, 1, '回收线索');
   eq(store.getThreads(sid, { status: 'open' }).length, 0, '回收后无未回收线索');
 
+  // 地点名能对上辞书 place 时自动补 place_id（当前地点加分不再依赖模型手写 id）。
+  const placeIdx = [{ alias: '司楼', kind: 'codex', id: 'silou', name: '司楼', type: 'place' }];
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 10,
+    aliasIndex: placeIdx,
+    update: { scene_change: { changed: true, place: '司楼' } },
+  });
+  const st10 = store.getState(sid, { branchId: 'main', atTurn: 10 });
+  eq(st10.state.place_id, 'silou', '地点名自动解析成 place_id');
+  eq(st10.state.tension, undefined, '缺省张力不写入 0');
+
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 11,
+    aliasIndex: [{ alias: '凌府', kind: 'codex', id: 'ling-fu', name: '凌府', type: 'place' }],
+    update: { scene_change: { changed: true, place: '凌府门口 → 凌府天井' } },
+  });
+  const st11 = store.getState(sid, { branchId: 'main', atTurn: 11 });
+  eq(st11.state.place_id, 'ling-fu', '复合地名按实体链接解析 place_id');
+
   const patches = store.listPatches(sid, { limit: 50 });
   ok(patches.some((p) => p.kind === 'assertion' && p.status === 'applied'), '断言提案有审计');
   ok(patches.every((p) => p.agent === 'archivist'), '审计记录 Agent 名');
@@ -332,6 +403,312 @@ console.log('\n=== 提案审计表 ===');
   eq(p.status, 'applied', '补丁状态可改');
   ok(p.applied_at > 0, '记录应用时间');
   eq(store.listPatches(sid, { status: 'open' }).length, 0, '按状态过滤');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 世界状态：变更校验 ===');
+{
+  const card = schema.normalizeCard({
+    title: 't',
+    cast: [{ name: '凌玥', aliases: ['玥姐姐'] }],
+    codex: [{ name: '玉佩' }],
+  });
+  const idx = schema.buildAliasIndex(card);
+
+  const add = arch.sanitizeChange(
+    { kind: 'cast', id: '玥姐姐', path: 'knowledge.knows', op: 'add', value: '七年前的真相' },
+    { aliasIndex: idx },
+  );
+  eq(add.entity_id, '凌玥', '实体变更按别名归一到 id');
+  eq(add.path, 'knowledge.knows', '知识路径放行');
+  ok(arch.sanitizeChange(
+    { kind: 'cast', id: '凌玥', path: 'identity.age', op: 'set', value: '18' },
+    { aliasIndex: idx },
+  ) === null, '身份根不可写');
+  ok(arch.sanitizeChange(
+    { kind: 'cast', id: '凌玥', path: 'knowledge.knows', op: 'set', value: 'x' },
+    { aliasIndex: idx },
+  ) === null, '列表路径不能用 set');
+  ok(arch.sanitizeChange(
+    { kind: 'cast', id: '凌玥', path: 'mood', op: 'add', value: 'x' },
+    { aliasIndex: idx },
+  ) === null, '标量路径不能用 add');
+
+  const introCodex = arch.sanitizeChange(
+    { kind: 'codex', fields: { type: 'place', name: '听雨楼', summary: '城南暗线' } },
+    { aliasIndex: idx },
+  );
+  eq(introCodex.op, 'introduce', 'introduce 放行新实体');
+  eq(introCodex.entity_id, '听雨楼', '新实体 id 由名字生成');
+
+  ok(arch.sanitizeChange(
+    { kind: 'codex', id: '玉佩', path: 'summary', op: 'set', value: '改写定义' },
+    { aliasIndex: idx },
+  ) === null, '已有辞书定义不可改写');
+  const codexRuntime = arch.sanitizeChange(
+    { kind: 'codex', id: '玉佩', path: 'status', op: 'set', value: '发绿光' },
+    { aliasIndex: idx },
+  );
+  eq(codexRuntime.path, 'status', '辞书运行态可写');
+
+  const player = arch.sanitizeChange(
+    { kind: 'player', id: '伍卿', path: 'knowledge.knows', op: 'add', value: '凌玥认识他' },
+    { aliasIndex: idx, playerName: '伍卿' },
+  );
+  eq(player.kind, 'player', '玩家角色命中玩家路径');
+  eq(player.entity_id, 'player', '玩家实体统一为 player');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 世界状态：落库与投影 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  const r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 3,
+    aliasIndex: [], playerName: '伍卿',
+    update: {
+      scene_change: {}, ledger: {},
+      changes: [
+        { kind: 'cast', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: '听雨楼在城南' },
+        { kind: 'codex', op: 'introduce', fields: { type: 'place', name: '听雨楼', summary: '暗线据点' } },
+        { kind: 'cast', id: 'a-jiu', op: 'introduce', fields: { name: '阿九', role: '跑堂' } },
+      ],
+    },
+  });
+  eq(r.changes, 3, '三条实体变更落库');
+
+  const now = store.getWorldState(sid, { branchId: 'main', atTurn: 3 });
+  eq(now.length, 3, '投影输入包含三条增量');
+  const before = store.getWorldState(sid, { branchId: 'main', atTurn: 2 });
+  eq(before.length, 0, '变更对之前的轮次不可见');
+
+  const patches = store.listPatches(sid, { branchId: 'main', limit: 20 });
+  ok(patches.some((p) => p.kind === 'world_change' && p.status === 'applied'), '实体变更进入审计');
+
+  // 模型常把「学到 A 和 B」写成数组；投影必须逐项写入，不能拼成 "A,B"。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 4,
+    aliasIndex: [], playerName: '伍卿',
+    update: {
+      changes: [{ kind: 'cast', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: ['A', 'B'] }],
+    },
+  });
+  const eff = effective.buildEffectiveWorld(schema.normalizeCard({ title: 't' }), store.getWorldState(sid, {
+    branchId: 'main', atTurn: 4,
+  }));
+  const ajiu = eff.cast.find((c) => c.id === 'a-jiu');
+  ok(ajiu.knowledge.knows.includes('A'), '数组 add 逐项写入');
+  ok(ajiu.knowledge.knows.includes('B'), '数组 add 不拼成一个字符串');
+
+  // 辞书运行态进入 effective world，而不是改写定义。
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'codex', entity_id: 'ling-fu',
+    path: 'status', op: 'set', value: '全府戒严', turn: 5,
+  });
+  const effCodex = effective.buildEffectiveWorld(
+    schema.normalizeCard({ title: 't', codex: [{ id: 'ling-fu', name: '凌府', type: 'place', summary: '主宅' }] }),
+    store.getWorldState(sid, { branchId: 'main', atTurn: 5 }),
+  );
+  eq(effCodex.codex.find((e) => e.id === 'ling-fu').status, '全府戒严', '辞书运行态进入投影');
+  eq(effCodex.codex.find((e) => e.id === 'ling-fu').summary, '主宅', '定义不被运行态覆盖');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支：分叉复制世界状态 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  store.setState(sid, 2, { place: '雨街', turn_no: 2 }, 'main');
+  store.setState(sid, 10, { place: '凌家院子', turn_no: 10 }, 'main');
+  store.upsertRelation(sid, { branch_id: 'main', from: '凌玥', to: '伍卿', kind: '旧识', sentiment: 0.6 });
+  store.upsertThread(sid, { branch_id: 'main', title: '玉佩发光', status: 'open', planted_turn: 2 });
+  store.setCharState(sid, { branchId: 'main', who: '伍卿', field: 'condition', value: '湿透', turn: 1 });
+  store.addAssertion(sid, {
+    branch_id: 'main', subject: '凌玥', predicate: '位于', object: '雨街', valid_from: 1, source_turn: 1,
+  });
+
+  store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 2 });
+  store.copyBranchState(sid, { fromBranch: 'main', toBranch: 'b2', forkTurn: 2 });
+
+  eq(store.getState(sid, { branchId: 'b2', atTurn: 10 }).state.place, '雨街', '新分支回到分叉点，而不是旧线第 10 轮');
+  eq(store.getRelations(sid, { branchId: 'b2' }).length, 1, '关系复制到新分支');
+  eq(store.getThreads(sid, { branchId: 'b2' }).length, 1, '线索复制到新分支');
+  eq(store.getCharStateMap(sid, { branchId: 'b2' }).伍卿.condition, '湿透', '人物状态复制到新分支');
+  eq(store.getAssertions(sid, { branchId: 'b2' }).length, 1, '有效断言复制到新分支');
+  eq(store.getState(sid, { branchId: 'main', atTurn: 10 }).state.place, '凌家院子', '旧分支保持原样');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支：嵌套分叉不读废弃兄弟分支 ===');
+{
+  const sid = `s-nested-${Date.now()}`;
+  store.createSession({ id: sid, title: 'nested' });
+  store.createBranch(sid, { branchId: 'main' });
+  for (let n = 1; n <= 12; n++) {
+    store.addTurn(sid, { turn_no: n, kind: 'player', content: `P${n}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: n, kind: 'narrator', content: `N${n}`, branch_id: 'main' });
+  }
+
+  const f1 = orch.forkSession({ sessionId: sid, toTurn: 8, note: 'b2' });
+  store.addTurn(sid, { turn_no: 13, kind: 'player', content: 'P13', branch_id: f1.branch_id });
+  store.addTurn(sid, { turn_no: 13, kind: 'narrator', content: 'N13', branch_id: f1.branch_id });
+  const f2 = orch.forkSession({ sessionId: sid, toTurn: 13, note: 'b3' });
+
+  const visible = store.getTurnsForBranch(sid, f2.branch_id, f2.fork_turn, { kinds: ['player'] });
+  eq(visible.map((t) => t.turn_no), [1, 2, 3, 4, 5, 6, 7, 8, 13], 'b3 只看祖先链：main ≤8 + b2 第 13 轮');
+  ok(!visible.some((t) => t.branch_id === 'main' && t.turn_no > 8), '看不到废弃兄弟分支的 9–12 轮');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支：关系/线索按分叉点重放 ===');
+{
+  const sid = `s-replay-${Date.now()}`;
+  store.createSession({ id: sid, title: 'replay' });
+  store.createBranch(sid, { branchId: 'main' });
+  for (let n = 1; n <= 12; n++) {
+    store.addTurn(sid, { turn_no: n, kind: 'player', content: `P${n}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: n, kind: 'narrator', content: `N${n}`, branch_id: 'main' });
+  }
+
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '凌玥', to: '伍卿', kind: '旧识', sentiment: 0.3, turn_no: 1,
+  });
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '玉佩发光', status: 'open', planted_turn: 1, turn_no: 1,
+  });
+  // 分叉点之后才发生的变化：新线不应该看到。
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '凌玥', to: '伍卿', kind: '决裂', sentiment: -0.8, turn_no: 9,
+  });
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '玉佩发光', status: 'resolved', resolved_turn: 9, turn_no: 9,
+  });
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '姬凡', to: '伍卿', kind: '敌意', sentiment: -0.5, turn_no: 9,
+  });
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '第九轮才埋的线索', status: 'open', planted_turn: 9, turn_no: 9,
+  });
+
+  const f = orch.forkSession({ sessionId: sid, toTurn: 8, note: '回滚' });
+  const rel = store.getRelations(sid, { branchId: f.branch_id });
+  eq(rel.find((r) => r.from_name === '凌玥' && r.to_name === '伍卿').kind, '旧识', '关系回到分叉点的版本');
+  ok(!rel.some((r) => r.from_name === '姬凡'), '分叉后才建立的关系不出现');
+
+  const th = store.getThreads(sid, { branchId: f.branch_id });
+  eq(th.find((t) => t.title === '玉佩发光').status, 'open', '线索回到未回收状态');
+  ok(!th.some((t) => t.title === '第九轮才埋的线索'), '分叉后才埋的线索不出现');
+
+  const mainRel = store.getRelations(sid, { branchId: 'main' });
+  eq(mainRel.find((r) => r.from_name === '凌玥' && r.to_name === '伍卿').kind, '决裂', '旧分支保持原样');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 定稿：世界线 → 新世界卡 ===');
+{
+  const baseCard = schema.normalizeCard({
+    title: '定稿测试',
+    cast: [{ id: 'ling-yue', name: '凌玥', role: '家主', knowledge: { knows: ['旧事'] } }],
+    anchors: [{ id: 'prologue', label: '序章', snapshot: { place: '雨街' }, opening_seed: '雨落下来。' }],
+    player: { name: '伍卿' },
+  });
+  const wid = `w-canon-${Date.now()}`;
+  store.saveWorld({ id: wid, title: '定稿测试', card: baseCard });
+  const sid = `s-canon-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: wid, title: '本局', cardSnapshot: baseCard, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  store.addTurn(sid, { turn_no: 1, kind: 'player', content: '我走进雨里。', branch_id: 'main' });
+  store.addTurn(sid, { turn_no: 1, kind: 'narrator', content: '雨更大了。', branch_id: 'main' });
+  store.setState(sid, 1, { place: '凌家院子', time: '当夜', turn_no: 1 }, 'main');
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    path: 'knowledge.knows', op: 'add', value: '她后来才知道的事', turn: 1,
+  });
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'codex', entity_id: 'tingyu-lou',
+    op: 'introduce', value: { type: 'place', name: '听雨楼', summary: '暗线据点' }, turn: 1,
+  });
+  store.upsertThread(sid, { branch_id: 'main', title: '玉佩还在发绿光', status: 'open', planted_turn: 1 });
+  store.upsertRelation(sid, {
+    branch_id: 'main', from: '凌玥', to: '伍卿', kind: '旧识·执念', sentiment: 0.7, note: '雨里没有甩开',
+  });
+
+  const out = orch.canonizeSession({ sessionId: sid, title: '定稿后的世界', anchorLabel: '从雨夜继续' });
+  ok(!!out.world.id && out.world.id !== wid, '定稿生成独立的新世界卡');
+  const newCast = out.card.cast.find((c) => c.id === 'ling-yue');
+  ok(newCast.knowledge.knows.includes('她后来才知道的事'), '人物知识被固化进新卡');
+  ok(out.card.codex.some((c) => c.name === '听雨楼'), '剧情新增地点被固化进新卡');
+  ok(out.card.anchors.some((a) => a.id === 'line-1' && a.snapshot.place === '凌家院子'), '当前账本成为新锚点');
+  ok(out.card.author_notes.some((n) => n.text.includes('玉佩还在发绿光')), '未回收线索写进作者笔记');
+  ok(newCast.relations.some((r) => r.to === '伍卿' && r.kind === '旧识·执念'), '关系账本并回人物卡');
+
+  const nextSession = orch.createSessionWithSettings({
+    title: '续章', worldId: out.world.id, anchorId: 'line-1',
+  });
+  ok(store.getRelations(nextSession.id, { branchId: 'main' })
+    .some((r) => r.from_name === '凌玥' && r.to_name === '伍卿'), '新会话从卡片关系初始化账本');
+
+  const oldCard = store.getWorld(wid).card;
+  ok(!oldCard.cast.find((c) => c.id === 'ling-yue').knowledge.knows.includes('她后来才知道的事'), '原世界卡不被改写');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 前情提要：摘要、覆盖边界、分支复制 ===');
+{
+  const sid = `sum-${Date.now()}`;
+  store.createSession({ id: sid, title: 'summary' });
+  store.createBranch(sid, { branchId: 'main' });
+  for (let i = 1; i <= 10; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `正文${i}`, branch_id: 'main' });
+  }
+
+  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 5 }), null, '没有摘要时返回 null');
+  const s1 = store.addSummary(sid, { branchId: 'main', coversTurnTo: 4, text: '前四轮摘要' });
+  ok(s1 && s1.covers_turn_to === 4, '摘要写入');
+  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 4 }).text, '前四轮摘要', '覆盖边界内可取');
+  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 3 }), null, '覆盖边界之前不可取');
+
+  const s2 = store.addSummary(sid, { branchId: 'main', coversTurnTo: 8, text: '前八轮摘要', prevId: s1.id });
+  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 10 }).id, s2.id, '取覆盖边界最大的那条');
+
+  store.addSummary(sid, { branchId: 'main', coversTurnTo: 8, text: '前八轮摘要 v2', prevId: s1.id });
+  eq(store.getSummaries(sid, { branchId: 'main' }).length, 2, '同一边界重压不新增行');
+  eq(store.getActiveSummary(sid, { branchId: 'main' }).text, '前八轮摘要 v2', '重压覆盖文本');
+
+  // fork：只继承覆盖到分叉点为止的摘要
+  store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 5 });
+  store.copyBranchState(sid, { fromBranch: 'main', toBranch: 'b2', forkTurn: 5 });
+  eq(store.getActiveSummary(sid, { branchId: 'b2' }).covers_turn_to, 4, '新分支只继承分叉点内的摘要');
+  eq(store.getActiveSummary(sid, { branchId: 'b2' }).text, '前四轮摘要', '继承的摘要内容正确');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支守卫：异步写入不落到旧分支 ===');
+{
+  const guard = await import('../server/memory/branch-guard.js');
+  const sid = `guard-${Date.now()}`;
+  store.createSession({ id: sid, title: 'guard' });
+  store.createBranch(sid, { branchId: 'main' });
+  store.addTurn(sid, { turn_no: 1, kind: 'player', content: '走', branch_id: 'main' });
+
+  const snap = guard.branchSnapshot(sid, 'main');
+  ok(guard.isBranchCurrent(snap), '刚取的快照成立');
+  store.addTurn(sid, { turn_no: 1, kind: 'narrator', content: '走了', branch_id: 'main' });
+  ok(!guard.isBranchCurrent(snap), '同一分支新增回合后旧快照失效');
+
+  const snap2 = guard.branchSnapshot(sid, 'main');
+  orch.forkSession({ sessionId: sid, toTurn: 1, note: 'test fork' });
+  ok(!guard.isBranchCurrent(snap2), '切分支后旧快照失效');
+  ok(guard.isBranchCurrent(guard.branchSnapshot(sid)), '新分支快照成立');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

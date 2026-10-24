@@ -9,7 +9,7 @@ import { el, clear, formatTime } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, openSheet } from '../app.js';
-import { hueTint, hueGlyph } from '../ui-kit.js';
+import { hueCover, hueGlyph } from '../ui-kit.js';
 
 export default {
   id: 'world',
@@ -127,9 +127,7 @@ export default {
     function hero(w, card) {
       const tags = (w.tags || card.genre || []).slice(0, 6);
       return el('div.wk-hero', {},
-        el('div.wk-cover', {
-          style: `background:linear-gradient(150deg, ${hueTint(w.cover_hue, { s: 42, l: 40 })}, ${hueTint((Number(w.cover_hue) || 210) + 24, { s: 38, l: 24 })});`,
-        },
+        el('div.wk-cover', { style: hueCover(w.cover_hue) },
           [...(w.title || '世')][0]),
         el('div.wk-hero-text', {},
           el('div.eyebrow', {}, 'World Codex'),
@@ -501,7 +499,10 @@ export default {
             stat(`${future}`, '原著参考'),
             stat(`${sessions.length}`, '剧情'),
             stat(`${turns}`, '轮次'),
+            stat(`v${w.version ?? 1}`, '模板版本'),
           ),
+          el('div', { style: 'padding:0 13px 13px;font-size:var(--fs-caption);color:var(--ink-4);line-height:1.7;' },
+            '编辑世界卡只影响之后创建的新会话；已开的剧情继续使用创建时冻结的快照。'),
         ),
       );
     }

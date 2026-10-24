@@ -20,6 +20,8 @@ process.env.DB_PATH = tmp;
 
 const schema = await import('../server/world/schema.js');
 const sheet = await import('../server/world/scene-sheet.js');
+const graphLib = await import('../server/world/graph.js');
+const lintLib = await import('../server/world/lint.js');
 
 let pass = 0;
 let fail = 0;
@@ -186,6 +188,23 @@ console.log('\n=== 辞书挑选（无关键词）===');
 
   const c = sheet.selectCodex(card, { presentIds: [], threadTags: [] });
   ok(c.every((x) => x.entry.pinned), '无连接无主题时只剩钉选项');
+
+  // 「当前地点」只认账本 place_id，不把所有被提及的地点都标成当前地点。
+  const places = schema.normalizeCard({
+    title: 'p',
+    codex: [
+      { id: 'ling-fu', name: '凌府', type: 'place' },
+      { id: 'silou', name: '司楼', type: 'place' },
+    ],
+  });
+  const d = sheet.selectCodex(places, {
+    presentIds: ['ling-fu', 'silou'], currentPlaceId: 'ling-fu',
+  });
+  const lf = d.find((x) => x.entry.id === 'ling-fu');
+  const sl = d.find((x) => x.entry.id === 'silou');
+  eq(lf.score, 80, '当前地点 +20');
+  ok(lf.why.includes('当前地点'), '只给当前地点标注');
+  ok(!sl.why.includes('当前地点'), '被提及但不是当前地点不加分');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -252,6 +271,81 @@ function estimate(s) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 辞书图谱：去重 / 关系 / 包含 ===');
+{
+  const card = schema.normalizeCard({
+    title: '图',
+    cast: [
+      { id: 'ling-yue', name: '凌玥', aliases: ['玥姐姐'], relations: [{ to: 'wu-qing', kind: '旧识', sentiment: 0.8 }] },
+      { id: 'wu-qing', name: '伍卿' },
+      { id: 'zhang-lan', name: '张兰', role: '保安' },
+    ],
+    codex: [
+      { id: 'ling-fu', name: '凌府', type: 'place', summary: '凌家主宅' },
+      { id: 'tianjing', name: '天井', type: 'place', parent_id: 'ling-fu' },
+      { id: 'yupei', name: '玉佩', type: 'item', summary: '无纹', links: ['cast:ling-yue'] },
+      // 与 cast 同名：应合并为同一实体，索引/场记单不重复
+      { id: 'zhang-lan-codex', name: '张兰', type: 'character', summary: '保安' },
+    ],
+    edges: [{ from: 'wu-qing', to: 'ling-fu', kind: 'located_in' }],
+  });
+  const g = graphLib.buildWorldGraph(card);
+
+  ok(g.mergedCodexIds.has('zhang-lan-codex'), '同名 cast/codex 标记为合并');
+  eq(g.resolve('zhang-lan-codex'), 'zhang-lan', 'codex id 解析到人物节点');
+  ok(g.entities.has('ling-fu'), '地点是独立节点');
+  ok(g.edges.some((e) => e.from === 'ling-yue' && e.to === 'wu-qing' && e.kind === '旧识'), 'cast.relations → 关系边');
+  ok(g.edges.some((e) => (e.from === 'ling-yue' && e.to === 'yupei')
+    || (e.from === 'yupei' && e.to === 'ling-yue')), 'codex.links → 关系边（cast: 前缀被剥掉）');
+  ok(g.edges.some((e) => e.from === 'tianjing' && e.to === 'ling-fu' && e.kind === 'located_in'), 'parent_id → located_in 边');
+  ok(g.edges.some((e) => e.from === 'wu-qing' && e.to === 'ling-fu' && e.kind === 'located_in'), '显式 edges 进入图');
+
+  ok([...graphLib.graphNeighbors(g, ['ling-yue'], { depth: 1 })].includes('yupei'), '1 跳邻域包含玉佩');
+  eq(graphLib.graphAncestors(g, 'tianjing'), ['ling-fu'], '包含关系可回溯祖先');
+
+  const tree = sheet.renderWorldTree(card, 1200, {
+    skipIds: g.mergedCodexIds, currentPlaceId: 'ling-fu',
+  });
+  ok(tree.includes('凌府（当前）'), '树形索引标注当前地点');
+  ok(tree.includes('└ 天井'), '子地点缩进在父地点下');
+  eq((tree.match(/张兰/g) || []).length, 1, '同名实体只出现一次');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 卡级 lint ===');
+{
+  const card = schema.normalizeCard({
+    title: 'lint',
+    cast: [
+      { id: 'wu-qing', name: '伍卿', aliases: ['阿卿'] },
+      { id: 'ling-yue', name: '凌玥' },
+      { id: 'zhang-lan', name: '张兰' },
+    ],
+    codex: [
+      { id: 'zhang-lan', name: '张兰', type: 'character' },
+      { id: 'broken', name: '断链', type: 'item', links: ['不存在'] },
+      { id: 'bad-parent', name: '断父', type: 'place', parent_id: '没有这个地方' },
+      { id: 'a', name: '环A', type: 'place', parent_id: 'b' },
+      { id: 'b', name: '环B', type: 'place', parent_id: 'a' },
+      { id: 'collide', name: '别名冲突', type: 'concept', aliases: ['阿卿'] },
+    ],
+    claims: [
+      { subject: '伍卿', predicate: '位于', cardinality: 'one', object: { kind: 'entity', id: 'a' }, validity: { from_turn: 1 } },
+      { subject: '伍卿', predicate: '位于', cardinality: 'one', object: { kind: 'entity', id: 'b' }, validity: { from_turn: 2 } },
+    ],
+  });
+  const report = lintLib.lintCard(card);
+  const codes = new Set(report.issues.map((i) => i.code));
+  ok(codes.has('duplicate_identity'), '报告同名 cast/codex');
+  ok(codes.has('alias_collision'), '报告别名冲突');
+  ok(codes.has('broken_link'), '报告断链');
+  ok(codes.has('broken_parent'), '报告断父');
+  ok(codes.has('parent_cycle'), '报告包含环');
+  ok(codes.has('claim_conflict'), '报告单值声明冲突');
+  ok(report.counts.entities >= 4, '报告实体计数');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== renderCardText（导出）===');
 {
   const card = schema.normalizeCard({
@@ -272,6 +366,47 @@ console.log('\n=== renderCardText（导出）===');
   ok(text.includes('[past] 母亲丢下他'), '时间线标 canon');
   ok(text.includes('[future] 黎婆确诊'), 'future 也标出来（给人看，不给模型）');
   ok(text.includes('## 可玩时间点'), '可玩时间点段');
+}
+
+console.log('\n=== 辞书检索（模型主动取证） ===');
+{
+  const card = schema.normalizeCard({
+    title: '检索测试',
+    codex: [
+      {
+        id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'],
+        summary: '官营青楼', tags: ['制度'], facets: { rules: ['入内即除籍'] },
+      },
+      {
+        id: 'yupei', type: 'item', name: '无纹玉佩', aliases: ['玉佩'],
+        summary: '遇暗发绿光', facets: { history: '凌玥所赠' },
+      },
+      {
+        id: 'chenghu', type: 'concept', name: '称呼礼法',
+        summary: '称公子是抬举', tags: ['制度'],
+      },
+    ],
+  });
+
+  eq(sheet.lookupCodex(card, '司楼').map((h) => h.entry.name), ['司楼'], '名称精确命中');
+  eq(sheet.lookupCodex(card, '青楼').map((h) => h.entry.name), ['司楼'], '别名命中');
+  eq(sheet.lookupCodex(card, '绿光').map((h) => h.entry.name), ['无纹玉佩'], '摘要命中');
+  eq(
+    sheet.lookupCodex(card, '制度').map((h) => h.entry.name).sort(),
+    ['司楼', '称呼礼法'].sort(),
+    '标签命中',
+  );
+  eq(sheet.lookupCodex(card, '不存在'), [], '无命中返回空');
+
+  const text = sheet.renderCodexHit(card.codex[0]);
+  ok(text.includes('入内即除籍'), '检索结果渲染规则');
+  ok(text.includes('官营青楼'), '检索结果渲染摘要');
+
+  const duplicated = sheet.renderCodexHit({
+    name: '玉佩', summary: '无纹玉佩',
+    facets: { history: '完整来历' }, detail: '完整来历',
+  });
+  eq((duplicated.match(/完整来历/g) || []).length, 1, 'summary/history/detail 重复文本只渲染一次');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

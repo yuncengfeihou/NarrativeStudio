@@ -9,7 +9,7 @@ import { el, clear, charCount } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, showLoading, hideLoading, openSheet, openActionSheet } from '../app.js';
-import { hueTint } from '../ui-kit.js';
+import { hueCover, hueGlyph } from '../ui-kit.js';
 
 export default {
   id: 'world-edit',
@@ -149,7 +149,7 @@ export default {
 
     function hero() {
       const cover = el('div.editor-cover', {
-        style: `background:${hueTint(model.coverHue, { s: 34, l: 38 })};`,
+        style: hueCover(model.coverHue),
         title: '点击更换封面色调',
         role: 'button',
         tabindex: '0',
@@ -191,11 +191,11 @@ export default {
       });
       slider.value = String(draftHue);
       const preview = el('div', {
-        style: `width:48px;height:48px;border-radius:8px;flex:none;background:${hueTint(draftHue, { s: 34, l: 38 })};`,
+        style: { width: '48px', height: '48px', borderRadius: '8px', flex: 'none', ...hueCover(draftHue) },
       });
       slider.addEventListener('input', () => {
         draftHue = Number(slider.value);
-        preview.style.background = hueTint(draftHue, { s: 34, l: 38 });
+        preview.style.background = hueCover(draftHue).background;
       });
       openSheet({
         title: '封面色调',
@@ -546,7 +546,7 @@ export default {
 
         const hue = (index * 47 + 200) % 360;
         const avatar = el('div.cast-avatar', {
-          style: `background:${hueTint(hue, { s: 32, l: 40 })};`,
+          style: hueGlyph(hue),
         }, [...(c.name || '新')][0]);
 
         const nameInput = el('input.cast-name-input', {
@@ -570,7 +570,7 @@ export default {
           alwaysSw.setAttribute('aria-checked', String(c.always_present));
         });
 
-        const card = el('div.cast-card', { style: `--char-hue:${hueTint(hue, { s: 32, l: 40 })};` });
+        const card = el('div.cast-card', { style: `--char-hue:${hueGlyph(hue).color};` });
         const collapseBtn = el('button.btn-icon.cast-collapse', {
           type: 'button', title: '收起', 'aria-label': '收起角色',
           onclick: (e) => {
@@ -762,7 +762,7 @@ export default {
         : {
           id: '', type: 'concept', name: '', aliases: [], tags: [],
           summary: '', facets: { sensory: '', rules: [], consequences: [], history: '' },
-          links: [], reveal: 'public', detail: '',
+          links: [], reveal: 'public', detail: '', parent_id: '',
         };
 
       const nameInput = el('input.field', { value: draft.name || '', placeholder: '名称（如「司楼」）' });
@@ -793,6 +793,10 @@ export default {
         value: (draft.tags || []).join('、'),
         placeholder: '主题标签，顿号分隔（如「制度、交易」）',
       });
+      const parentInput = el('input.field', {
+        value: draft.parent_id || '',
+        placeholder: '上级地点/机构 id（可选，如「帝都」；用于世界索引树）',
+      });
 
       const typeSelect = el('select.field', {}, ...CODEX_TYPES.map(([v, l]) =>
         el('option', { value: v, selected: draft.type === v }, l)));
@@ -817,6 +821,7 @@ export default {
           b.appendChild(field('来历', historyInput));
           b.appendChild(field('关联实体', linksInput));
           b.appendChild(field('主题标签', tagsInput));
+          b.appendChild(field('上级地点/机构', parentInput));
           b.appendChild(el('p.field-hint', {},
             '「未解」条目会被标注为「只你可知，不得说破」——引擎会遵守，但不会让角色说出来。'));
         },
@@ -833,6 +838,7 @@ export default {
             summary: summaryInput.value.trim(),
             tags: split(tagsInput.value),
             links: split(linksInput.value),
+            parent_id: parentInput.value.trim(),
             reveal: revealSelect.value,
             facets: {
               sensory: sensoryInput.value.trim(),

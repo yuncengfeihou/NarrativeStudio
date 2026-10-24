@@ -90,6 +90,12 @@ function normalizeCast(raw) {
         aliases: asStringArray(o.aliases),
         role: str(o.role),
         one_line: str(o.one_line),
+        // 运行期状态字段允许写在卡里作为初始值，但只有一个会话世界线能覆盖它们。
+        status: str(o.status),
+        condition: str(o.condition),
+        mood: str(o.mood),
+        location: str(o.location),
+        goal: str(o.goal),
         identity: {
           age: str(identity.age),
           appearance: str(identity.appearance),
@@ -169,6 +175,22 @@ function normalizeCodex(raw) {
         canon_from: str(o.canon_from),
         detail: str(o.detail),
         pinned: !!o.pinned,
+        // v5 图谱字段（可选）：包含关系与来源。没有时由 graph 层从 links/relations 推导。
+        parent_id: str(o.parent_id),
+        sources: asArray(o.sources)
+          .map((s) => {
+            const x = obj(s);
+            return {
+              kind: str(x.kind),
+              ref: str(x.ref),
+              title: str(x.title),
+              chapter: num(x.chapter, 0),
+              offset: num(x.offset, 0),
+              quote: str(x.quote),
+              turn_no: num(x.turn_no, 0),
+            };
+          })
+          .filter((s) => s.kind || s.ref || s.title || s.quote),
       };
       return entry;
     })
@@ -248,6 +270,60 @@ function normalizeAnchors(raw) {
     .filter(Boolean);
 }
 
+/**
+ * v5 图谱字段（可选）：类型化关系边。
+ * v4 卡没有 edges 时，graph 层会从 cast.relations / codex.links / parent_id 推导等价边。
+ */
+const GRAPH_VISIBILITIES = ['public', 'rumor', 'engine', 'secret'];
+
+function normalizeEdges(raw) {
+  return asArray(raw)
+    .map((e) => {
+      const o = obj(e);
+      const from = str(o.from);
+      const to = str(o.to);
+      if (!from || !to) return null;
+      return {
+        from,
+        to,
+        kind: str(o.kind) || 'related_to',
+        directed: o.directed !== false,
+        weight: clamp01(o.weight, 0.5),
+        visibility: GRAPH_VISIBILITIES.includes(o.visibility) ? o.visibility : 'public',
+        note: str(o.note).slice(0, 200),
+      };
+    })
+    .filter(Boolean);
+}
+
+/** v5 图谱字段（可选）：卡级事实声明。运行期断言仍写 assertions 表。 */
+function normalizeClaims(raw) {
+  return asArray(raw)
+    .map((c) => {
+      const o = obj(c);
+      const subject = str(o.subject);
+      const predicate = str(o.predicate);
+      if (!subject || !predicate) return null;
+      const objRaw = o.object;
+      const object = typeof objRaw === 'object' && objRaw != null
+        ? { kind: str(objRaw.kind) || 'literal', id: str(objRaw.id), text: str(objRaw.text) }
+        : { kind: 'literal', id: '', text: str(objRaw) };
+      const validity = obj(o.validity);
+      return {
+        subject,
+        predicate,
+        object,
+        cardinality: o.cardinality === 'one' ? 'one' : 'many',
+        visibility: GRAPH_VISIBILITIES.includes(o.visibility) ? o.visibility : 'public',
+        validity: {
+          from_turn: num(validity.from_turn, 0),
+          to_turn: validity.to_turn == null ? null : num(validity.to_turn, 0),
+        },
+      };
+    })
+    .filter(Boolean);
+}
+
 function normalizePlayer(raw, cast) {
   const p = obj(raw);
   const name = str(p.name);
@@ -269,6 +345,11 @@ function normalizePlayer(raw, cast) {
     inner_voice: str(p.inner_voice),
     wants: str(p.wants),
     afraid: str(p.afraid),
+    status: str(p.status),
+    condition: str(p.condition),
+    mood: str(p.mood),
+    location: str(p.location),
+    goal: str(p.goal),
     knowledge: {
       knows: asStringArray(knowledge.knows),
       does_not_know: asStringArray(knowledge.does_not_know),
@@ -310,6 +391,9 @@ export function normalizeCard(raw) {
     codex,
     timeline,
     anchors,
+    // v5 图谱字段（可选）；没有时由 server/world/graph.js 从 v4 字段推导。
+    edges: normalizeEdges(c.edges),
+    claims: normalizeClaims(c.claims),
     player: normalizePlayer(c.player, cast),
     author_notes: asArray(c.author_notes)
       .map((n) => {
@@ -378,6 +462,16 @@ export function resolveWho(name, aliasIndex) {
   if (!n) return '';
   const hit = aliasIndex.find((e) => e.alias === n);
   return hit ? hit.id : n;
+}
+
+/** 解析成实体引用；解析不了返回 kind=''，由调用方决定是否当作临时实体。 */
+export function resolveEntity(name, aliasIndex) {
+  const n = str(name);
+  if (!n) return { kind: '', id: '', name: '' };
+  const hit = (aliasIndex || []).find((e) => e.alias === n);
+  return hit
+    ? { kind: hit.kind, id: hit.id, name: hit.name, type: hit.type || '' }
+    : { kind: '', id: n, name: n, type: '' };
 }
 
 /** 场景主题标签：在场实体的 tags ∪ 账本 theme_tags ∪ 线索 tags。 */

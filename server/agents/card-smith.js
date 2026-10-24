@@ -101,6 +101,7 @@ async function extractChapter(chapter, index, total, { signal } = {}) {
     maxTokens: cfg.maxTokens,
     reasoningEffort: cfg.reasoningEffort,
     responseFormat: { type: 'json_object' },
+    model: cfg.model || undefined,
     signal,
   });
   return parseChapterExtract(res.content, index);

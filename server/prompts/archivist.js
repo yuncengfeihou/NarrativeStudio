@@ -8,11 +8,9 @@
  * 与旁白的关系：旁白永远不输出 JSON。记账这件事完全外包给史官。
  */
 
-/** 受控谓词表。不在表内的谓词会被代码拒绝。 */
-export const PREDICATES = [
-  '知道', '不知道', '相信', '想要', '害怕', '拥有', '位于', '属于',
-  '敌对', '效忠', '隐瞒', '承诺', '欠', '伤害', '救下', '是', '曾经是',
-];
+/** 受控谓词表。不在表内的谓词会被代码拒绝；基数定义见 memory/predicates.js。 */
+import { PREDICATES } from '../memory/predicates.js';
+export { PREDICATES };
 
 export const VISIBILITIES = ['public', 'engine', 'secret'];
 export const STATE_FIELDS = ['condition', 'mood', 'location', 'goal'];
@@ -34,7 +32,8 @@ schema：
     "place": "新的地点（变了才写）",
     "place_id": "地点实体 id（能对应上才写）",
     "weather": "天气（变了才写）",
-    "tension": 0.5
+    "tension": 0.5,
+    "present": ["伍卿", "凌玥"]  // 必填：这一拍镜头里的人物
   },
   "ledger": {
     "characters": {"凌玥": {"condition": "西装肩上有雨", "mood": "克制着的急切", "location": "台阶上", "goal": "把他带走"}},
@@ -44,6 +43,13 @@ schema：
     "quests_update": [{"goal": "弄清她为什么认识自己", "progress": "还没问出口", "status": "active"}],
     "last_hook": "她说出「以前认识」四个字"
   },
+  "changes": [
+    {"kind": "cast", "id": "凌玥", "path": "knowledge.knows", "op": "add", "value": "七年前是她母亲把伍卿丢在街上"},
+    {"kind": "cast", "id": "凌玥", "path": "status", "op": "set", "value": "左肩中箭，强撑着"},
+    {"kind": "codex", "id": "玉佩", "path": "reveal", "op": "set", "value": "public"},
+    {"kind": "codex", "id": "tingyu-lou", "op": "introduce", "fields": {"type": "place", "name": "听雨楼", "summary": "城南的暗线据点"}},
+    {"kind": "cast", "id": "a-jiu", "op": "introduce", "fields": {"name": "阿九", "role": "听雨楼的跑堂"}}
+  ],
   "assertions": [
     {"subject": "凌玥", "predicate": "知道", "object": "七年前是她母亲把伍卿丢在街上", "confidence": 0.95, "visibility": "public", "evidence": "她盯着那条街看了一眼"}
   ],
@@ -59,6 +65,8 @@ schema：
 ## assertions（断言，世界的真相）
 - 只记本轮正文**明确支撑得住**的事实。主语和宾语尽量用下面给出的规范名。
 - predicate 只能从这个表里选：${PREDICATES.join(' / ')}
+- 「位于 / 是 / 曾经是」是单值：同一时刻只能有一个对象；其余谓词可以并存，
+  不要因为对象不同就当成矛盾（知道 A 与知道 B 可以同时成立）。
 - visibility：
   - public  —— 在场的人都知道
   - engine  —— 只有演绎引擎知道（用于保持自洽，不得由角色说出）
@@ -72,6 +80,26 @@ schema：
 
 ## states
 - 与 ledger.characters 二选一即可，都写则以 states 为准。字段限定：${STATE_FIELDS.join(' / ')}
+
+## changes（世界线的运行期状态）
+- 用来记「这个世界后来变了什么」，只写本轮正文明确支撑的变化。
+- kind / path 白名单（不在表内的会被代码拒绝）：
+  - cast: status / condition / mood / location / goal / one_line / role / aliases；
+    knowledge.knows / knowledge.does_not_know / knowledge.believes_falsely；
+    psyche.wants / psyche.fears / psyche.hides / psyche.values
+  - codex（运行态）: status / condition / access / open_to / owner_id / location_id /
+    reveal / facets.sensory；facets.rules / facets.consequences / aliases / tags / links
+  - codex 的 summary / detail / facets.history 是作者定义，运行期不可写；
+    新条目用 introduce 一次写清。
+  - player: situation / capability / inner_voice / wants / afraid；
+    status / condition / mood / location / goal；
+    knowledge.knows / knowledge.does_not_know
+  - world: status（城邦/阵营/天下的整体局势，例如「全城戒严」）
+- op：set 写标量；add / remove 写列表；introduce 让剧情里第一次出现的实体进入当前世界线。
+- 角色在正文里学到/误解/遗忘一件事，必须写 knowledge.*；不要只写进 assertions 就完事。
+- 死亡、重伤、失势、身份变化写 cast.status；不要让世界索引一直显示开局标签。
+- 新地点/新物件/新人物用 introduce，给出 name 与最小 fields；它们只属于这一局，不会写回世界卡。
+- 身份根（id / name / identity / voice）不可写。运行时改名请用 aliases，不要改 name。
 
 ## relations
 - 只写本轮**态度发生实质变化**的人物对。sentiment -1（死敌）到 +1（性命相托）。
@@ -89,6 +117,9 @@ schema：
 
 ## scene_change
 - 只有地点、时间、在场者发生实质变化时才 changed: true。同一场景内的推进不要切场。
+- present 每轮必填，只列这一拍**真正在镜头里**的人物（规范名）；不在场的人不要列。
+  场景没变也要写当前在场者，它是「谁在场」的唯一依据，不是「最近谁被提到」。
+- 发生时间跳跃或跨地点移动时，changed 必须为 true，并写新的 when / place。
 
 # 参考信息
 ${castIndex ? `【已知人物】（主语/宾语/键名一律用这里的规范名）\n${castIndex}` : '（作者未提供卡司）'}
@@ -228,8 +259,12 @@ export function librarianSystemPrompt() {
 - get_character_state(who)         取某人物当前状态
 - get_threads(status)              取线索（open / resolved / all）
 - get_scene(turn_no)               取某一轮的场次记录
+- get_relations(who)               取某人的关系账本（from / to / kind / sentiment / note）
+- search_claims(subject, predicate) 按主语/谓词查已成立的事实（断言账本）
 
 # 工作方式
+0. 问「关系/债/敌意/亲近」先用 get_relations；问「谁知道什么/谁拥有什么」先用 search_claims。
+   这两类问题不一定在原文里出现关键词，不要只靠 search_events。
 1. 每一轮只能调用一个工具，输出 {"action":"工具名","args":{...}}。
 2. 你会收到工具结果，然后决定再查一次，或者交答案。
 3. 最多调用 3 次工具。第 4 次必须交答案。

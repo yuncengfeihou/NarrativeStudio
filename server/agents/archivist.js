@@ -10,9 +10,14 @@
  */
 import { config } from '../config.js';
 import { chat } from '../llm.js';
-import { buildAliasIndex, normalizeCard } from '../world/schema.js';
 import {
-  addAssertion, addPatch, addVoice, findConflictingAssertions, getState, getThreads,
+  CODEX_TYPES, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
+} from '../world/schema.js';
+import {
+  CODEX_CANON_PATHS, LIST_PATH_SET, ENTITY_KINDS, pathsFor,
+} from '../world/state-paths.js';
+import {
+  addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
   invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
 } from '../memory/store.js';
 import {
@@ -65,6 +70,134 @@ export function sanitizeState(s, aliasIndex) {
   return { who, field, value: value.slice(0, 200) };
 }
 
+const CODEX_REVEALS = ['public', 'rumor', 'secret'];
+
+const asCleanList = (v, max = 12) => arr(v)
+  .map((x) => str(x).slice(0, 120))
+  .filter(Boolean)
+  .slice(0, max);
+
+/** 新登场实体只收渲染需要的字段，并截断长度，避免模型塞进无限细节。 */
+function sanitizeIntroduce(kind, fields, name) {
+  const f = obj(fields);
+  if (kind === 'cast') {
+    const out = { name: name.slice(0, 60) };
+    for (const k of ['role', 'one_line', 'status', 'condition', 'mood', 'location', 'goal']) {
+      if (str(f[k])) out[k] = str(f[k]).slice(0, 200);
+    }
+    if (arr(f.aliases).length) out.aliases = asCleanList(f.aliases);
+    const knowledge = obj(f.knowledge);
+    if (Object.keys(knowledge).length) {
+      out.knowledge = {};
+      for (const k of ['knows', 'does_not_know', 'believes_falsely']) {
+        if (arr(knowledge[k]).length) out.knowledge[k] = asCleanList(knowledge[k]);
+      }
+    }
+    const psyche = obj(f.psyche);
+    if (Object.keys(psyche).length) {
+      out.psyche = {};
+      for (const k of ['wants', 'fears', 'hides', 'values']) {
+        if (arr(psyche[k]).length) out.psyche[k] = asCleanList(psyche[k]);
+      }
+    }
+    return out;
+  }
+  const out = {
+    name: name.slice(0, 60),
+    type: CODEX_TYPES.includes(f.type) ? f.type : 'custom',
+  };
+  for (const k of ['summary', 'detail', 'sensory', 'history', 'parent_id']) {
+    if (str(f[k])) out[k] = str(f[k]).slice(0, 400);
+  }
+  if (str(f.reveal)) out.reveal = CODEX_REVEALS.includes(f.reveal) ? f.reveal : 'public';
+  for (const k of ['aliases', 'tags', 'links']) {
+    if (arr(f[k]).length) out[k] = asCleanList(f[k]);
+  }
+  const facets = obj(f.facets);
+  if (Object.keys(facets).length) {
+    out.facets = {};
+    for (const k of ['sensory', 'history']) {
+      if (str(facets[k])) out.facets[k] = str(facets[k]).slice(0, 400);
+    }
+    for (const k of ['rules', 'consequences']) {
+      if (arr(facets[k]).length) out.facets[k] = asCleanList(facets[k]);
+    }
+  }
+  return out;
+}
+
+/**
+ * 校验一条实体变更提案。
+ *
+ * 只放行 state-paths 白名单；身份根（id/name/identity）不可写。
+ * 未知实体默认当作「本世界线临时登场」，不会写回世界卡。
+ */
+export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
+  const o = obj(raw);
+  const op = str(o.op) || (o.fields ? 'introduce' : 'set');
+  if (!['set', 'add', 'remove', 'introduce'].includes(op)) return null;
+  let kind = str(o.kind);
+  if (!ENTITY_KINDS.includes(kind)) return null;
+
+  if (op === 'introduce') {
+    if (kind !== 'cast' && kind !== 'codex') return null;
+    const fields = obj(o.fields || o.value);
+    const name = str(fields.name || o.id);
+    if (!name) return null;
+    return {
+      kind,
+      entity_id: str(o.id) || slugify(name),
+      path: '',
+      op,
+      value: sanitizeIntroduce(kind, fields, name),
+      name,
+    };
+  }
+
+  const rawName = str(o.id || o.name || o.who || o.entity);
+  if (!rawName) return null;
+  const path = str(o.path);
+
+  let entityId = rawName;
+  if (kind === 'player') {
+    entityId = 'player';
+  } else if (playerName && rawName === playerName) {
+    kind = 'player';
+    entityId = 'player';
+  } else {
+    const resolved = resolveEntity(rawName, aliasIndex);
+    if (resolved.kind === 'cast' || resolved.kind === 'codex') {
+      kind = resolved.kind;
+      entityId = resolved.id;
+    }
+  }
+
+  // 辞书定义（summary/detail/facets.history）是作者公理：已有条目只能写运行态，
+  // 想新增定义必须走 introduce（上面已返回）。
+  if (kind === 'codex' && CODEX_CANON_PATHS.has(path)) return null;
+
+  // 先按别名归一实体类型，再按最终类型校验路径。
+  const allowed = pathsFor(kind);
+  if (!allowed || !allowed.has(path)) return null;
+
+  const isList = LIST_PATH_SET.has(path);
+  if ((op === 'add' || op === 'remove') && !isList) return null;
+  if (op === 'set' && isList) return null;
+
+  let value = o.value;
+  if (kind === 'codex' && path === 'reveal') {
+    value = CODEX_REVEALS.includes(str(value)) ? str(value) : null;
+    if (!value) return null;
+  }
+  if (value == null) return null;
+  if (typeof value === 'string') {
+    const text = value.trim();
+    if (!text) return null;
+    value = text.slice(0, 300);
+  }
+  return { kind, entity_id: entityId, path, op, value };
+}
+
 /**
  * 把账本增量合并进旧账本。
  * 规则：标量出现即覆盖；characters 逐键合并（键先归一）；
@@ -75,10 +208,15 @@ export function mergeLedger(oldState, delta, { aliasIndex = [] } = {}) {
   const d = obj(delta);
   const next = { ...base };
 
-  for (const k of ['time', 'place', 'place_id', 'weather', 'last_hook']) {
+  for (const k of ['time', 'place', 'weather', 'last_hook']) {
     if (str(d[k])) next[k] = str(d[k]);
   }
-  if (Number.isFinite(Number(d.tension))) next.tension = Math.max(0, Math.min(1, Number(d.tension)));
+  // place_id 允许显式清空：地点换了但没有对应实体时，不能沿用旧地点的 id。
+  if (d.place_id !== undefined) next.place_id = str(d.place_id);
+  // null / 缺省表示「这一拍没有新信息」，不能把张力清零。
+  if (d.tension != null && d.tension !== '' && Number.isFinite(Number(d.tension))) {
+    next.tension = Math.max(0, Math.min(1, Number(d.tension)));
+  }
 
   const characters = obj(next.characters);
   for (const [rawWho, fields] of Object.entries(obj(d.characters))) {
@@ -87,6 +225,19 @@ export function mergeLedger(oldState, delta, { aliasIndex = [] } = {}) {
     characters[who] = { ...(characters[who] || {}), ...obj(fields) };
   }
   next.characters = characters;
+
+  // 在场是「这一拍镜头里的人物」，不是「账本里出现过的所有人」。
+  if (Array.isArray(d.present)) {
+    const present = [];
+    const seen = new Set();
+    for (const raw of d.present) {
+      const who = canonicalize(raw, aliasIndex) || str(raw);
+      if (!who || seen.has(who)) continue;
+      seen.add(who);
+      present.push(who);
+    }
+    next.present = present;
+  }
 
   const inventory = arr(next.inventory).map((i) => (typeof i === 'string' ? { name: i, holder: '' } : { ...obj(i) }));
   const remove = new Set(arr(d.inventory_remove).map((x) => str(typeof x === 'string' ? x : obj(x).name)).filter(Boolean));
@@ -162,9 +313,9 @@ function escapeRawControlCharsInStrings(text) {
 }
 
 const EMPTY_UPDATE = {
-  scene_change: { changed: false, reason: '', when: '', place: '', place_id: '', weather: '', tension: null },
+  scene_change: { changed: false, reason: '', when: '', place: '', place_id: '', weather: '', tension: null, present: [] },
   ledger: { characters: {}, inventory_add: [], inventory_remove: [], quests_add: [], quests_update: [], last_hook: '', theme_tags: [] },
-  assertions: [], states: [], relations: [], threads: [], quotes: [], uncertain: [],
+  assertions: [], changes: [], states: [], relations: [], threads: [], quotes: [], uncertain: [],
 };
 
 export function parseArchivistUpdate(content) {
@@ -193,7 +344,10 @@ export function parseArchivistUpdate(content) {
       place: str(scene.place),
       place_id: str(scene.place_id),
       weather: str(scene.weather),
-      tension: Number.isFinite(Number(scene.tension)) ? Number(scene.tension) : null,
+      tension: scene.tension != null && scene.tension !== '' && Number.isFinite(Number(scene.tension))
+        ? Number(scene.tension)
+        : null,
+      present: arr(scene.present).map(str).filter(Boolean),
     },
     ledger: {
       characters,
@@ -205,6 +359,7 @@ export function parseArchivistUpdate(content) {
       theme_tags: arr(ledger.theme_tags).map(str).filter(Boolean),
     },
     assertions: arr(p.assertions),
+    changes: arr(p.changes),
     states: arr(p.states),
     relations: arr(p.relations),
     threads: arr(p.threads),
@@ -222,7 +377,7 @@ export function parseArchivistUpdate(content) {
  * @returns {Promise<{applied:object, scene_change:object, uncertain:string[], usage:object|null}>}
  */
 export async function runArchivist({
-  session, world, turnNo, playerText, narrative, branchChoice, options = {}, signal,
+  session, world, turnNo, playerText, narrative, branchChoice, options = {}, signal, guard,
 }) {
   const cfg = config.agents.archivist;
   const sessionId = session?.id;
@@ -239,7 +394,7 @@ export async function runArchivist({
     .slice(0, 60)
     .map((e) => `· ${e.name}${e.aliases.length ? `（${e.aliases.join('、')}）` : ''}${e.summary ? `｜${e.summary}` : ''}`)
     .join('\n');
-  const openThreads = getThreads(sessionId, { status: 'open', limit: 12 }).map((t) => t.title);
+  const openThreads = getThreads(sessionId, { branchId, status: 'open', limit: 12 }).map((t) => t.title);
 
   const res = await chat({
     messages: [
@@ -249,22 +404,46 @@ export async function runArchivist({
     temperature: options.temperature ?? cfg.temperature,
     maxTokens: options.maxTokens ?? cfg.maxTokens,
     reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
-    model: options.model,
+    model: options.model ?? cfg.model ?? undefined,
     responseFormat: { type: 'json_object' },
     signal,
   });
 
   const update = parseArchivistUpdate(res.content);
 
-  const applied = applyArchivistUpdate({ sessionId, branchId, turnNo: no, update, aliasIndex });
+  // 分支守卫：旁路调用期间用户可能 rollback / rewrite。分支变了就整批丢弃，
+  // 不让旧线的提案写进新线（新线会从自己的分叉点状态重建）。
+  if (typeof guard === 'function' && !guard()) {
+    addPatch(sessionId, {
+      branchId, agent: 'archivist', kind: 'stale', turn_no: no, status: 'stale',
+      severity: 'info', payload: { reason: 'branch changed during archivist call' },
+    });
+    return {
+      applied: {
+        assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
+        relations: 0, threads: 0, voices: 0, ledger: false,
+      },
+      scene_change: update.scene_change, uncertain: update.uncertain,
+      usage: res.usage || null, stale: true,
+    };
+  }
+
+  const applied = applyArchivistUpdate({
+    sessionId, branchId, turnNo: no, update, aliasIndex, playerName: card.player?.name || '',
+  });
   return { applied, scene_change: update.scene_change, uncertain: update.uncertain, usage: res.usage || null };
 }
 
 /**
  * 确定性应用史官提案。所有写入都在这里发生，全部可回放、可审计。
  */
-export function applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex = [] }) {
-  const applied = { assertions: 0, assertions_invalidated: 0, states: 0, relations: 0, threads: 0, voices: 0, ledger: false };
+export function applyArchivistUpdate({
+  sessionId, branchId, turnNo, update, aliasIndex = [], playerName = '',
+}) {
+  const applied = {
+    assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
+    relations: 0, threads: 0, voices: 0, ledger: false,
+  };
 
   /* ---- 断言：冲突时旧断言失效，不删除 ---- */
   for (const raw of update.assertions || []) {
@@ -307,6 +486,19 @@ export function applyArchivistUpdate({ sessionId, branchId, turnNo, update, alia
   }
   for (const s of stateItems) {
     setCharState(sessionId, { branchId, who: s.who, field: s.field, value: s.value, turn: turnNo });
+    const ref = resolveEntity(s.who, aliasIndex);
+    const isPlayer = !ref.kind && playerName && s.who === playerName;
+    addWorldState(sessionId, {
+      branch_id: branchId,
+      entity_kind: isPlayer ? 'player' : (ref.kind || 'cast'),
+      entity_id: isPlayer ? 'player' : (ref.id || s.who),
+      path: s.field,
+      op: 'set',
+      value: s.value,
+      turn: turnNo,
+      source: 'archivist',
+      evidence: 'ledger/states',
+    });
     applied.states++;
   }
 
@@ -317,6 +509,7 @@ export function applyArchivistUpdate({ sessionId, branchId, turnNo, update, alia
     const to = canonicalize(r.to, aliasIndex);
     if (!from || !to || from === to) continue;
     upsertRelation(sessionId, {
+      branch_id: branchId,
       from, to,
       kind: str(r.kind),
       sentiment: Number.isFinite(Number(r.sentiment)) ? Math.max(-1, Math.min(1, Number(r.sentiment))) : 0,
@@ -333,22 +526,27 @@ export function applyArchivistUpdate({ sessionId, branchId, turnNo, update, alia
     if (!title) continue;
     const action = str(t.action) === 'resolve' ? 'resolve' : 'plant';
     if (action === 'resolve') {
-      const open = getThreads(sessionId, { status: 'open', limit: 50 });
+      const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
       const hit = open.find((x) => x.title === title) || open.find((x) => str(x.title) === title);
       if (hit) {
-        upsertThread(sessionId, { title: hit.title, status: 'resolved', resolved_turn: turnNo });
+        upsertThread(sessionId, {
+          branch_id: branchId, title: hit.title, status: 'resolved',
+          resolved_turn: turnNo, turn_no: turnNo,
+        });
         applied.threads++;
       }
       continue;
     }
-    const open = getThreads(sessionId, { status: 'open', limit: 50 });
+    const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
     const hit = open.find((x) => x.title === title);
     upsertThread(sessionId, {
+      branch_id: branchId,
       title: hit ? hit.title : title,
       status: 'open',
       weight: Number.isFinite(Number(t.weight)) ? Math.max(0, Math.min(1, Number(t.weight))) : 0.5,
       note: str(t.note).slice(0, 200),
       planted_turn: hit ? hit.planted_turn : turnNo,
+      turn_no: turnNo,
     });
     applied.threads++;
   }
@@ -363,20 +561,61 @@ export function applyArchivistUpdate({ sessionId, branchId, turnNo, update, alia
     applied.voices++;
   }
 
+  /* ---- 实体变更：世界线自己的运行期状态 ---- */
+  for (const raw of update.changes || []) {
+    const c = sanitizeChange(raw, { aliasIndex, playerName });
+    if (!c) continue;
+    addWorldState(sessionId, {
+      branch_id: branchId,
+      entity_kind: c.kind,
+      entity_id: c.entity_id,
+      path: c.path,
+      op: c.op,
+      value: c.value,
+      turn: turnNo,
+      source: 'archivist',
+      evidence: str(obj(raw).evidence).slice(0, 120),
+    });
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'world_change', turn_no: turnNo,
+      status: 'applied', payload: c, evidence: str(obj(raw).evidence).slice(0, 120),
+    });
+    applied.changes++;
+  }
+
   /* ---- 账本合并 ---- */
-  const old = getState(sessionId);
+  const old = getState(sessionId, { branchId, atTurn: turnNo });
   const delta = update.ledger || {};
   const scene = update.scene_change || {};
+
+  // 地点名能对上辞书里的 place 时，自动补 place_id；这让「当前地点」加分与
+  // 地点辞书进场不再依赖模型是否手写了 id。
+  let placeId = scene.place_id || '';
+  if (!placeId && scene.place) {
+    const resolved = resolveEntity(scene.place, aliasIndex);
+    if (resolved.kind === 'codex' && resolved.type === 'place') {
+      placeId = resolved.id;
+    } else {
+      // 「凌府门口 → 凌府天井」这类复合地名：用实体链接取最长的 place 命中。
+      const hit = linkEntities(scene.place, aliasIndex).codex
+        .map((id) => aliasIndex.find((e) => e.kind === 'codex' && e.id === id && e.type === 'place'))
+        .find(Boolean);
+      if (hit) placeId = hit.id;
+    }
+  }
+
   const mergedDelta = {
     ...delta,
     time: scene.when || undefined,
     place: scene.place || undefined,
-    place_id: scene.place_id || undefined,
+    place_id: (scene.place || scene.place_id) ? placeId : undefined,
     weather: scene.weather || undefined,
     tension: scene.tension,
+    present: scene.present?.length ? scene.present : undefined,
   };
   const next = mergeLedger(old?.state || {}, mergedDelta, { aliasIndex });
-  setState(sessionId, turnNo, next);
+  next.turn_no = turnNo;
+  setState(sessionId, turnNo, next, branchId);
   applied.ledger = true;
 
   /* ---- 未确定项：交给人，不当事实 ---- */
