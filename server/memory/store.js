@@ -32,64 +32,9 @@ import { isFunctionalPredicate } from './predicates.js';
 
 let db = null;
 
-/**
- * 启动前的幂等迁移：旧库的 summaries 是「level / turn_from / turn_to / content」形状，
- * 新代码在 CREATE INDEX 时就会引用 branch_id / covers_turn_to。必须在主 schema exec
- * 之前把它重建成新形状，否则旧库会因为「no such column: branch_id」直接起不来。
- */
-function ensureSummariesSchema(d) {
-  const exists = d.prepare(
-    `SELECT name FROM sqlite_master WHERE type='table' AND name='summaries'`,
-  ).get();
-  if (!exists) return;
-  const cols = d.prepare(`PRAGMA table_info(summaries)`).all().map((c) => c.name);
-  const has = (c) => cols.includes(c);
-  if (has('branch_id') && has('covers_turn_to') && has('text')) return;
-
-  const branch = has('branch_id') ? 'branch_id' : "'main'";
-  const covers = has('covers_turn_to') ? 'covers_turn_to' : (has('turn_to') ? 'turn_to' : '0');
-  const text = has('text') ? 'text' : (has('content') ? 'content' : "''");
-  const prev = has('prev_id') ? 'prev_id' : 'NULL';
-  const token = has('token_count') ? 'token_count' : '0';
-  const created = has('created_at') ? 'created_at' : String(Date.now());
-
-  d.exec('PRAGMA foreign_keys = OFF');
-  d.exec('BEGIN');
-  try {
-    d.exec('ALTER TABLE summaries RENAME TO summaries_legacy');
-    d.exec(`
-      CREATE TABLE summaries (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-        branch_id TEXT NOT NULL DEFAULT 'main',
-        covers_turn_to INTEGER NOT NULL,
-        text TEXT NOT NULL,
-        prev_id INTEGER,
-        token_count INTEGER NOT NULL DEFAULT 0,
-        created_at INTEGER NOT NULL,
-        UNIQUE(session_id, branch_id, covers_turn_to)
-      )
-    `);
-    d.exec(`
-      INSERT OR REPLACE INTO summaries
-        (session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
-      SELECT session_id, ${branch}, ${covers}, ${text}, ${prev}, ${token}, ${created}
-      FROM summaries_legacy
-    `);
-    d.exec('DROP TABLE summaries_legacy');
-    d.exec('COMMIT');
-  } catch (err) {
-    d.exec('ROLLBACK');
-    throw err;
-  } finally {
-    d.exec('PRAGMA foreign_keys = ON');
-  }
-}
-
 export function getDb() {
   if (db) return db;
   db = new DatabaseSync(config.storage.dbPath);
-  ensureSummariesSchema(db);
   db.exec(`
     PRAGMA journal_mode = WAL;
     PRAGMA foreign_keys = ON;
@@ -118,6 +63,9 @@ export function getDb() {
       turn_count INTEGER NOT NULL DEFAULT 0,
       usage_json TEXT,
       status TEXT NOT NULL DEFAULT 'active',
+      branch_id TEXT NOT NULL DEFAULT 'main',
+      anchor_id TEXT,
+      scene_seq INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       updated_at INTEGER NOT NULL
     );
@@ -125,6 +73,7 @@ export function getDb() {
     CREATE TABLE IF NOT EXISTS turns (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
+      branch_id TEXT NOT NULL DEFAULT 'main',
       turn_no INTEGER NOT NULL,
       kind TEXT NOT NULL,                 -- player | narrator | system
       content TEXT NOT NULL,
@@ -134,6 +83,8 @@ export function getDb() {
       token_count INTEGER NOT NULL DEFAULT 0,
       usage_json TEXT,
       meta_json TEXT,
+      branch_taken TEXT,
+      edited INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL,
       UNIQUE(session_id, turn_no, kind)
     );
@@ -416,118 +367,13 @@ export function getDb() {
       key TEXT PRIMARY KEY,
       value TEXT NOT NULL
     );
-  `);
-  migrate(db);
-  return db;
-}
 
-/** 轻量迁移：为旧库补齐后续版本新增的列（幂等）。 */
-function migrate(d) {
-  const colsOf = (table) => d.prepare(`PRAGMA table_info(${table})`).all();
-  const addColumn = (table, column, ddl) => {
-    if (!colsOf(table).some((c) => c.name === column)) {
-      d.exec(`ALTER TABLE ${table} ADD COLUMN ${ddl}`);
-    }
-  };
-  addColumn('turns', 'edited', 'edited INTEGER NOT NULL DEFAULT 0');
-  addColumn('turns', 'branch_taken', 'branch_taken TEXT');
-  addColumn('turns', 'usage_json', 'usage_json TEXT');
-  addColumn('turns', 'branch_id', "branch_id TEXT NOT NULL DEFAULT 'main'");
-  addColumn('sessions', 'world_id', 'world_id TEXT');
-  addColumn('sessions', 'usage_json', 'usage_json TEXT');
-  addColumn('sessions', 'branch_id', "branch_id TEXT NOT NULL DEFAULT 'main'");
-  addColumn('sessions', 'anchor_id', 'anchor_id TEXT');
-  addColumn('sessions', 'scene_seq', 'scene_seq INTEGER NOT NULL DEFAULT 0');
-  addColumn('sessions', 'card_snapshot_json', 'card_snapshot_json TEXT');
-  addColumn('sessions', 'world_version', 'world_version INTEGER');
-  addColumn('worlds', 'version', 'version INTEGER NOT NULL DEFAULT 1');
-
-  // 旧会话没有创建时快照，只能以迁移当刻的卡片回填；至少从此以后不再被编辑追溯改写。
-  d.exec(`
-    UPDATE sessions
-    SET card_snapshot_json = (SELECT w.card_json FROM worlds w WHERE w.id = sessions.world_id),
-        world_version = (SELECT w.version FROM worlds w WHERE w.id = sessions.world_id)
-    WHERE card_snapshot_json IS NULL AND world_id IS NOT NULL
-      AND EXISTS (SELECT 1 FROM worlds w WHERE w.id = sessions.world_id)
-  `);
-
-  // 账本/关系/线索从会话级改为分支级。旧表的唯一约束会阻止同一对人物
-  // 在不同分支各存一行，所以必须重建，而不是只加一列。
-  rebuildBranchTable(d, 'states', {
-    columns: ['session_id', 'branch_id', 'turn_no', 'state_json', 'created_at'],
-    select: `session_id, 'main', turn_no, state_json, created_at FROM states_old`,
-    ddl: `CREATE TABLE states (
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      branch_id TEXT NOT NULL DEFAULT 'main',
-      turn_no INTEGER NOT NULL,
-      state_json TEXT NOT NULL,
-      created_at INTEGER NOT NULL,
-      PRIMARY KEY (session_id, branch_id, turn_no)
-    )`,
-  });
-  rebuildBranchTable(d, 'relations', {
-    columns: ['session_id', 'branch_id', 'from_name', 'to_name', 'kind', 'sentiment', 'note', 'turn_no', 'updated_at'],
-    select: `session_id, 'main', from_name, to_name, kind, sentiment, note, turn_no, updated_at FROM relations_old`,
-    ddl: `CREATE TABLE relations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      branch_id TEXT NOT NULL DEFAULT 'main',
-      from_name TEXT NOT NULL,
-      to_name TEXT NOT NULL,
-      kind TEXT NOT NULL DEFAULT '',
-      sentiment REAL NOT NULL DEFAULT 0,
-      note TEXT NOT NULL DEFAULT '',
-      turn_no INTEGER NOT NULL DEFAULT 0,
-      updated_at INTEGER NOT NULL,
-      UNIQUE(session_id, branch_id, from_name, to_name)
-    )`,
-  });
-  rebuildBranchTable(d, 'threads', {
-    columns: ['session_id', 'branch_id', 'title', 'status', 'weight', 'planted_turn', 'resolved_turn', 'note', 'updated_at'],
-    select: `session_id, 'main', title, status, weight, planted_turn, resolved_turn, note, updated_at FROM threads_old`,
-    ddl: `CREATE TABLE threads (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
-      branch_id TEXT NOT NULL DEFAULT 'main',
-      title TEXT NOT NULL,
-      status TEXT NOT NULL DEFAULT 'open',
-      weight REAL NOT NULL DEFAULT 0.5,
-      planted_turn INTEGER NOT NULL DEFAULT 0,
-      resolved_turn INTEGER,
-      note TEXT NOT NULL DEFAULT '',
-      updated_at INTEGER NOT NULL,
-      UNIQUE(session_id, branch_id, title)
-    )`,
-  });
-  d.exec(`
     CREATE INDEX IF NOT EXISTS idx_states_branch ON states(session_id, branch_id, turn_no);
     CREATE INDEX IF NOT EXISTS idx_relations_branch ON relations(session_id, branch_id, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_threads_branch ON threads(session_id, branch_id, status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_world ON sessions(world_id, updated_at DESC);
   `);
-}
-
-/** 旧表没有 branch_id 时，原地重建并保留旧数据（默认归入 main 分支）。 */
-function rebuildBranchTable(d, table, { columns, select, ddl }) {
-  if (colsOf(d, table).some((c) => c.name === 'branch_id')) return;
-  d.exec('PRAGMA foreign_keys = OFF');
-  d.exec('BEGIN');
-  try {
-    d.exec(`ALTER TABLE ${table} RENAME TO ${table}_old`);
-    d.exec(ddl);
-    d.exec(`INSERT INTO ${table} (${columns.join(', ')}) SELECT ${select}`);
-    d.exec(`DROP TABLE ${table}_old`);
-    d.exec('COMMIT');
-  } catch (err) {
-    d.exec('ROLLBACK');
-    throw err;
-  } finally {
-    d.exec('PRAGMA foreign_keys = ON');
-  }
-}
-
-function colsOf(d, table) {
-  return d.prepare(`PRAGMA table_info(${table})`).all();
+  return db;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
