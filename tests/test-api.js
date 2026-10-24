@@ -42,7 +42,9 @@ try {
 console.log('\n=== 配置 ===');
 {
   const { data } = await req('GET', '/api/config');
-  ok(data.defaults?.archivist_effort === 'medium', '配置暴露 archivist 档位');
+  // 档位会被本地 .env 覆盖（如 max），只断言暴露且是合法档位。
+  ok(['low', 'medium', 'high', 'max'].includes(data.defaults?.archivist_effort), '配置暴露 archivist 档位');
+  ok(['low', 'medium', 'high', 'max'].includes(data.defaults?.narrator_effort), '配置暴露 narrator 档位');
   ok(data.budget?.system === 3200, '配置暴露 v4 四层预算');
   ok(!('lore' in (data.budget || {})), '预算里没有 lore 层');
   ok(!('director' in (data.budget || {})), '预算里没有 director 层');

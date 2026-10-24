@@ -1,5 +1,5 @@
 {
-  "name": "ai-roleplay",
+  "name": "narrative-studio",
   "version": "1.0.0",
   "description": "叙事台 — 世界卡驱动的长篇剧情演绎工作台（v4 上下文引擎 + 多 Agent 记忆）",
   "type": "module",

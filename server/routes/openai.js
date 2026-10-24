@@ -23,8 +23,8 @@ export const openaiRouter = Router();
 
 const VIRTUAL_MODELS = [
   { id: config.upstream.model, object: 'model', created: 1700000000, owned_by: 'stepfun' },
-  { id: 'roleplay-narrator', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
-  { id: 'roleplay-branch', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
+  { id: 'roleplay-narrator', object: 'model', created: 1700000000, owned_by: 'narrative-studio' },
+  { id: 'roleplay-branch', object: 'model', created: 1700000000, owned_by: 'narrative-studio' },
   { id: 'step-router-v1', object: 'model', created: 1700000000, owned_by: 'stepfun' },
 ];
 

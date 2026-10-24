@@ -12,7 +12,7 @@ import { $, el, clear, formatTime, firstChar } from './util.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
 import { navigate, matchRoute, openActionSheet, confirmDialog, toast, openPopover } from './app.js';
-import { ui, cycleTheme } from './store.js';
+import { ui, setTheme, applyWithRipple } from './store.js';
 import { hueGlyph } from './ui-kit.js';
 
 const railEl = $('#rail');
@@ -71,12 +71,21 @@ function renderRail() {
   railEl.appendChild(items);
 
   const foot = el('div.rail-foot');
+  // 快捷切换只在深浅两档间翻转（跟随系统留给设置页），图标对应当前外观。
+  const resolved = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   foot.appendChild(el('button.rail-item', {
     type: 'button', title: '切换外观', 'aria-label': '切换外观',
-    onclick: () => { cycleTheme(); renderRail(); },
+    onclick: (e) => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      const r = e.currentTarget.getBoundingClientRect();
+      applyWithRipple(
+        () => { setTheme(next); renderRail(); },
+        r.left + r.width / 2, r.top + r.height / 2,
+      );
+    },
   },
-    icon(ui.get().theme === 'dark' ? 'sun' : ui.get().theme === 'light' ? 'moon' : 'palette', { size: 17 }),
-    el('span.rail-item-label', {}, ui.get().theme === 'dark' ? '浅色' : ui.get().theme === 'light' ? '深色' : '跟随'),
+    icon(resolved === 'dark' ? 'sun' : 'moon', { size: 17 }),
+    el('span.rail-item-label', {}, resolved === 'dark' ? '浅色' : '深色'),
   ));
   railEl.appendChild(foot);
 }
@@ -325,7 +334,7 @@ export function closeDrawer() {
       const route = matchRoute();
       if (route.name !== 'world' && route.name !== 'play' && route.name !== 'worlds') subbarEl.hidden = true;
     }
-  }, 240);
+  }, 420);
 }
 
 scrimEl.addEventListener('click', closeDrawer);

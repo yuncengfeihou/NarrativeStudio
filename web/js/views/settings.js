@@ -10,7 +10,7 @@ import { el, clear, fmtNumber, fmtTokens } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, openSheet } from '../app.js';
-import { ui, setTheme, setPref, applyAppearancePrefs } from '../store.js';
+import { ui, setTheme, setPref, applyAppearancePrefs, applyWithRipple } from '../store.js';
 import {
   FONT_PRESETS, COMMON_FONTS, fontDisplayName, fontStack,
   listLocalFonts, supportsLocalFonts,
@@ -53,6 +53,8 @@ export default {
     let activeSection = 'appearance';
     let sectionNodes = [];
     let navButtons = [];
+    let spyPaused = false;   // 点击导航后的平滑滚动期间，暂停滚动联动
+    let spyToken = 0;
     let fontRowRefs = [];
     let fontPreview = null;
 
@@ -137,11 +139,23 @@ export default {
     function scrollToSection(id) {
       const target = scroll.querySelector(`#settings-${id}`);
       if (!target) return;
+      // 点击导航的平滑滚动期间暂停 scroll-spy：竖线直接落位到目标分组，
+      // 不跟着途经的中间分组逐项跳动（否则看起来在上下抖动）。
+      const token = ++spyToken;
+      spyPaused = true;
+      const release = () => {
+        if (token !== spyToken) return;  // 期间又点了别的分组，让新的一次接管
+        spyPaused = false;
+        onScroll();
+      };
+      scroll.addEventListener('scrollend', release, { once: true });
+      setTimeout(release, 900);  // scrollend 缺席时的兜底
       // scroll-margin-top 在窄屏会为吸顶的分组导航留出高度。
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function onScroll() {
+      if (spyPaused) return;
       if (!sectionNodes.length) return;
       const edge = scroll.getBoundingClientRect().top + 44;
       let current = sectionNodes[0].dataset.section;
@@ -171,9 +185,12 @@ export default {
         const btn = el('button.theme-card', {
           type: 'button',
           class: current === value ? 'is-active' : '',
-          onclick: () => {
-            setTheme(value);
-            cards.forEach((c, i) => c.classList.toggle('is-active', options[i][0] === value));
+          onclick: (e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            applyWithRipple(() => {
+              setTheme(value);
+              cards.forEach((c, i) => c.classList.toggle('is-active', options[i][0] === value));
+            }, r.left + r.width / 2, r.top + r.height / 2);
             toast(value === 'dark' ? '已切换深色' : value === 'light' ? '已切换浅色' : '跟随系统');
           },
         },
@@ -521,7 +538,11 @@ export default {
         card.appendChild(infoRow('史官推理强度', effortLabel(cfg.defaults?.archivist_effort), '每轮把正文抽成结构化记忆'));
         card.appendChild(infoRow('上下文软目标', `${fmtNumber(cfg.limits?.context_soft_tokens || 52000)} tok`, '每轮装配的目标体积'));
         card.appendChild(infoRow('上下文硬上限', `${fmtNumber(cfg.limits?.context_max_tokens || 200000)} tok`, '绝对安全线'));
-        card.appendChild(infoRow('逐字保留回合', String(cfg.defaults?.recent_raw_turns ?? 4), '一个回合 = 你的行动 + 旁白'));
+        card.appendChild(infoRow(
+          '原文沉淀水位',
+          `${fmtNumber(cfg.defaults?.summary_low_tokens ?? 8000)} / ${fmtNumber(cfg.defaults?.summary_high_tokens ?? 12000)} tok`,
+          `超过高水位就把最旧一批压进摘要，至少保留 ${cfg.defaults?.summary_min_raw_turns ?? 4} 轮逐字`,
+        ));
         card.appendChild(infoRow('校勘间隔', `每 ${cfg.defaults?.continuity_every ?? 10} 轮`, '查矛盾、知识越界、别名冲突'));
         card.appendChild(infoRow('世界呼吸间隔', `每 ${cfg.defaults?.world_tick_every ?? 8} 轮`, '推演不在场角色的行动'));
       }
@@ -534,7 +555,7 @@ export default {
           el('div.group-title', {}, '各层 token 配额'),
           el('div.group-card', {},
             infoRow('系统层', `${fmtTokens(b.system)} tok`, '演绎契约 + 命题 + 宪章 + 世界索引'),
-            infoRow('最近原文', `${fmtTokens(b.recent)} tok`, '逐字保留的最近若干轮'),
+            infoRow('最近原文', `${fmtTokens(b.recent)} tok`, '摘要边界之后的全部逐字原文（由沉淀水位控制）'),
             infoRow('场记单', `${fmtTokens(b.scene)} tok`, '当前这一刻的世界状态，每场渲染一次'),
             infoRow('本轮输入', `${fmtTokens(b.current)} tok`, '你的行动 + 本场指令 + 尾注'),
           ),

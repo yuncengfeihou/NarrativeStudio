@@ -9,7 +9,7 @@ import { el, clear, formatTime } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, openSheet } from '../app.js';
-import { hueCover, hueGlyph } from '../ui-kit.js';
+import { hueCover, hueGlyph, slidingThumb } from '../ui-kit.js';
 
 export default {
   id: 'world',
@@ -166,9 +166,11 @@ export default {
             scroll.querySelectorAll('.editor-pane').forEach((p) => {
               p.classList.toggle('is-active', p.dataset.pane === key);
             });
+            syncThumb();
           },
         }, icon(iconName, { size: 13 }), label));
       }
+      const syncThumb = slidingThumb(bar, '.editor-tab');
       return bar;
     }
 

@@ -220,8 +220,8 @@ export function openSheet(opts = {}) {
     sheet.classList.remove('is-open');
     lockScroll(false);
     document.removeEventListener('keydown', onKey);
-    setTimeout(() => { veil.remove(); sheet.remove(); }, 220);
-  }
+    setTimeout(() => { veil.remove(); sheet.remove(); }, 460);
+  };
 
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
@@ -258,7 +258,7 @@ export function openActionSheet(opts = {}) {
       sheet.classList.remove('is-open');
       lockScroll(false);
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => { veil.remove(); sheet.remove(); }, 220);
+      setTimeout(() => { veil.remove(); sheet.remove(); }, 400);
       resolve(result);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(null); };
@@ -309,7 +309,7 @@ export function confirmDialog({ title = '', message = '', confirmText = '确定'
       dialog.classList.remove('is-open');
       lockScroll(false);
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => { veil.remove(); dialog.remove(); }, 180);
+      setTimeout(() => { veil.remove(); dialog.remove(); }, 380);
       resolve(result);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(false); };
@@ -355,7 +355,7 @@ export function openPopover(anchor, items, opts = {}) {
       veil.classList.remove('is-open');
       pop.remove();
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => veil.remove(), 160);
+      setTimeout(() => veil.remove(), 320);
       resolve(v);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(null); };

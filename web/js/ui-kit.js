@@ -32,6 +32,55 @@ export function hueCover(hue) {
 }
 
 /* =========================================================================
+ * 滑动指示条
+ * ========================================================================= */
+
+/**
+ * 在导航/标签容器里放一枚绝对定位的滑片（.tabs-thumb），
+ * 每次 update() 测量 `.is-active` 项的位置与尺寸，用弹簧曲线滑过去。
+ * 容器需要 position 非 static（sticky / relative 均可）；横向滚动容器也支持。
+ * 首次定位直接落位，不播动画。
+ *
+ * @param {HTMLElement} container  指示条容器（即标签栏本体）
+ * @param {string} itemSelector    标签项选择器，如 '.editor-tab'
+ * @returns {() => void} update  切换 is-active 后调用
+ */
+export function slidingThumb(container, itemSelector) {
+  const thumb = el('span.tabs-thumb');
+  container.appendChild(thumb);
+  let armed = false;
+
+  function place() {
+    const active = container.querySelector(`${itemSelector}.is-active`)
+      || container.querySelector(itemSelector);
+    if (!active) { thumb.style.opacity = '0'; return; }
+    const cb = container.getBoundingClientRect();
+    const b = active.getBoundingClientRect();
+    if (!armed) thumb.style.transition = 'none';
+    thumb.style.opacity = '1';
+    thumb.style.top = `${b.top - cb.top + container.scrollTop}px`;
+    thumb.style.left = `${b.left - cb.left + container.scrollLeft}px`;
+    thumb.style.width = `${b.width}px`;
+    thumb.style.height = `${b.height}px`;
+    if (!armed) {
+      void thumb.offsetWidth;  // 强制回流，让首帧落位不产生过渡
+      thumb.style.transition = '';
+      // 挂载前测到的是 0；只有真正进文档后的首次定位才算「落位」。
+      armed = container.isConnected;
+    }
+  }
+
+  place();
+  // 挂载后的校准：rAF 需要渲染帧，页面不可见/无帧时用宏任务兜底。
+  requestAnimationFrame(place);
+  setTimeout(place, 0);
+  if (typeof ResizeObserver === 'function') {
+    new ResizeObserver(place).observe(container);
+  }
+  return place;
+}
+
+/* =========================================================================
  * 环形进度
  * ========================================================================= */
 

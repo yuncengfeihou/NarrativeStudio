@@ -9,7 +9,7 @@ import { el, clear, charCount } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, showLoading, hideLoading, openSheet, openActionSheet } from '../app.js';
-import { hueCover, hueGlyph } from '../ui-kit.js';
+import { hueCover, hueGlyph, slidingThumb } from '../ui-kit.js';
 
 export default {
   id: 'world-edit',
@@ -229,8 +229,6 @@ export default {
 
       if (resizeHandler) window.removeEventListener('resize', resizeHandler);
       const bar = el('div.editor-tabs.has-indicator', { role: 'tablist', 'aria-label': '编辑分区' });
-      const indicator = el('span.editor-tab-indicator');
-      const buttons = [];
       tabBadges = {};
 
       for (const [key, label, iconName] of items) {
@@ -244,19 +242,10 @@ export default {
           class: activeTab === key ? 'is-active' : '',
           onclick: () => activateTab(key),
         }, icon(iconName, { size: 13 }), label, badge);
-        buttons.push(btn);
         bar.appendChild(btn);
       }
-      bar.appendChild(indicator);
 
-      moveTabIndicator = () => {
-        const active = buttons.find((b) => b.dataset.tab === activeTab);
-        if (!active) return;
-        const barRect = bar.getBoundingClientRect();
-        const rect = active.getBoundingClientRect();
-        indicator.style.width = `${Math.max(12, rect.width - 8)}px`;
-        indicator.style.transform = `translateX(${rect.left - barRect.left + 4}px)`;
-      };
+      moveTabIndicator = slidingThumb(bar, '.editor-tab');
 
       resizeHandler = () => requestAnimationFrame(moveTabIndicator);
       window.addEventListener('resize', resizeHandler);

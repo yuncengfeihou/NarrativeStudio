@@ -1,5 +1,8 @@
 /* =========================================================================
  * views.css — 世界卡列表 / 世界卡详情 / 编辑器 / 设置
+ *
+ * 视觉回归「白瓷朱砂」：瓷面卡片、hairline、衬线标题；
+ * 交互保留弹簧过渡（悬停上浮、标签滑片、勾选弹出）。
  * ========================================================================= */
 
 /* =========================================================================
@@ -63,7 +66,7 @@
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--ok) 22%, transparent);
 }
 .home-actions { display: flex; flex-direction: column; gap: 8px; min-width: 132px; flex: none; }
-.home-actions .btn { height: 40px; border-radius: var(--r-lg); font-weight: 600; }
+.home-actions .btn { height: 40px; width: 100%; border-radius: var(--r-lg); font-weight: 600; }
 .home-actions .btn-primary { box-shadow: 0 2px 12px color-mix(in srgb, var(--accent) 26%, transparent); }
 
 .home-section-head {
@@ -78,12 +81,14 @@
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  padding: 3px 2px;
+  padding: 3px 8px;
+  border-radius: var(--r-sm);
   font-size: var(--fs-caption);
   font-weight: 500;
   color: var(--accent);
+  transition: background-color var(--dur) var(--ease);
 }
-.home-section-link:hover { color: var(--accent-hover); text-decoration: underline; }
+.home-section-link:hover { color: var(--accent-hover); background: var(--accent-soft); text-decoration: none; }
 
 @media (max-width: 760px) {
   .home-welcome { grid-template-columns: auto minmax(0, 1fr); padding: 18px; }
@@ -119,12 +124,12 @@
   text-align: left;
   cursor: pointer;
   transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
-    transform var(--dur) var(--ease);
+    transform var(--dur) var(--ease-soft);
 }
 .world-row:hover {
   border-color: color-mix(in srgb, var(--accent) 35%, var(--line-strong));
   box-shadow: var(--sh-md);
-  transform: translateY(-1px);
+  transform: translateY(-2px);
 }
 .world-row:active { transform: translateY(0); }
 
@@ -295,7 +300,7 @@
 .wk-tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
 .wk-hero-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
 
-/* 详情页标签：分段控件，选中项是白瓷小片 */
+/* 详情页标签：分段控件，选中滑片（.tabs-thumb）由 ui-kit 注入并滑动 */
 .wk .editor-tabs {
   gap: 4px;
   padding: 4px;
@@ -305,9 +310,11 @@
   background: var(--paper-sunken);
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
-  position: static;
+  position: relative;
 }
 .wk .editor-tab {
+  position: relative;
+  z-index: 1;
   padding: 6px 12px;
   border-radius: var(--r-sm);
   background: transparent;
@@ -317,10 +324,10 @@
 }
 .wk .editor-tab:hover { background: color-mix(in srgb, var(--paper-raised) 60%, transparent); color: var(--ink); }
 .wk .editor-tab.is-active {
-  background: var(--paper-raised);
+  background: transparent;
   color: var(--accent);
   font-weight: 600;
-  box-shadow: var(--sh-sm);
+  box-shadow: none;
 }
 .wk .editor-tab.is-active::after { display: none; }
 
@@ -376,8 +383,8 @@
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   cursor: pointer;
-  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease),
-    box-shadow var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease),
+    transform var(--dur) var(--ease-soft);
   text-align: left;
   width: 100%;
 }
@@ -385,6 +392,7 @@
   background: var(--paper-raised);
   border-color: var(--line-strong);
   box-shadow: var(--sh-sm);
+  transform: translateY(-1px);
 }
 
 .cast-face {
@@ -654,7 +662,7 @@
   color: #fff;
   opacity: 0;
   transform: scale(0.7);
-  transition: opacity var(--dur) var(--ease), transform var(--dur) var(--ease-out);
+  transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-pop);
 }
 .editor-cover:hover .editor-cover-tip,
 .editor-cover:focus-visible .editor-cover-tip { opacity: 1; transform: none; }
@@ -707,6 +715,7 @@
 .editor-tabs::-webkit-scrollbar { display: none; }
 .editor-tab {
   position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -718,15 +727,13 @@
   letter-spacing: 0;
   color: var(--ink-2);
   white-space: nowrap;
-  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease),
-    box-shadow var(--dur) var(--ease);
+  transition: color var(--dur) var(--ease), background-color var(--dur) var(--ease);
 }
 .editor-tab:hover { color: var(--ink); background: color-mix(in srgb, var(--paper-raised) 55%, transparent); }
 .editor-tab.is-active {
   color: var(--accent-ink);
-  background: var(--paper-raised);
+  background: transparent;
   font-weight: 600;
-  box-shadow: var(--sh-sm);
 }
 .editor-tabs.has-indicator .editor-tab.is-active::after { display: none; }
 /* 标签已改为胶囊选中态；指示条代码仍由 world-edit 维护，这里不再渲染。 */
@@ -744,6 +751,7 @@
   line-height: 13px;
   text-align: center;
   font-variant-numeric: tabular-nums;
+  transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .tab-count[hidden] { display: none; }
 .editor-tab.is-active .tab-count {
@@ -830,6 +838,7 @@
   border: 1px solid var(--line-strong);
   border-radius: var(--r-md);
   cursor: text;
+  transition: border-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
 }
 .tagbox:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
 .tagbox input {
@@ -844,8 +853,10 @@
   color: currentColor;
   opacity: 0.55;
   padding: 0;
+  transition: opacity var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .tag-x:hover { opacity: 1; }
+.tag-x:active { transform: scale(0.85); }
 
 /* 角色卡编辑 */
 .cast-list { display: flex; flex-direction: column; gap: 7px; }
@@ -868,7 +879,7 @@
 .cast-head-text { flex: 1; min-width: 0; }
 .cast-tools { display: flex; align-items: center; gap: 5px; flex: none; }
 .cast-always-label { font-size: 10px; color: var(--ink-4); }
-.cast-collapse svg { transition: transform var(--dur) var(--ease); }
+.cast-collapse svg { transition: transform var(--dur-slow) var(--ease-soft); }
 .cast-collapse.is-collapsed svg { transform: rotate(-90deg); }
 .cast-avatar {
   display: flex;
@@ -944,9 +955,10 @@
   border-radius: var(--r-md);
   font-size: var(--fs-label);
   color: var(--ink-3);
-  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease);
+  transition: border-color var(--dur) var(--ease), color var(--dur) var(--ease),
+    background-color var(--dur) var(--ease);
 }
-.cast-add:hover { border-color: var(--accent); color: var(--accent); }
+.cast-add:hover { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
 
 /* 宪章编辑 */
 .charter-empty {
@@ -1389,7 +1401,7 @@
   color: var(--on-accent);
   opacity: 0;
   transform: scale(0.65);
-  transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-out);
+  transition: opacity var(--dur) var(--ease), transform var(--dur-slow) var(--ease-pop);
 }
 .theme-card.is-active .theme-check { opacity: 1; transform: none; }
 
@@ -1607,7 +1619,7 @@
 
 @media (max-width: 900px) {
   .worlds-list { gap: 10px; }
-  .world-row { grid-template-columns: 60px minmax(0, 1fr); padding: 10px 12px 10px 10px; }
+  .world-row { grid-template-columns: 60px minmax(0, 1fr); padding:  10px 12px 10px 10px; }
   .world-cover { width: 60px; height: 80px; padding: 8px; }
   .world-cover-glyph { font-size: 24px; }
   .world-facts { display: none; }
