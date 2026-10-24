@@ -19,6 +19,7 @@ import {
   deleteWorld, getCodex, getWorld, listSessions, listWorlds, saveWorld, setCodexPinned,
 } from '../memory/store.js';
 import { normalizeCard, renderCardText } from '../world/schema.js';
+import { lintCard } from '../world/lint.js';
 import { createSessionWithSettings } from '../agents/orchestrator.js';
 
 export const worldsRouter = Router();
@@ -76,6 +77,13 @@ worldsRouter.get('/worlds/:id', (req, res) => {
     codex: getCodex(world.id),
     sessions: listSessions({ worldId: world.id }),
   });
+});
+
+/** 卡级静态体检：断链、别名冲突、包含环、孤立辞书、单值声明冲突。 */
+worldsRouter.get('/worlds/:id/lint', (req, res) => {
+  const world = getWorld(req.params.id);
+  if (!world) return res.status(404).json({ error: { message: 'world not found' } });
+  res.json(lintCard(normalizeCard(world.card || {})));
 });
 
 worldsRouter.get('/worlds/:id/export', (req, res) => {

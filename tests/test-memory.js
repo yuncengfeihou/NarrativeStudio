@@ -441,6 +441,16 @@ console.log('\n=== 世界状态：变更校验 ===');
   eq(introCodex.op, 'introduce', 'introduce 放行新实体');
   eq(introCodex.entity_id, '听雨楼', '新实体 id 由名字生成');
 
+  ok(arch.sanitizeChange(
+    { kind: 'codex', id: '玉佩', path: 'summary', op: 'set', value: '改写定义' },
+    { aliasIndex: idx },
+  ) === null, '已有辞书定义不可改写');
+  const codexRuntime = arch.sanitizeChange(
+    { kind: 'codex', id: '玉佩', path: 'status', op: 'set', value: '发绿光' },
+    { aliasIndex: idx },
+  );
+  eq(codexRuntime.path, 'status', '辞书运行态可写');
+
   const player = arch.sanitizeChange(
     { kind: 'player', id: '伍卿', path: 'knowledge.knows', op: 'add', value: '凌玥认识他' },
     { aliasIndex: idx, playerName: '伍卿' },
@@ -492,6 +502,18 @@ console.log('\n=== 世界状态：落库与投影 ===');
   const ajiu = eff.cast.find((c) => c.id === 'a-jiu');
   ok(ajiu.knowledge.knows.includes('A'), '数组 add 逐项写入');
   ok(ajiu.knowledge.knows.includes('B'), '数组 add 不拼成一个字符串');
+
+  // 辞书运行态进入 effective world，而不是改写定义。
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'codex', entity_id: 'ling-fu',
+    path: 'status', op: 'set', value: '全府戒严', turn: 5,
+  });
+  const effCodex = effective.buildEffectiveWorld(
+    schema.normalizeCard({ title: 't', codex: [{ id: 'ling-fu', name: '凌府', type: 'place', summary: '主宅' }] }),
+    store.getWorldState(sid, { branchId: 'main', atTurn: 5 }),
+  );
+  eq(effCodex.codex.find((e) => e.id === 'ling-fu').status, '全府戒严', '辞书运行态进入投影');
+  eq(effCodex.codex.find((e) => e.id === 'ling-fu').summary, '主宅', '定义不被运行态覆盖');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

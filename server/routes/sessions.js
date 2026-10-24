@@ -39,6 +39,7 @@ sessionsRouter.get('/config', (req, res) => {
       branch_effort: config.agents.branch.reasoningEffort,
       recent_raw_turns: config.context.recentRawTurns,
       continuity_every: config.context.continuityEvery,
+      continuity_max_applied: config.context.continuityMaxApplied,
       world_tick_every: config.context.worldTickEvery,
     },
     limits: {

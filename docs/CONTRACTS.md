@@ -90,15 +90,24 @@ ai-roleplay/
   codex: [{
     id, type: 'place|institution|item|faction|concept|character|custom',
     name, aliases[], tags[], summary,
-    facets: { sensory, rules[], consequences[], history },
+    facets: { sensory, rules[], consequences, history },
     links[], reveal: 'public|rumor|secret', canon_from, detail, pinned,
+    parent_id,           // v5：地点/机构包含关系（可选）
+    sources: [{ kind, ref, title, chapter, offset, quote, turn_no }],
   }],
   timeline: [{ id, when, where, what, who[], source, canon: 'past|future|branch' }],
   anchors: [{ id, label, after_event, snapshot, opening_seed, note }],
+  // v5 图谱字段（可选）；没有时由 server/world/graph.js 从 relations/links/parent_id 推导
+  edges: [{ from, to, kind, directed, weight, visibility, note }],
+  claims: [{ subject, predicate, object:{kind,id,text}, cardinality:'one|many', visibility, validity }],
   player: { mode: 'original|canon', canon_character, name, …, knowledge },
   author_notes: [{ text, scope: 'always|scene|session' }],
 }
 ```
+
+**辞书图谱**：`buildWorldGraph(card)` 把 cast/codex 投影成统一实体图；同名 cast/codex 合并为
+一个节点（`mergedCodexIds`），索引与场记单不再重复。边来自 `cast.relations`、`codex.links`、
+`codex.parent_id` 与显式 `card.edges`。图只读、纯函数，不写库。
 
 **模板快照**：`worlds.version` 在每次 `saveWorld()`（含辞书钉选）时递增。
 会话创建时把整张卡写入 `sessions.card_snapshot_json` 并记录 `world_version`；
@@ -163,6 +172,10 @@ summaries(session_id, branch_id, covers_turn_to, text, prev_id, token_count, cre
 身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas)` 把
 模板与增量投影成当轮有效的世界；上下文引擎只读投影结果，永远不把运行期状态写回 `card_json`。
 
+**辞书定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有条目运行期不可写
+（`CODEX_CANON_PATHS`）；运行期只写 `status / condition / access / open_to / owner_id / location_id /
+reveal / facets.sensory` 与列表路径。新条目第一次 `introduce` 时可以一次写清定义。
+
 **断言语义**：只有**单值谓词**（位于 / 是 / 曾经是）在「同主同谓、对象不同、有效期重叠」时
 把旧断言 `status='invalidated'` 并记 `valid_to`，**不删除**；多值谓词（知道 / 拥有 / 想要…）
 的多个对象可以并存。基数表在 `server/memory/predicates.js`。
@@ -193,18 +206,36 @@ linkEntities(text, aliasIndex)     // -> {cast:[], codex:[]} 最长匹配、不�
 renderCardText(card)               // 纯文本导出（时间线标 canon 供人看）
 ```
 
+## 辞书图谱接口（纯函数）
+
+```js
+import {
+  buildWorldGraph, graphNeighbors, graphAncestors, graphChildren, hasContainment,
+} from './world/graph.js';
+import { lintCard } from './world/lint.js';
+
+buildWorldGraph(card)
+// -> { entities:Map, edges[], aliasToId:Map, mergedCodexIds:Set,
+//      codexById:Map, castById:Map, adjacency:Map, resolve(ref) }
+graphNeighbors(graph, ids, { depth })   // -> Set<entityId>（1 跳/多跳邻域）
+graphAncestors(graph, id) / graphChildren(graph, id)
+lintCard(card)                          // -> {issues:[{severity,code,message,ids}], counts}
+```
+
 ## Scene Sheet 接口（纯函数）
 
 ```js
-import { renderWorldIndex, selectCodex, renderSceneSheet } from './world/scene-sheet.js';
+import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet } from './world/scene-sheet.js';
 
-renderWorldIndex(card, capTokens)                  // 人物表；超配额降级为只留名字
-selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlaceId })
+renderWorldIndex(card, capTokens, { skipIds })     // 平铺索引；超配额降级为只留名字
+renderWorldTree(card, capTokens, { skipIds, currentPlaceId })
+  // 有 parent_id 时按包含关系折叠；没有时退回 renderWorldIndex
+selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlaceId, skipIds })
   // -> [{entry, score, why[]}]  实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20
-  // currentPlaceId 只认账本 place_id，不把所有被提及的地点都标成「当前地点」
-renderSceneSheet({ ledger, present, relations, threads, codex, voices, echoes, directive, capTokens })
-  // -> {text, meta}  按 when/cast/pressure/threads/relations/knowledge/directive/codex/echoes 顺序装配
-  // meta 额外记录 kept[] / dropped[] / codex_rendered（候选 ≠ 实际渲染）
+  // currentPlaceId 只认账本 place_id；skipIds 用于跳过与 cast 合并的 codex
+renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices, echoes, directive, capTokens })
+  // codex = T0 全量，codexBrief = T1 一句
+  // -> {text, meta}  meta 记录 kept[] / dropped[] / codex_rendered / codex_brief_rendered
 ```
 
 ## Context Engine 接口
@@ -217,17 +248,19 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 // retrieval = { text, queries, entries } | null   // 模型主动检索的辞书全文（当拍）
 // -> { messages, budget:{system,summary,recent,scene,retrieval,current,total}, state, ledger, anchor,
 //      recentTurns, echoes, meta:{present, mentioned, theme_tags, codex, codex_candidates,
-//                                 codex_rendered, codex_dropped, facts, facts_candidates,
-//                                 dropped_sections, branch, summary, retrieval, degraded} }
+//                                 codex_rendered, codex_dropped, codex_brief_candidates,
+//                                 codex_brief_rendered, graph:{entities,edges,merged_codex},
+//                                 facts, facts_candidates, dropped_sections, branch, summary,
+//                                 retrieval, degraded} }
 ```
 
 装配顺序（缓存友好）：**稳定前缀 → 前情提要 → 追加原文 → 易变尾部**
 
 ```
-1. system   契约 + 命题 + 宪章 + 世界索引
+1. system   契约 + 命题 + 宪章 + 世界索引（有 parent_id 时是树形；同名 codex 已去重）
 2. user     【前情提要】滚动摘要（覆盖到 covers_turn_to）
 3. …        最近原文（turn_no > covers_turn_to，player/assistant 交替）
-4. user     场记单（每场变一次）
+4. user     场记单（T0 全量设定 + T1 一句邻域设定；每场变一次）
 5. user     【检索结果】（模型主动查阅的辞书全文，当拍蒸发）
 6. user     本场指令 + 本轮行动 + 尾注
 ```
@@ -298,6 +331,8 @@ runSummarizer({ session, branchId, turnFrom, turnTo, previousSummary, playerName
 // -> {text, turns, chars, usage} | {skipped:true, reason, chars?}
 
 // 辞书检索预检（server/agents/retrieval.js）
+shouldPrecheckRetrieval({ mode, codexCount, minCodex, playerText, branchChoice, card })
+// auto：大卡 + 玩家文本点名了某个 codex 才跑；on/off 强制开关。
 runRetrieval({ card, playerText, ledger, lastNarrative, signal })
 // -> {text, queries, entries:[{id,name,why}], usage} | null
 // parseRetrievalQueries(content) -> string[]（宽容解析，失败返回空数组）
@@ -363,6 +398,7 @@ GET    /api/fonts                         -> {fonts, source}（服务端本机�
 GET    /api/worlds                        -> 摘要列表
 GET    /api/worlds/:id                    -> {world, card, codex, sessions}
 GET    /api/worlds/:id/export             -> 纯文本
+GET    /api/worlds/:id/lint               -> {issues, counts}（断链/别名/环/声明冲突）
 POST   /api/worlds                        body:{id?, title?, card, source?}
 PATCH  /api/worlds/:id
 DELETE /api/worlds/:id

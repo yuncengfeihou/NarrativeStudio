@@ -11,7 +11,28 @@ import { config } from '../config.js';
 import { chat } from '../llm.js';
 import { truncateToTokens } from '../tokens.js';
 import { lookupCodex, renderCodexHit } from '../world/scene-sheet.js';
+import { buildAliasIndex, linkEntities } from '../world/schema.js';
 import { retrievalSystemPrompt, retrievalUserPrompt } from '../prompts/retrieval.js';
+
+/**
+ * 纯函数：这一拍要不要跑检索预检。
+ *
+ * auto 模式下只在大卡且玩家文本真的提到某个辞书实体时跑。这不是「按关键词注入」：
+ * 它只决定要不要花一次模型调用去判断，不决定注入哪段设定。分段模式另有 codex_lookup。
+ */
+export function shouldPrecheckRetrieval({
+  mode = 'auto', codexCount = 0, minCodex = 0, playerText = '', branchChoice = null, card = null,
+} = {}) {
+  if (mode === 'off') return false;
+  if (mode === 'on') return true;
+  if (!(codexCount >= minCodex)) return false;
+  if (!card) return true;
+  const linked = linkEntities(
+    [playerText || '', branchChoice?.description || ''].join('\n'),
+    buildAliasIndex(card),
+  );
+  return (linked.codex || []).length > 0;
+}
 
 function tryParseObject(text) {
   const t = String(text || '').trim();

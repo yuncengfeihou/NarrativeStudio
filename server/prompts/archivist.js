@@ -87,8 +87,10 @@ schema：
   - cast: status / condition / mood / location / goal / one_line / role / aliases；
     knowledge.knows / knowledge.does_not_know / knowledge.believes_falsely；
     psyche.wants / psyche.fears / psyche.hides / psyche.values
-  - codex: summary / detail / reveal / facets.sensory / facets.history；
-    facets.rules / facets.consequences / aliases / tags / links
+  - codex（运行态）: status / condition / access / open_to / owner_id / location_id /
+    reveal / facets.sensory；facets.rules / facets.consequences / aliases / tags / links
+  - codex 的 summary / detail / facets.history 是作者定义，运行期不可写；
+    新条目用 introduce 一次写清。
   - player: situation / capability / inner_voice / wants / afraid；
     status / condition / mood / location / goal；
     knowledge.knows / knowledge.does_not_know

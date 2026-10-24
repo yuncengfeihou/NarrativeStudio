@@ -61,6 +61,7 @@ export const config = {
 
     // 后台 Agent 节奏
     continuityEvery: int(env.CONTINUITY_EVERY, 10),   // 每 N 轮跑一次校勘
+    continuityMaxApplied: int(env.CONTINUITY_MAX_APPLIED, 20), // 单次校勘最多自动落库几条
     worldTickEvery: int(env.WORLD_TICK_EVERY, 8),     // 每 N 轮跑一次世界呼吸
     sceneEvery: int(env.SCENE_EVERY, 0),              // >0 时按固定轮数强制切场
   },

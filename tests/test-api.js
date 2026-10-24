@@ -47,6 +47,7 @@ console.log('\n=== 配置 ===');
   ok(!('lore' in (data.budget || {})), '预算里没有 lore 层');
   ok(!('director' in (data.budget || {})), '预算里没有 director 层');
   ok(data.defaults?.continuity_every === 10, '校勘节奏可配置');
+  ok(data.defaults?.continuity_max_applied === 20, '校勘写入上限可配置');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -106,6 +107,10 @@ const CARD = {
   const one = await req('GET', `/api/worlds/${WORLD_ID}`);
   ok(one.data.card.timeline.length === 2, '详情含时间线');
   ok(one.data.card.cast[0].psyche.hides[0] === '钥匙在他鞋里', '详情含卡司私心');
+
+  const lint = await req('GET', `/api/worlds/${WORLD_ID}/lint`);
+  ok(lint.status === 200 && Array.isArray(lint.data.issues), '卡级 lint 接口可达');
+  ok(lint.data.counts?.entities >= 1, 'lint 返回实体计数');
 
   const text = await fetch(`${BASE}/api/worlds/${WORLD_ID}/export`).then((r) => r.text());
   ok(text.includes('# 接口测试世界'), '导出纯文本');

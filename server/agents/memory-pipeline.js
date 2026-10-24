@@ -215,9 +215,18 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
 
   /* ---- 应用安全补丁 ---- */
   let applied = 0;
+  const maxApplied = config.context.continuityMaxApplied;
   for (const issue of issues) {
     const { action, target, value } = issue.fix;
     let status = 'open';
+    // 单次校勘最多自动落库 N 条；超出的保留为 open，交给人或下一次校勘。
+    if (applied >= maxApplied) {
+      addPatch(sessionId, {
+        branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status: 'open',
+        severity: issue.severity, payload: issue, evidence: issue.evidence,
+      });
+      continue;
+    }
     if (action === 'invalidate_assertion' && /^\d+$/.test(target)) {
       invalidateAssertion(sessionId, Number(target), { validTo: turnNo });
       status = 'applied';

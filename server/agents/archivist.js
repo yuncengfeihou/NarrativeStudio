@@ -14,7 +14,7 @@ import {
   CODEX_TYPES, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
-  LIST_PATH_SET, ENTITY_KINDS, pathsFor,
+  CODEX_CANON_PATHS, LIST_PATH_SET, ENTITY_KINDS, pathsFor,
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
@@ -106,7 +106,7 @@ function sanitizeIntroduce(kind, fields, name) {
     name: name.slice(0, 60),
     type: CODEX_TYPES.includes(f.type) ? f.type : 'custom',
   };
-  for (const k of ['summary', 'detail', 'sensory', 'history']) {
+  for (const k of ['summary', 'detail', 'sensory', 'history', 'parent_id']) {
     if (str(f[k])) out[k] = str(f[k]).slice(0, 400);
   }
   if (str(f.reveal)) out.reveal = CODEX_REVEALS.includes(f.reveal) ? f.reveal : 'public';
@@ -171,6 +171,10 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
       entityId = resolved.id;
     }
   }
+
+  // 辞书定义（summary/detail/facets.history）是作者公理：已有条目只能写运行态，
+  // 想新增定义必须走 introduce（上面已返回）。
+  if (kind === 'codex' && CODEX_CANON_PATHS.has(path)) return null;
 
   // 先按别名归一实体类型，再按最终类型校验路径。
   const allowed = pathsFor(kind);

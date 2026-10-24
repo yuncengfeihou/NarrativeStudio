@@ -102,6 +102,8 @@ function emptyCodexEntry(id, fields = {}) {
     canon_from: String(fields.canon_from || 'session'),
     detail: String(fields.detail || ''),
     pinned: false,
+    parent_id: String(fields.parent_id || ''),
+    sources: asArray(fields.sources),
     improvised: true,
   };
 }

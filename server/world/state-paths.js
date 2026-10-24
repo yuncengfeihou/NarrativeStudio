@@ -10,8 +10,15 @@ const CAST_SCALARS = [
   'status', 'condition', 'mood', 'location', 'goal', 'one_line', 'role',
 ];
 
+/**
+ * 辞书的定义（summary / detail / facets.history）是作者公理，运行期不可写；
+ * 运行期只写「此刻如何」的字段。新实体第一次 introduce 时仍可写定义。
+ */
+export const CODEX_CANON_PATHS = new Set(['summary', 'detail', 'facets.history']);
+
 const CODEX_SCALARS = [
-  'summary', 'detail', 'reveal', 'facets.sensory', 'facets.history',
+  'status', 'condition', 'access', 'open_to', 'owner_id', 'location_id',
+  'reveal', 'facets.sensory',
 ];
 
 const PLAYER_SCALARS = [
@@ -35,6 +42,7 @@ const PLAYER_LIST_PATHS = ['knowledge.knows', 'knowledge.does_not_know'];
 
 export const CAST_PATHS = new Set([...CAST_SCALARS, ...CAST_LIST_PATHS]);
 export const CODEX_PATHS = new Set([...CODEX_SCALARS, ...CODEX_LIST_PATHS]);
+// CODEX_CANON_PATHS 不在 CODEX_PATHS 内：已有条目只能通过 introduce 写定义。
 export const PLAYER_PATHS = new Set([...PLAYER_SCALARS, ...PLAYER_LIST_PATHS]);
 export const WORLD_PATHS = new Set(WORLD_SCALARS);
 export const LIST_PATH_SET = new Set([

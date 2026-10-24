@@ -26,7 +26,7 @@ import {
   upsertRelation,
 } from '../memory/store.js';
 import { planSummary, runSummarizer } from './summarizer.js';
-import { runRetrieval } from './retrieval.js';
+import { runRetrieval, shouldPrecheckRetrieval } from './retrieval.js';
 
 // sessionId -> 串行链
 const sessionLocks = new Map();
@@ -113,8 +113,15 @@ async function runTurnInner({
   const retrievalMode = session.settings?.codex_retrieval || 'auto';
   const codexCount = (world?.card?.codex || []).length;
   // 分段模式自带 codex_lookup，不再额外跑检索预检，避免同一拍查两次。
-  const wantRetrieval = narrationMode !== 'segmented' && !isOpening && retrievalMode !== 'off'
-    && (retrievalMode === 'on' || codexCount >= config.context.retrievalMinCodex);
+  const wantRetrieval = narrationMode !== 'segmented' && !isOpening
+    && shouldPrecheckRetrieval({
+      mode: retrievalMode,
+      codexCount,
+      minCodex: config.context.retrievalMinCodex,
+      playerText,
+      branchChoice,
+      card: world?.card || null,
+    });
   if (wantRetrieval && !signal?.aborted) {
     try {
       const ledger = getState(sessionId, { branchId, atTurn: Math.max(0, turnNo - 1) })?.state || null;

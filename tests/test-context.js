@@ -21,6 +21,7 @@ const store = await import('../server/memory/store.js');
 const engine = await import('../server/memory/context-engine.js');
 const schema = await import('../server/world/schema.js');
 const { config } = await import('../server/config.js');
+const { shouldPrecheckRetrieval } = await import('../server/agents/retrieval.js');
 
 let pass = 0;
 let fail = 0;
@@ -207,6 +208,64 @@ console.log('\n=== 装配清单：候选 vs 实际渲染 ===');
   ok(ctx.meta.codex_rendered <= ctx.meta.codex_candidates, '渲染数不超过候选');
   ok(Array.isArray(ctx.meta.dropped_sections), '记录被丢弃的段');
   ok(ctx.meta.facts_candidates >= ctx.meta.facts, '事实候选数不小于渲染数');
+}
+
+console.log('\n=== 辞书场景视图：T0 / T1 两档 ===');
+{
+  const tierCard = schema.normalizeCard({
+    title: 'tier',
+    cast: [
+      { id: 'a', name: '甲', relations: [{ to: 'b', kind: '旧识' }] },
+      { id: 'b', name: '乙' },
+    ],
+    codex: [
+      { id: 'p', name: '当前地', type: 'place', summary: '这里' },
+      { id: 'n', name: '邻居物', type: 'item', summary: '挨着甲', links: ['cast:a'] },
+      { id: 'pin', name: '钉选物', type: 'concept', summary: '常驻', pinned: true },
+      { id: 'far', name: '远处物', type: 'item', summary: '无连接' },
+    ],
+    anchors: [{
+      id: 'p0', label: '序',
+      snapshot: { place: '当前地', place_id: 'p', characters: { a: { mood: '沉' } } },
+    }],
+    player: { name: '甲' },
+  });
+  const tw = { id: `w-tier-${Date.now()}`, title: 'tier', card: tierCard };
+  store.saveWorld(tw);
+  const ts = store.createSession({
+    id: `s-tier-${Date.now()}`, title: 'tier', worldId: tw.id,
+    cardSnapshot: tierCard, worldVersion: 1,
+  });
+  store.createBranch(ts.id, { branchId: 'main' });
+  store.setSessionAnchor(ts.id, 'p0', 'main');
+  store.setState(ts.id, 0, {
+    place: '当前地', place_id: 'p', present: ['a'], characters: { a: { mood: '沉' } }, turn_no: 0,
+  }, 'main');
+
+  const ctx = await engine.assembleContext({
+    session: { ...ts, branch_id: 'main', anchor_id: 'p0' },
+    world: tw, turnNo: 1, playerText: '我站在原地。',
+  });
+  const t0 = ctx.meta.codex.map((c) => c.name);
+  ok(t0.includes('当前地'), '当前地点进 T0');
+  ok(t0.includes('钉选物'), '钉选进 T0');
+  ok(!t0.includes('邻居物'), '邻域实体不占 T0');
+  ok(ctx.meta.codex_brief_candidates >= 1, '邻域实体进入 T1 候选');
+
+  const sheetText = ctx.messages
+    .find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheetText.includes('附近设定') && sheetText.includes('邻居物'), 'T1 以一句摘要渲染');
+  ok(!sheetText.includes('远处物'), '无连接实体不进场记单');
+}
+
+console.log('\n=== 检索预检门控 ===');
+{
+  const gCard = schema.normalizeCard({ title: 'g', codex: [{ name: '司楼', aliases: ['青楼'] }] });
+  ok(shouldPrecheckRetrieval({ mode: 'off', codexCount: 30, minCodex: 24, playerText: '司楼', card: gCard }) === false, 'off 永不预检');
+  ok(shouldPrecheckRetrieval({ mode: 'on', codexCount: 1, minCodex: 24, playerText: '走', card: gCard }) === true, 'on 强制预检');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我往前走', card: gCard }) === false, 'auto：没点名不预检');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我去司楼', card: gCard }) === true, 'auto：点名辞书才预检');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 10, minCodex: 24, playerText: '我去司楼', card: gCard }) === false, 'auto：小卡不预检');
 }
 
 console.log('\n=== 场记单内容 ===');

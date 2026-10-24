@@ -29,9 +29,9 @@ const TYPE_GROUPS = [
  *
  * 超预算时的降级顺序：带摘要 → 只留名字 → 末尾省略。
  */
-export function renderWorldIndex(card, capTokens = 1200) {
+export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}) {
   const cast = card.cast || [];
-  const codex = card.codex || [];
+  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
   if (!cast.length && !codex.length) return '';
 
   const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
@@ -83,6 +83,85 @@ export function renderWorldIndex(card, capTokens = 1200) {
   return `${header}\n${lines.join('\n')}`;
 }
 
+/**
+ * 世界索引·树形版：有 parent_id 的卡按包含关系折叠。
+ * 远处实体只留名字，近处（有摘要）保留一句话；没有包含关系时退回平铺索引。
+ *
+ * @param {object} card
+ * @param {number} capTokens
+ * @param {{skipIds?:Set<string>, currentPlaceId?:string}} opts
+ */
+export function renderWorldTree(card, capTokens = 1200, { skipIds = null, currentPlaceId = '' } = {}) {
+  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
+  const hasParent = codex.some((e) => e.parent_id);
+  if (!hasParent) return renderWorldIndex(card, capTokens, { skipIds });
+
+  const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
+    + '不说明「此刻如何」——细节以场记单为准。不得发明索引之外的重要实体，'
+    + '不得改写这些名字。';
+
+  const byKey = new Map();
+  for (const e of codex) {
+    byKey.set(e.id, e);
+    byKey.set(e.name, e);
+    for (const a of e.aliases || []) byKey.set(a, e);
+  }
+  const children = new Map();
+  const roots = [];
+  for (const e of codex) {
+    const parent = e.parent_id ? byKey.get(e.parent_id) : null;
+    if (parent && parent !== e) {
+      if (!children.has(parent.id)) children.set(parent.id, []);
+      children.get(parent.id).push(e);
+    } else {
+      roots.push(e);
+    }
+  }
+
+  const treeTypes = new Set(['place', 'institution', 'faction']);
+  const isTree = (e) => treeTypes.has(e.type) || !!e.parent_id || children.has(e.id);
+  const label = (e) => {
+    const bits = [e.summary].filter(Boolean);
+    const mark = currentPlaceId && (e.id === currentPlaceId || e.name === currentPlaceId) ? '（当前）' : '';
+    return `${e.name}${mark}${bits.length ? `（${bits[0]}）` : ''}`;
+  };
+
+  const buildLines = (withSummary) => {
+    const lines = [];
+    const cast = (card.cast || []).slice().sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    if (cast.length) {
+      lines.push(`人物　${join(cast.map((c) => {
+        const bits = [c.role, c.status && c.status !== c.role ? c.status : ''].filter(Boolean);
+        const s = bits.join(' · ') || c.one_line || '';
+        return withSummary && s ? `${c.name}（${s}）` : c.name;
+      }), '｜')}`);
+    }
+
+    const walk = (e, depth) => {
+      const indent = depth === 0 ? '' : `${'  '.repeat(depth)}└ `;
+      lines.push(`${indent}${withSummary ? label(e) : e.name}`);
+      for (const child of (children.get(e.id) || []).sort((a, b) => a.name.localeCompare(b.name))) {
+        walk(child, depth + 1);
+      }
+    };
+    for (const e of roots.filter(isTree).sort((a, b) => a.name.localeCompare(b.name))) walk(e, 0);
+
+    for (const g of TYPE_GROUPS) {
+      if (g.key === 'character' || g.key === 'place' || g.key === 'institution' || g.key === 'faction') continue;
+      const items = codex.filter((e) => e.type === g.key && !isTree(e));
+      if (!items.length) continue;
+      lines.push(`${g.label}　${join(items.map((e) => (withSummary && e.summary ? `${e.name}（${e.summary}）` : e.name)), '｜')}`);
+    }
+    return lines;
+  };
+
+  let lines = buildLines(true);
+  if (estimateTokens(`${header}\n${lines.join('\n')}`) > capTokens) lines = buildLines(false);
+  let text = `${header}\n${lines.join('\n')}`;
+  if (estimateTokens(text) > capTokens) text = truncateToTokens(text, capTokens);
+  return text;
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 2. 辞书挑选（无关键词）                                                 */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -97,11 +176,13 @@ export function renderWorldIndex(card, capTokens = 1200) {
  */
 export function selectCodex(card, {
   presentIds = [], mentionedIds = [], threadTags = [], pinnedIds = [], currentPlaceId = null,
+  skipIds = null,
 } = {}) {
   const linkSet = new Set([...presentIds, ...mentionedIds, ...pinnedIds]);
   const tagSet = new Set((threadTags || []).filter(Boolean));
   const out = [];
   for (const entry of card.codex || []) {
+    if (skipIds?.has(entry.id)) continue;
     const why = [];
     let score = 0;
     if (entry.pinned) { score += 100; why.push('钉选'); }
@@ -170,7 +251,23 @@ function renderCodexEntry(entry) {
   if (f.consequences?.length) lines.push(`  后果：${join(f.consequences, '；')}`);
   if (f.sensory) lines.push(`  质感：${f.sensory}`);
   if (history) lines.push(`  来历：${history}`);
+  // 运行态字段（world_state 投影到 effective world 后挂在这里），与定义分开渲染。
+  const now = [
+    entry.status ? `状态：${entry.status}` : '',
+    entry.condition ? `状况：${entry.condition}` : '',
+    entry.access ? `出入：${entry.access}` : '',
+    entry.owner_id ? `归属：${entry.owner_id}` : '',
+    entry.location_id ? `位置：${entry.location_id}` : '',
+    entry.open_to ? `开放：${entry.open_to}` : '',
+  ].filter(Boolean);
+  if (now.length) lines.push(`  此刻：${join(now, '｜')}`);
   return lines.join('\n');
+}
+
+/** T1 邻域：只给一句摘要与当前状态，不展开规则/来历。 */
+function renderCodexBrief(entry) {
+  const bits = [str(entry.summary), str(entry.status), str(entry.access)].filter(Boolean);
+  return `· ${entry.name}${bits.length ? `｜${join(bits, '；')}` : ''}`;
 }
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
@@ -191,18 +288,20 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  * @returns {{text:string, meta:object}}
  */
 export function renderSceneSheet({
-  ledger = {}, present = [], relations = [], threads = [], codex = [],
+  ledger = {}, present = [], relations = [], threads = [], codex = [], codexBrief = [],
   voices = {}, echoes = [], facts = [], worldRuntime = {}, directive = '', capTokens = 2200,
 } = {}) {
   const L = ledger || {};
   const meta = {
     present: present.length,
     codex: codex.length,
+    codex_brief: codexBrief.length,
     echoes: echoes.length,
     facts: facts.length,
     kept: [],
     dropped: [],
     codex_rendered: 0,
+    codex_brief_rendered: 0,
   };
   if (!present.length && !L.place && !L.time) return { text: '', meta };
 
@@ -259,6 +358,7 @@ export function renderSceneSheet({
     });
 
   const codexBlock = (codex || []).map((c) => renderCodexEntry(c.entry || c)).join('\n');
+  const codexBriefBlock = (codexBrief || []).map((c) => renderCodexBrief(c.entry || c)).join('\n');
 
   const echoLines = (echoes || [])
     .slice(0, 4)
@@ -275,11 +375,12 @@ export function renderSceneSheet({
   if (knowledgeLine.length) sections.push({ key: 'knowledge', text: `知识边界\n${knowledgeLine.join('；')}` });
   if (pressure.length) sections.push({ key: 'pressure', text: `压力\n${pressure.join('\n')}` });
   if (codexBlock) sections.push({ key: 'codex', text: `本场可用设定\n${codexBlock}` });
+  if (codexBriefBlock) sections.push({ key: 'codexBrief', text: `附近设定（只给一句，展开前先查辞书）\n${codexBriefBlock}` });
   if (echoLines.length) sections.push({ key: 'echoes', text: `回声（过去的原话，可自然带出，不要整段复述）\n${echoLines.join('\n')}` });
   if (directive) sections.push({ key: 'directive', text: `本场指令（作者钦定，优先级最高）\n${directive}` });
 
   const headerCost = estimateTokens(head.join('\n')) + 2;
-  const order = ['when', 'world', 'cast', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'directive', 'codex', 'echoes'];
+  const order = ['when', 'world', 'cast', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'directive', 'echoes'];
   const kept = [];
   let used = headerCost;
   for (const key of order) {
@@ -289,7 +390,7 @@ export function renderSceneSheet({
     if (used + cost <= capTokens) { kept.push(sec); used += cost; continue; }
     // 超配额：按优先级砍——echoes/codex 先降级为截断，其余整段丢
     const room = capTokens - used - 2;
-    if (room > 60 && (key === 'codex' || key === 'echoes' || key === 'directive')) {
+    if (room > 60 && (key === 'codex' || key === 'codexBrief' || key === 'echoes' || key === 'directive')) {
       kept.push({ ...sec, text: truncateToTokens(sec.text, room) });
       used += estimateTokens(sec.text) + 2;
     }
@@ -301,6 +402,10 @@ export function renderSceneSheet({
   const codexText = kept.find((s) => s.key === 'codex')?.text || '';
   meta.codex_rendered = codexText
     ? codexText.split('\n').filter((line) => line.startsWith('· ')).length
+    : 0;
+  const briefText = kept.find((s) => s.key === 'codexBrief')?.text || '';
+  meta.codex_brief_rendered = briefText
+    ? briefText.split('\n').filter((line) => line.startsWith('· ')).length
     : 0;
 
   const body = kept.map((s) => s.text).join('\n\n');

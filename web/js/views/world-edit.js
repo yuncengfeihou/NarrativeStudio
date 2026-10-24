@@ -762,7 +762,7 @@ export default {
         : {
           id: '', type: 'concept', name: '', aliases: [], tags: [],
           summary: '', facets: { sensory: '', rules: [], consequences: [], history: '' },
-          links: [], reveal: 'public', detail: '',
+          links: [], reveal: 'public', detail: '', parent_id: '',
         };
 
       const nameInput = el('input.field', { value: draft.name || '', placeholder: '名称（如「司楼」）' });
@@ -793,6 +793,10 @@ export default {
         value: (draft.tags || []).join('、'),
         placeholder: '主题标签，顿号分隔（如「制度、交易」）',
       });
+      const parentInput = el('input.field', {
+        value: draft.parent_id || '',
+        placeholder: '上级地点/机构 id（可选，如「帝都」；用于世界索引树）',
+      });
 
       const typeSelect = el('select.field', {}, ...CODEX_TYPES.map(([v, l]) =>
         el('option', { value: v, selected: draft.type === v }, l)));
@@ -817,6 +821,7 @@ export default {
           b.appendChild(field('来历', historyInput));
           b.appendChild(field('关联实体', linksInput));
           b.appendChild(field('主题标签', tagsInput));
+          b.appendChild(field('上级地点/机构', parentInput));
           b.appendChild(el('p.field-hint', {},
             '「未解」条目会被标注为「只你可知，不得说破」——引擎会遵守，但不会让角色说出来。'));
         },
@@ -833,6 +838,7 @@ export default {
             summary: summaryInput.value.trim(),
             tags: split(tagsInput.value),
             links: split(linksInput.value),
+            parent_id: parentInput.value.trim(),
             reveal: revealSelect.value,
             facets: {
               sensory: sensoryInput.value.trim(),

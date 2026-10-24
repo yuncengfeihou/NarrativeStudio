@@ -18,7 +18,8 @@ import { config } from '../config.js';
 import { estimateMessageTokens, estimateTokens, truncateToTokens } from '../tokens.js';
 import { normalizeCard, buildAliasIndex, linkEntities, sceneThemeTags } from '../world/schema.js';
 import { buildEffectiveWorld, emptyCastEntry } from '../world/effective.js';
-import { renderWorldIndex, selectCodex, renderSceneSheet } from '../world/scene-sheet.js';
+import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet } from '../world/scene-sheet.js';
+import { buildWorldGraph, graphNeighbors } from '../world/graph.js';
 import { narratorTailInstruction } from '../prompts/narrator.js';
 import {
   getActiveSummary, getAssertions, getBranch, getRelations, getRecentTurnsForBranch,
@@ -82,7 +83,12 @@ export function buildContract(session, world, card = normalizeCard(world?.card |
 
 /** 系统层总装：契约 + 命题 + 宪章 + 世界索引。 */
 export function buildSystemLayer(
-  session, world, { card = normalizeCard(world?.card || {}), indexCap = config.context.layerBudget.system } = {},
+  session, world, {
+    card = normalizeCard(world?.card || {}),
+    indexCap = config.context.layerBudget.system,
+    graph = null,
+    currentPlaceId = '',
+  } = {},
 ) {
   const parts = [buildContract(session, world, card)];
 
@@ -93,7 +99,11 @@ export function buildSystemLayer(
     parts.push(`【世界宪章】这个世界的硬设定，任何场景下都成立，不得违背。\n${charter}`);
   }
 
-  const index = renderWorldIndex(card, Math.max(400, indexCap - estimateTokens(parts.join('\n\n')) - 200));
+  const indexCapNow = Math.max(400, indexCap - estimateTokens(parts.join('\n\n')) - 200);
+  // 有包含关系时用树形索引；否则保持平铺。去重后的 codex 不再重复出现。
+  const index = graph
+    ? renderWorldTree(card, indexCapNow, { skipIds: graph.mergedCodexIds, currentPlaceId })
+    : renderWorldIndex(card, indexCapNow);
   if (index) parts.push(index);
 
   const player = card.player;
@@ -200,26 +210,71 @@ function pickPresent(card, { ledger, linked }) {
  * 三条进场路径：实体连接 / 主题标签 / 用户钉选。
  * presentIds 里既有卡司 id，也有账本里的地点 id 与随身物品 id。
  */
-function pickCodex(card, { ledger, linked, pinnedIds = [] }) {
+function pickCodex(card, { ledger, linked, present = [], pinnedIds = [], graph = null, playerLinked = null }) {
+  const currentPlaceId = ledger?.place_id || null;
   const presentIds = [
     ...(linked?.cast || []),
     ...(linked?.codex || []),
     ...pinnedIds,
   ];
-  if (ledger?.place_id) presentIds.push(ledger.place_id);
+  if (currentPlaceId) presentIds.push(currentPlaceId);
   for (const item of ledger?.inventory || []) if (item.id) presentIds.push(item.id);
 
   const tags = sceneThemeTags(card, presentIds, ledger?.theme_tags || []);
-  return {
-    candidates: selectCodex(card, {
-      presentIds,
-      mentionedIds: linked?.codex || [],
-      threadTags: tags,
-      pinnedIds,
-      currentPlaceId: ledger?.place_id || null,
-    }),
-    themeTags: tags,
+  const skipIds = graph?.mergedCodexIds || null;
+  const candidates = selectCodex(card, {
+    presentIds,
+    mentionedIds: linked?.codex || [],
+    threadTags: tags,
+    pinnedIds,
+    currentPlaceId,
+    skipIds,
+  });
+
+  if (!graph) return { candidates, t0: candidates, t1: [], themeTags: tags };
+
+  // 焦点 = 在场人物 + 当前地点 + 随身物 + 钉选 + 玩家这一拍点名的辞书。
+  const focus = new Set();
+  const addFocus = (ref) => {
+    const id = graph.resolve(ref);
+    if (id) focus.add(id);
   };
+  for (const c of present) addFocus(c.id);
+  for (const id of playerLinked?.codex || []) addFocus(id);
+  if (currentPlaceId) addFocus(currentPlaceId);
+  for (const id of pinnedIds) addFocus(id);
+  for (const item of ledger?.inventory || []) if (item.id) addFocus(item.id);
+
+  const neighborIds = graphNeighbors(graph, focus, { depth: 1 });
+  const byId = new Map(candidates.map((c) => [c.entry.id, c]));
+
+  // 邻域里没有链接/标签/钉选的条目也要进 T1（一句摘要），否则图边白建。
+  for (const id of neighborIds) {
+    const entry = graph.codexById.get(id);
+    if (!entry || skipIds?.has(id) || byId.has(id)) continue;
+    const cand = { entry, score: 10, why: ['邻域'] };
+    candidates.push(cand);
+    byId.set(id, cand);
+  }
+
+  const t0 = [];
+  const t1 = [];
+  for (const cand of candidates) {
+    const id = cand.entry.id;
+    if (skipIds?.has(id)) continue; // 与 cast 同名的 codex，人物块已经覆盖
+    const nodeId = graph.resolve(id) || id;
+    if (focus.has(id) || focus.has(nodeId)) {
+      t0.push(cand);
+      continue;
+    }
+    // 未点名的 secret 不靠「邻域/主题」自动进场；要出现必须被钉选或玩家点名。
+    if (cand.entry.reveal === 'secret') continue;
+    if (neighborIds.has(id) || neighborIds.has(nodeId)
+      || cand.why.includes('本场主题') || cand.why.includes('实体在场')) {
+      t1.push(cand);
+    }
+  }
+  return { candidates, t0, t1, themeTags: tags };
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -340,6 +395,8 @@ export async function assembleContext({
   const templateCard = normalizeCard(session?.card_snapshot || world?.card || {});
   const deltas = getWorldState(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0 });
   const card = buildEffectiveWorld(templateCard, deltas);
+  // 辞书图谱：实体去重、包含关系、1 跳邻域都从投影后的世界计算。
+  const graph = buildWorldGraph(card);
   const anchors = card.anchors || [];
   const anchorId = session.anchor_id || anchors[0]?.id || null;
   const anchor = anchors.find((a) => a.id === anchorId) || anchors[0] || null;
@@ -368,7 +425,9 @@ export async function assembleContext({
 
   /* ---- 辞书 ---- */
   const pinnedIds = (card.codex || []).filter((e) => e.pinned).map((e) => e.id);
-  const { candidates, themeTags } = pickCodex(card, { ledger, linked, pinnedIds });
+  const { t0: codexT0, t1: codexT1, themeTags } = pickCodex(card, {
+    ledger, linked, present, pinnedIds, graph, playerLinked: linkedPlayer,
+  });
 
   /* ---- 关系 / 线索 / 已成立的事实 ---- */
   const relations = getRelations(sessionId, { branchId, limit: 60 });
@@ -387,13 +446,16 @@ export async function assembleContext({
   const sceneCap = budget.scene;
   const perEntryCost = 90;
   const codexSlots = Math.max(1, Math.floor(sceneCap * 0.45 / perEntryCost));
-  const selectedCodex = candidates.slice(0, codexSlots);
+  const selectedCodex = codexT0.slice(0, codexSlots);
+  const briefSlots = Math.max(0, Math.floor(sceneCap * 0.2 / 40));
+  const selectedBrief = codexT1.slice(0, briefSlots);
   const sheet = renderSceneSheet({
     ledger,
     present,
     relations,
     threads,
     codex: selectedCodex,
+    codexBrief: selectedBrief,
     voices: {},
     echoes,
     facts,
@@ -403,10 +465,19 @@ export async function assembleContext({
   });
   // 候选 ≠ 实际渲染：场记单预算不足时，codex/facts 可能整段被丢。
   const codexRendered = sheet.meta?.codex_rendered ?? selectedCodex.length;
+  const codexBriefRendered = sheet.meta?.codex_brief_rendered ?? 0;
   const factsRendered = (sheet.meta?.kept || []).includes('facts') ? facts.length : 0;
 
   /* ---- 系统层（稳定前缀） ---- */
-  const systemMsg = { role: 'system', content: buildSystemLayer(session, world, { card, indexCap: budget.system }) };
+  const systemMsg = {
+    role: 'system',
+    content: buildSystemLayer(session, world, {
+      card,
+      indexCap: budget.system,
+      graph,
+      currentPlaceId: ledger?.place_id || '',
+    }),
+  };
 
   /* ---- 前情提要（滚动摘要） ---- */
   // atTurn 传当前回合：只取覆盖边界不超过本轮的摘要。摘要只影响装配，不改写 turns。
@@ -525,9 +596,16 @@ export async function assembleContext({
       codex: selectedCodex.slice(0, Math.min(codexRendered, 8))
         .map((c) => ({ id: c.entry.id, name: c.entry.name, why: c.why })),
       codex_total: card.codex.length,
-      codex_candidates: selectedCodex.length,
+      codex_candidates: codexT0.length,
       codex_rendered: codexRendered,
-      codex_dropped: Math.max(0, selectedCodex.length - codexRendered),
+      codex_dropped: Math.max(0, codexT0.length - codexRendered),
+      codex_brief_candidates: codexT1.length,
+      codex_brief_rendered: codexBriefRendered,
+      graph: {
+        entities: graph.entities.size,
+        edges: graph.edges.length,
+        merged_codex: graph.mergedCodexIds.size,
+      },
       timeline_past: (card.timeline || []).filter((t) => t.canon === 'past').length,
       timeline_future_held: (card.timeline || []).filter((t) => t.canon === 'future').length,
       world_state_changes: deltas.length,

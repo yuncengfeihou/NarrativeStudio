@@ -25,6 +25,7 @@ const PROGRESS = path.join(__dirname, 'real-10turn-progress.json');
 const SERVER_LOG = path.join(__dirname, 'real-10turn-server.log');
 
 const MAX_TURNS = Math.max(1, Math.min(12, Number(process.env.AUDIT_TURNS) || 12));
+const ROLLBACK_TURN = Math.min(8, MAX_TURNS);
 
 const ACTIONS = [
   '雨还在下。我把蛇皮袋往肩上一甩，隔着雨幕问那个撑伞的女人：「你认得我？」',
@@ -167,6 +168,9 @@ async function runOneTurn(sessionId, n, action, extra = {}) {
       codex_candidates: context.meta?.codex_candidates,
       codex_rendered: context.meta?.codex_rendered,
       codex_dropped: context.meta?.codex_dropped,
+      codex_brief_candidates: context.meta?.codex_brief_candidates,
+      codex_brief_rendered: context.meta?.codex_brief_rendered,
+      graph: context.meta?.graph,
       facts_candidates: context.meta?.facts_candidates,
       dropped_sections: context.meta?.dropped_sections,
       summary: context.meta?.summary,
@@ -391,11 +395,11 @@ try {
     entity_kind: r.entity_kind, entity_id: r.entity_id, path: r.path, op: r.op,
     value: r.value, valid_from: r.valid_from, valid_to: r.valid_to,
   }));
-  const worldAt8Before = await get(`/api/sessions/${sessionId}/world-state?at_turn=8`);
-  const rollback = await req('POST', `/api/sessions/${sessionId}/rollback`, { turn_no: 8 });
+  const worldAt8Before = await get(`/api/sessions/${sessionId}/world-state?at_turn=${ROLLBACK_TURN}`);
+  const rollback = await req('POST', `/api/sessions/${sessionId}/rollback`, { turn_no: ROLLBACK_TURN });
   const branchesAfter = await get(`/api/sessions/${sessionId}/branches`);
   const turnsAfterFork = (await get(`/api/sessions/${sessionId}`)).turns || [];
-  const worldAt8After = await get(`/api/sessions/${sessionId}/world-state?at_turn=8`);
+  const worldAt8After = await get(`/api/sessions/${sessionId}/world-state?at_turn=${ROLLBACK_TURN}`);
   report.checks.fork = {
     rollbackStatus: rollback.status,
     rollback: rollback.json ? {
@@ -527,7 +531,7 @@ function printSummary(r) {
   console.log(`world_state 变化 ${c.afterRun?.worldStateChanges}｜patches ${c.afterRun?.patches?.total}`);
   console.log(`摘要事件：${JSON.stringify((r.turns || []).map((t) => t.summary).filter(Boolean))}`);
   console.log(`分支：before=${c.afterRun?.branches?.branches?.length} after=${c.fork?.branches?.branches?.length}`);
-  console.log(`回滚到第 8 轮：${ok(c.fork?.rollbackStatus === 200)}｜分叉点状态一致：${ok(c.fork?.sameAtFork)}｜可见回合 ${c.fork?.visibleTurns}（最大 ${c.fork?.maxVisibleTurn}）`);
+  console.log(`回滚到第 ${ROLLBACK_TURN} 轮：${ok(c.fork?.rollbackStatus === 200)}｜分叉点状态一致：${ok(c.fork?.sameAtFork)}｜可见回合 ${c.fork?.visibleTurns}（最大 ${c.fork?.maxVisibleTurn}）`);
   console.log(`新分支第 13 轮：${ok(c.forkTurn?.status === 200 && c.forkTurn?.narrativeChars > 0)}｜正文 ${c.forkTurn?.narrativeChars} 字`);
   console.log(`检索命中：${c.search?.hits}｜改稿：${ok(c.edit?.edited)}｜笔记：${ok(c.notes?.createStatus === 201)}`);
   console.log(`recall：${ok(c.recall?.status === 200)}｜/v1：${ok(c.v1?.status === 200 && c.v1?.hasContent)}`);
