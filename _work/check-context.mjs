@@ -38,10 +38,17 @@ const NARRATIVE = ('雨顺着他的围巾往下淌，冰凉。他忽然发现，
 for (let i = 1; i <= turns; i++) {
   store.addTurn('scale-session', { turn_no: i, kind: 'player', content: '我低着头没说话。', branch_id: 'main' });
   store.addTurn('scale-session', { turn_no: i, kind: 'narrator', content: NARRATIVE, branch_id: 'main' });
+  // 模拟回合末的沉淀：原文窗口只保留摘要边界之后的回合。
+  if (i % 4 === 0 && i >= 4) {
+    store.addSummary('scale-session', {
+      branchId: 'main', coversTurnTo: i - 2,
+      text: `摘要覆盖到第 ${i - 2} 轮。${'旧剧情已经沉淀。'.repeat(80)}`,
+    });
+  }
 }
 
 console.log(`\n模拟 ${turns} 轮的装配体积：\n`);
-console.log('  轮次    系统    原文   场记单   本轮    合计');
+console.log('  轮次    系统    原文   场记单   本轮    合计   覆盖');
 
 const samples = [1, 10, 50, 100, 200, 500, 1000].filter((n) => n <= turns);
 const results = [];
@@ -51,10 +58,14 @@ for (const n of samples) {
   });
   const b = ctx.budget;
   results.push({ n, ...b });
+  const c = ctx.meta.coverage || {};
+  const seam = c.recent_from == null || c.recent_from === c.summary_to + 1 ? '✓' : '✗';
   console.log(
     `  ${String(n).padStart(4)}  ${String(b.system).padStart(6)}  ${String(b.recent).padStart(6)}`
-    + `  ${String(b.scene).padStart(6)}  ${String(b.current).padStart(5)}  ${String(b.total).padStart(6)}`,
+    + `  ${String(b.scene).padStart(6)}  ${String(b.current).padStart(5)}  ${String(b.total).padStart(6)}`
+    + `   ${c.summary_to ?? 0}→${c.recent_from ?? '-'} ${seam}`,
   );
+  if (seam === '✗') process.exitCode = 1;
 }
 
 const first = results[0].total;
@@ -67,4 +78,4 @@ if (growth > 2.5) {
   console.error('✗ 体积随轮数显著增长，不符合设计');
   process.exit(1);
 }
-console.log('✓ 体积与轮数无关（含历史时受 recent 配额约束，超出部分由 fitRecent 裁剪）');
+console.log('✓ 体积与轮数无关（原文窗口 = 摘要边界之后的回合，由沉淀水位控制）');

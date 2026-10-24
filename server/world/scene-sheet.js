@@ -65,9 +65,8 @@ export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}
     .slice()
     .sort((a, b) => (b.weight || 0) - (a.weight || 0))
     .map((c) => {
-      // 索引只说「现在这个人是谁」，运行期状态由场记单负责细节。
-      const bits = [c.role, c.status && c.status !== c.role ? c.status : ''].filter(Boolean);
-      return { name: c.name, summary: bits.join(' · ') || c.one_line || c.status };
+      // 索引只承载 canon（这个人是谁）；受伤/死亡/失势等运行态由场记单负责。
+      return { name: c.name, summary: c.role || c.one_line || '' };
     });
   pushGroup('人物', castItems);
 
@@ -89,9 +88,9 @@ export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}
  *
  * @param {object} card
  * @param {number} capTokens
- * @param {{skipIds?:Set<string>, currentPlaceId?:string}} opts
+ * @param {{skipIds?:Set<string>}} opts
  */
-export function renderWorldTree(card, capTokens = 1200, { skipIds = null, currentPlaceId = '' } = {}) {
+export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {}) {
   const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
   const hasParent = codex.some((e) => e.parent_id);
   if (!hasParent) return renderWorldIndex(card, capTokens, { skipIds });
@@ -120,11 +119,8 @@ export function renderWorldTree(card, capTokens = 1200, { skipIds = null, curren
 
   const treeTypes = new Set(['place', 'institution', 'faction']);
   const isTree = (e) => treeTypes.has(e.type) || !!e.parent_id || children.has(e.id);
-  const label = (e) => {
-    const bits = [e.summary].filter(Boolean);
-    const mark = currentPlaceId && (e.id === currentPlaceId || e.name === currentPlaceId) ? '（当前）' : '';
-    return `${e.name}${mark}${bits.length ? `（${bits[0]}）` : ''}`;
-  };
+  // 索引只承载 canon，不标注「当前地点」——那是运行态，会破坏前缀缓存，也误导模型的「此刻」判断。
+  const label = (e) => `${e.name}${e.summary ? `（${e.summary}）` : ''}`;
 
   const buildLines = (withSummary) => {
     const lines = [];
@@ -270,6 +266,36 @@ function renderCodexBrief(entry) {
   return `· ${entry.name}${bits.length ? `｜${join(bits, '；')}` : ''}`;
 }
 
+/**
+ * 按整条条目裁剪：超预算时从末尾整条丢弃，绝不切半条。
+ * 第一行是段落标题，后续条目由 entryStart 开头（codex 是「· 」，回声是「（」）。
+ */
+function fitEntries(text, maxTokens, entryStart = '· ') {
+  if (!text) return '';
+  if (estimateTokens(text) <= maxTokens) return text;
+  const lines = text.split('\n');
+  const header = lines[0] || '';
+  const entries = [];
+  let cur = [];
+  for (const line of lines.slice(1)) {
+    if (line.startsWith(entryStart) && cur.length) {
+      entries.push(cur.join('\n'));
+      cur = [line];
+    } else {
+      cur.push(line);
+    }
+  }
+  if (cur.length) entries.push(cur.join('\n'));
+
+  const kept = [];
+  for (const entry of entries) {
+    const candidate = [header, ...kept, entry].join('\n');
+    if (estimateTokens(candidate) + 2 > maxTokens) break;
+    kept.push(entry);
+  }
+  return kept.length ? [header, ...kept].join('\n') : '';
+}
+
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
 
 /**
@@ -364,7 +390,7 @@ export function renderSceneSheet({
     .slice(0, 4)
     .map((e) => `（${e.who ? `${e.who}·` : ''}第${e.turn_no}轮）${e.text}`);
 
-  /* ---- 分段装配，按配额从尾部开始砍 ---- */
+  /* ---- 分段装配：可选段落整条取舍，不做半句截断 ---- */
   const sections = [];
   if (whenLine) sections.push({ key: 'when', text: whenLine, need: true });
   if (runtimeLine) sections.push({ key: 'world', text: runtimeLine, need: true });
@@ -380,7 +406,8 @@ export function renderSceneSheet({
   if (directive) sections.push({ key: 'directive', text: `本场指令（作者钦定，优先级最高）\n${directive}` });
 
   const headerCost = estimateTokens(head.join('\n')) + 2;
-  const order = ['when', 'world', 'cast', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'directive', 'echoes'];
+  // directive 声明「优先级最高」，就必须排在可选设定之前；放不下时它还能靠尾注通道活下来。
+  const order = ['when', 'world', 'cast', 'directive', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'echoes'];
   const kept = [];
   let used = headerCost;
   for (const key of order) {
@@ -388,12 +415,24 @@ export function renderSceneSheet({
     if (!sec) continue;
     const cost = estimateTokens(sec.text) + 2;
     if (used + cost <= capTokens) { kept.push(sec); used += cost; continue; }
-    // 超配额：按优先级砍——echoes/codex 先降级为截断，其余整段丢
+
     const room = capTokens - used - 2;
-    if (room > 60 && (key === 'codex' || key === 'codexBrief' || key === 'echoes' || key === 'directive')) {
-      kept.push({ ...sec, text: truncateToTokens(sec.text, room) });
-      used += estimateTokens(sec.text) + 2;
+    if (room <= 60) continue;
+    // 辞书/回声按整条取舍：宁可少一条，也不留下半条设定。
+    if (key === 'codex' || key === 'codexBrief') {
+      const fitted = fitEntries(sec.text, room, '· ');
+      if (fitted) {
+        kept.push({ ...sec, text: fitted });
+        used += estimateTokens(fitted) + 2;
+      }
+    } else if (key === 'echoes') {
+      const fitted = fitEntries(sec.text, room, '（');
+      if (fitted) {
+        kept.push({ ...sec, text: fitted });
+        used += estimateTokens(fitted) + 2;
+      }
     }
+    // 其余段落整段丢弃；不截半句。
   }
 
   const keptKeys = new Set(kept.map((s) => s.key));

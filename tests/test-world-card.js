@@ -139,7 +139,7 @@ console.log('\n=== 世界索引 ===');
   const card = schema.normalizeCard({
     title: 't',
     cast: [
-      { name: '凌玥', role: '凌家家主', weight: 1 },
+      { name: '凌玥', role: '凌家家主', status: '左肩中箭', weight: 1 },
       { name: '张兰', role: '保安', weight: 0.3 },
       { name: '龙套甲' },
     ],
@@ -152,6 +152,7 @@ console.log('\n=== 世界索引 ===');
   const index = sheet.renderWorldIndex(card, 1200);
   ok(index.includes('【世界索引】'), '有索引头');
   ok(index.includes('凌玥（凌家家主）'), '人物带 role 摘要');
+  ok(!index.includes('左肩中箭'), '索引只承载 canon，不渲染运行态 status');
   ok(index.includes('机构　司楼（官营青楼）'), '按类型分组');
   ok(index.includes('物件　玉佩（来路不明）'), '物品分组');
   ok(!index.includes('priority'), '不含任何触发机制字样');
@@ -303,10 +304,8 @@ console.log('\n=== 辞书图谱：去重 / 关系 / 包含 ===');
   ok([...graphLib.graphNeighbors(g, ['ling-yue'], { depth: 1 })].includes('yupei'), '1 跳邻域包含玉佩');
   eq(graphLib.graphAncestors(g, 'tianjing'), ['ling-fu'], '包含关系可回溯祖先');
 
-  const tree = sheet.renderWorldTree(card, 1200, {
-    skipIds: g.mergedCodexIds, currentPlaceId: 'ling-fu',
-  });
-  ok(tree.includes('凌府（当前）'), '树形索引标注当前地点');
+  const tree = sheet.renderWorldTree(card, 1200, { skipIds: g.mergedCodexIds });
+  ok(!tree.includes('（当前）'), '树形索引不标注当前地点（运行态归场记单）');
   ok(tree.includes('└ 天井'), '子地点缩进在父地点下');
   eq((tree.match(/张兰/g) || []).length, 1, '同名实体只出现一次');
 }

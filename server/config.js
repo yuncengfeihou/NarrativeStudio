@@ -37,18 +37,19 @@ export const config = {
     layerBudget: {
       system: int(env.BUDGET_SYSTEM, 3200),      // 契约 + 命题 + 宪章 + 世界索引
       summary: int(env.BUDGET_SUMMARY, 1800),    // 前情提要（滚动摘要）
-      recent: int(env.BUDGET_RECENT, 9000),      // 最近原文（逐字）
+      recent: int(env.BUDGET_RECENT, 9000),      // 最近原文（逐字；由摘要沉淀控制，不做字符串截断）
       scene: int(env.BUDGET_SCENE, 2400),        // 场记单
       retrieval: int(env.BUDGET_RETRIEVAL, 600), // 模型主动检索到的辞书全文（当拍）
       current: int(env.BUDGET_CURRENT, 2000),    // 本轮输入 + 尾注
     },
 
-    // 保留的原始回合数（还会按 recent 配额二次裁剪）
-    recentRawTurns: int(env.RECENT_RAW_TURNS, 4),
-
-    // 前情提要：每 SUMMARY_EVERY 轮检查一次；最近 SUMMARY_KEEP_RECENT 轮永远逐字保留。
-    summaryEvery: int(env.SUMMARY_EVERY, 8),
-    summaryKeepRecent: int(env.SUMMARY_KEEP_RECENT, 4),
+    // 前情提要：按 token 水位批量沉淀，不按固定轮数。
+    // 原文窗口 = 摘要边界之后的全部回合；超过 high 时把最旧一批压进摘要，
+    // 压到 low 以下，并至少保留 minRawTurns 轮逐字原文。
+    summaryHighTokens: int(env.SUMMARY_HIGH_TOKENS, 12000),
+    summaryLowTokens: int(env.SUMMARY_LOW_TOKENS, 8000),
+    summaryMinRawTurns: int(env.SUMMARY_KEEP_RECENT, 4),
+    summaryMaxRawTurns: int(env.SUMMARY_MAX_RAW_TURNS, 12),
     summaryMinChars: int(env.SUMMARY_MIN_CHARS, 2000),
 
     // 辞书主动检索：auto = 只在大卡上启用；on/off 可被会话 settings.codex_retrieval 覆盖。

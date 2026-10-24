@@ -15,7 +15,12 @@ export { PREDICATES };
 export const VISIBILITIES = ['public', 'engine', 'secret'];
 export const STATE_FIELDS = ['condition', 'mood', 'location', 'goal'];
 
-export function archivistSystemPrompt({ castIndex, codexIndex, openThreads, playerName }) {
+/**
+ * 史官的 system 只放稳定内容：身份、schema、字段规范。
+ * cast/codex/线索是会变的参考事实，走 user 消息——否则每轮线索一变，
+ * 这个每轮都要跑的 Agent 就无法复用 system 前缀缓存。
+ */
+export function archivistSystemPrompt() {
   return `# 身份
 你是长篇互动剧情的「史官」。你的唯一职责是把刚发生的一轮剧情，转成高密度、可校验、可长期携带的结构化记忆。
 你不创作剧情，不评论，不推测剧情之外的事。宁可少记，绝不编造。正文没有明说的，一律放到 uncertain，不许当成事实。
@@ -119,17 +124,25 @@ schema：
 - 只有地点、时间、在场者发生实质变化时才 changed: true。同一场景内的推进不要切场。
 - present 每轮必填，只列这一拍**真正在镜头里**的人物（规范名）；不在场的人不要列。
   场景没变也要写当前在场者，它是「谁在场」的唯一依据，不是「最近谁被提到」。
-- 发生时间跳跃或跨地点移动时，changed 必须为 true，并写新的 when / place。
-
-# 参考信息
-${castIndex ? `【已知人物】（主语/宾语/键名一律用这里的规范名）\n${castIndex}` : '（作者未提供卡司）'}
-${codexIndex ? `【已知事物】\n${codexIndex}` : ''}
-${openThreads?.length ? `【当前未回收的线索】（resolve 时 title 必须与这里完全一致）\n${openThreads.map((t) => `· ${t}`).join('\n')}` : '（暂无未回收线索）'}
-${playerName ? `【玩家角色】${playerName}——他的行动由玩家决定，你只记录后果，不替他做决定。` : ''}`;
+- 发生时间跳跃或跨地点移动时，changed 必须为 true，并写新的 when / place。`;
 }
 
-export function archivistUserPrompt({ turnNo, playerText, branchChoice, narrative }) {
+export function archivistUserPrompt({
+  turnNo, playerText, branchChoice, narrative,
+  castIndex = '', codexIndex = '', openThreads = [], playerName = '',
+}) {
+  const refs = [];
+  refs.push(castIndex
+    ? `【已知人物】（主语/宾语/键名一律用这里的规范名）\n${castIndex}`
+    : '（作者未提供卡司）');
+  if (codexIndex) refs.push(`【已知事物】\n${codexIndex}`);
+  refs.push(openThreads.length
+    ? `【当前未回收的线索】（resolve 时 title 必须与这里完全一致）\n${openThreads.map((t) => `· ${t}`).join('\n')}`
+    : '（暂无未回收线索）');
+  if (playerName) refs.push(`【玩家角色】${playerName}——他的行动由玩家决定，你只记录后果，不替他做决定。`);
+
   const parts = [
+    `【参考信息】\n${refs.join('\n')}`,
     `【回合】第 ${turnNo} 轮`,
     `【玩家行动】${(playerText || '').trim() || '（开场轮，玩家尚未行动）'}`,
   ];

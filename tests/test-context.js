@@ -281,23 +281,155 @@ console.log('\n=== 场记单内容 ===');
   ok(!sheet.includes('玉佩'), 'reveal=secret 的条目不被链接带出时不出现在单子里');
 }
 
-console.log('\n=== 体积不随轮数增长 ===');
+console.log('\n=== 体积不随轮数增长（原文窗口由摘要沉淀控制） ===');
 {
+  const sid = `s-volume-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: 'volume', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const volSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  for (let i = 1; i <= 520; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, {
+      turn_no: i, kind: 'narrator',
+      content: `正文${i}：${'雨落在街面上。'.repeat(20)}`, branch_id: 'main',
+    });
+    // 模拟真实沉淀节奏：每 4 轮覆盖到 i-2，原文窗口只保留边界之后的回合。
+    if (i % 4 === 0 && i >= 4) {
+      store.addSummary(sid, {
+        branchId: 'main', coversTurnTo: i - 2,
+        text: `摘要覆盖到第 ${i - 2} 轮。${'旧剧情已经沉淀。'.repeat(80)}`,
+      });
+    }
+  }
+
   const sizes = [];
   for (const turnNo of [1, 50, 200, 500]) {
     const ctx = await engine.assembleContext({
-      session: S, world, turnNo, playerText: '我继续往前走。',
+      session: volSession, world, turnNo, playerText: '我继续往前走。',
     });
-    sizes.push({ turnNo, total: ctx.budget.total, scene: ctx.budget.scene, system: ctx.budget.system });
+    sizes.push({ turnNo, ...ctx.budget, coverage: ctx.meta.coverage });
+    ok(ctx.meta.coverage.summary_to < turnNo, `第 ${turnNo} 轮：摘要不覆盖当前轮`);
+    ok(
+      ctx.meta.coverage.recent_from == null
+        || ctx.meta.coverage.recent_from === ctx.meta.coverage.summary_to + 1,
+      `第 ${turnNo} 轮：摘要边界与原文起点首尾相接`,
+    );
   }
   for (const s of sizes) {
-    console.log(`  第 ${String(s.turnNo).padStart(3)} 轮  合计 ${s.total}  tok（系统 ${s.system}｜场记单 ${s.scene}）`);
+    console.log(`  第 ${String(s.turnNo).padStart(3)} 轮  合计 ${s.total}  tok（系统 ${s.system}｜原文 ${s.recent}｜场记单 ${s.scene}）`);
   }
   const first = sizes[0].total;
   const last = sizes[sizes.length - 1].total;
   ok(last < first * 2.2, `500 轮与第 1 轮同量级（${first} → ${last}）`);
   ok(sizes.every((s) => s.system < 4200), '系统层受配额约束');
   ok(sizes.every((s) => s.scene < 3000), '场记单受配额约束');
+}
+
+console.log('\n=== 覆盖不变量：摘要覆盖过的回合不再逐字，边界之后全部逐字 ===');
+{
+  const sid = `s-cover-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: 'cover', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const coverSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  for (let i = 1; i <= 20; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `旧行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `旧正文${i}`, branch_id: 'main' });
+  }
+  store.addSummary(sid, { branchId: 'main', coversTurnTo: 6, text: '前六轮摘要。' });
+
+  const ctx = await engine.assembleContext({
+    session: coverSession, world, turnNo: 21, playerText: '我继续往前走。',
+  });
+  const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  ok(all.includes('旧正文7'), '摘要边界之后的第一轮仍在（不再只取最后 8 轮）');
+  ok(all.includes('旧正文20'), '最新一轮仍在');
+  ok(!all.includes('旧正文6'), '摘要覆盖的回合不再逐字重复');
+  eq(ctx.meta.coverage.summary_to, 6, 'meta 记录摘要边界');
+  eq(ctx.meta.coverage.recent_from, 7, 'meta 记录原文起点');
+  eq(ctx.meta.coverage.recent_to, 20, 'meta 记录原文终点');
+}
+
+console.log('\n=== system：主角与作者笔记优先于世界索引 ===');
+{
+  const bigCard = schema.normalizeCard({
+    title: '大卡',
+    premise: '测试命题',
+    charter: Array.from({ length: 12 }, (_, i) => ({
+      rule: `宪章${i}：${'这是很长的世界规则。'.repeat(6)}`,
+    })),
+    cast: Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, name: `人物${i}`, role: '角色' })),
+    codex: Array.from({ length: 60 }, (_, i) => ({
+      id: `k${i}`, name: `条目${i}`, type: 'concept', summary: '摘要'.repeat(20),
+    })),
+    player: {
+      name: '我', afraid: '怕水怕高怕欠人情',
+      knowledge: { does_not_know: ['七年前的真相'] },
+    },
+    author_notes: [{ text: '作者必须保留的笔记', scope: 'always' }],
+    anchors: [{ id: 'p0', snapshot: { time: '初冬', place: '雨街' } }],
+  });
+  const bw = { id: `w-big-${Date.now()}`, title: '大卡', card: bigCard };
+  store.saveWorld(bw);
+  const bs = store.createSession({
+    id: `s-big-${Date.now()}`, worldId: bw.id, title: 'big',
+    cardSnapshot: bigCard, worldVersion: 1,
+  });
+  store.createBranch(bs.id, { branchId: 'main' });
+  store.setSessionAnchor(bs.id, 'p0', 'main');
+
+  const ctx = await engine.assembleContext({
+    session: { ...bs, branch_id: 'main', anchor_id: 'p0' },
+    world: bw, turnNo: 1, isOpening: true,
+  });
+  const sys = ctx.messages[0].content;
+  ok(sys.includes('怕水怕高怕欠人情'), '主角的「害怕」没有被截断');
+  ok(sys.includes('七年前的真相'), '主角的知识边界没有被截断');
+  ok(sys.includes('作者必须保留的笔记'), '作者笔记没有被截断');
+  ok(!sys.includes('摘要'.repeat(5)), '世界索引在必需单元之后退化为只留名字');
+}
+
+console.log('\n=== canon / runtime 分离：运行态不改 system 前缀 ===');
+{
+  const w = { id: `w-stable-${Date.now()}`, title: 'stable', card };
+  store.saveWorld(w);
+  const made = store.createSession({
+    id: `s-stable-${Date.now()}`, worldId: w.id, title: 'stable',
+    cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(made.id, { branchId: 'main' });
+  store.setSessionAnchor(made.id, 'prologue', 'main');
+  const sess = { ...made, branch_id: 'main', anchor_id: 'prologue' };
+
+  const before = await engine.assembleContext({ session: sess, world: w, turnNo: 1, isOpening: true });
+  store.addWorldState(made.id, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    path: 'status', op: 'set', value: '左肩中箭', turn: 1, source: 'archivist',
+  });
+  const after = await engine.assembleContext({
+    session: sess, world: w, turnNo: 2, playerText: '我抬头看向玥姐姐。',
+  });
+  ok(after.messages[0].content === before.messages[0].content, '运行态变化不改 system 前缀');
+  const sheet = after.messages
+    .find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheet.includes('左肩中箭'), '运行态进入场记单');
+}
+
+console.log('\n=== 逐轮 directive 进入尾注 ===');
+{
+  const ctx = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '我往前走。',
+    directive: '这一拍让凌玥先开口',
+  });
+  const last = ctx.messages[ctx.messages.length - 1];
+  ok(String(last.content || '').includes('这一拍让凌玥先开口'), '逐轮指令在最后一条 user 消息里');
 }
 
 console.log('\n=== 超预算降级 ===');
@@ -457,22 +589,31 @@ console.log('\n=== 前情提要：覆盖边界与最近原文 ===');
     '超长摘要被截断');
 }
 
-console.log('\n=== 摘要触发：计划是纯函数 ===');
+console.log('\n=== 摘要沉淀：按 token 水位的纯函数 ===');
 {
-  const { planSummary } = await import('../server/agents/summarizer.js');
-  eq(planSummary({ turnNo: 7, active: null, every: 8, keepRecent: 4 }), null, '未到期不压');
+  const { planCompaction } = await import('../server/agents/summarizer.js');
+  const rows = (n, offset = 0) => Array.from({ length: n }, (_, i) => ({
+    turn_no: offset + i + 1, content: '长'.repeat(100),
+  }));
   eq(
-    planSummary({ turnNo: 8, active: null, every: 8, keepRecent: 4 }),
-    { from: 1, to: 4, covered: 0 },
-    '到期后覆盖到「最近保留」之前',
+    planCompaction({ active: null, rows: rows(4), highTokens: 10000, lowTokens: 8000, minRawTurns: 4, maxRawTurns: 12 }),
+    null, '不超过高水位不压',
   );
-  eq(planSummary({ turnNo: 9, active: { covers_turn_to: 4 }, every: 8, keepRecent: 4 }), null, '二次压缩未到期');
   eq(
-    planSummary({ turnNo: 12, active: { covers_turn_to: 4 }, every: 8, keepRecent: 4 }),
-    { from: 5, to: 8, covered: 4 },
-    '二次压缩从上一份边界之后开始',
+    planCompaction({ active: null, rows: rows(10), highTokens: 500, lowTokens: 200, minRawTurns: 4, maxRawTurns: 12 }),
+    { from: 1, to: 6, covered: 0 },
+    '超过高水位：压到低水位，保留至少 minRawTurns',
   );
-  eq(planSummary({ turnNo: 5, active: { covers_turn_to: 4 }, every: 1, keepRecent: 6 }), null, '保留窗口内没有可压内容');
+  eq(
+    planCompaction({ active: { covers_turn_to: 10 }, rows: rows(10, 10), highTokens: 500, lowTokens: 200, minRawTurns: 4, maxRawTurns: 12 }),
+    { from: 11, to: 16, covered: 10 },
+    '从上一份摘要边界之后开始',
+  );
+  eq(
+    planCompaction({ active: null, rows: rows(6), highTokens: 100000, lowTokens: 80000, minRawTurns: 4, maxRawTurns: 4 }),
+    { from: 1, to: 2, covered: 0 },
+    '超过轮数上限也触发',
+  );
 }
 
 console.log('\n=== 检索结果：current 层、当拍注入 ===');

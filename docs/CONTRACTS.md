@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```
-ai-roleplay/
+NarrativeStudio/
 ├── package.json
 ├── server/
 │   ├── index.js            入口
@@ -250,20 +250,31 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //      recentTurns, echoes, meta:{present, mentioned, theme_tags, codex, codex_candidates,
 //                                 codex_rendered, codex_dropped, codex_brief_candidates,
 //                                 codex_brief_rendered, graph:{entities,edges,merged_codex},
-//                                 facts, facts_candidates, dropped_sections, branch, summary,
-//                                 retrieval, degraded} }
+//                                 facts, facts_candidates, dropped_sections, branch,
+//                                 coverage:{summary_to, recent_from, recent_to, turns},
+//                                 summary, retrieval, degraded} }
 ```
 
 装配顺序（缓存友好）：**稳定前缀 → 前情提要 → 追加原文 → 易变尾部**
 
 ```
-1. system   契约 + 命题 + 宪章 + 世界索引（有 parent_id 时是树形；同名 codex 已去重）
+1. system   契约 + 命题 + 宪章 + 世界索引（canon-only；运行态 status/当前地点不进索引）
 2. user     【前情提要】滚动摘要（覆盖到 covers_turn_to）
-3. …        最近原文（turn_no > covers_turn_to，player/assistant 交替）
+3. …        最近原文 = 摘要边界之后的**全部**回合（turn_no > covers_turn_to，player/assistant 交替）
 4. user     场记单（T0 全量设定 + T1 一句邻域设定；每场变一次）
 5. user     【检索结果】（模型主动查阅的辞书全文，当拍蒸发）
 6. user     本场指令 + 本轮行动 + 尾注
 ```
+
+### 记忆覆盖不变量
+
+- **摘要边界 + 1 必须等于原文窗口第一轮**：`coverage.recent_from === coverage.summary_to + 1`
+  （没有更早回合时 `recent_from` 为 null）。原文窗口不做字符串裁剪。
+- 原文离开窗口前必须先被摘要接住：回合末 `planCompaction()` 按 token 高/低水位
+  把最旧一批压进摘要，`covers_turn_to` 前移后，下一次装配的原文从新边界继续。
+  摘要失败时原文继续保留，宁可 prompt 暂时变大，也不在中间留空洞。
+- 结构化记忆（账本/断言/关系/线索/场次）是状态沉淀，不能替代叙事摘要；
+  因果、时间顺序与语气仍由摘要负责。
 
 ### 硬约束
 
@@ -272,7 +283,11 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 - 辞书自动进场仍只有三条路（实体连接 / 主题标签 / 钉选）；`retrieval` 是模型发起的取证，
   不是第四条自动注入路径，代码不因文本匹配自动塞设定。
 - codex 条目按预估成本决定条数（`scene * 0.45 / 90`），高分优先，低分整条放弃。
-- 超预算降级：裁场记单 → 裁前情提要 → 砍一半最近原文 → 截断最长非 system 消息。
+- 超预算降级：裁场记单 → 裁前情提要 → 硬上限兜底（原文窗口不参与软目标裁剪）。
+- system 层先为契约/宪章/主角/常驻作者笔记预留预算；世界索引只吃剩余空间，
+  超了先砍索引，绝不从尾部截断主角或作者笔记。
+- 场记单的可选段落按整条取舍（辞书/回声少一条，不切半句）；`directive` 排在可选设定之前，
+  并且逐轮 directive 同时进入尾注，避免被场记单预算丢掉。
 - 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
   最近原文提到但不在场的角色只进辞书邻域/关系提示，不占完整人物卡位。
 - 玩家角色永远在场（即使不在 cast 里，也会造一个最小条目）。
@@ -325,8 +340,9 @@ runLibrarian({ session, question, signal })               // -> {found, answer, 
 //       get_relations(who) / search_claims(subject,predicate)
 runWorldTick({ session, world, turnNo, signal, guard })   // -> {events, stale?}
 
-// 前情提要（server/agents/summarizer.js）
-planSummary({ turnNo, active, every, keepRecent })   // 纯函数 -> {from,to,covered}|null
+// 前情提要 / 原文沉淀（server/agents/summarizer.js）
+planCompaction({ active, rows, highTokens, lowTokens, minRawTurns, maxRawTurns })
+// 纯函数 -> {from,to,covered}|null；from 必须等于 active.covers_turn_to+1
 runSummarizer({ session, branchId, turnFrom, turnTo, previousSummary, playerName, charName, signal })
 // -> {text, turns, chars, usage} | {skipped:true, reason, chars?}
 

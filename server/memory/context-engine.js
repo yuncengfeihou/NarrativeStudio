@@ -5,10 +5,14 @@
  * 没有关键词触发、没有扫描深度、没有递归、没有优先级、没有常驻开关。
  *
  * 装配顺序（缓存友好：稳定前缀 → 追加原文 → 易变尾部）：
- *   1. system  演绎契约 + 命题 + 宪章 + 世界索引   （一个会话内几乎不变，吃前缀缓存）
- *   2. …      最近原文（player/narrator 交替，只追加）
- *   3. user    场记单 + 回声                       （每场变一次，放在尾部注意力最强处）
- *   4. user    本场指令 + 本轮行动
+ *   1. system  演绎契约 + 命题 + 宪章 + 世界索引   （canon，只随卡片变化）
+ *   2. user    前情提要（摘要覆盖的旧剧情）
+ *   3. …      最近原文 = 摘要边界之后的**全部**回合（player/narrator 交替，只追加）
+ *   4. user    场记单 + 回声                       （runtime，每场变一次，尾部注意力最强）
+ *   5. user    本场指令 + 本轮行动
+ *
+ * 记忆不变量：摘要边界 + 1 必须等于原文窗口的第一轮。原文窗口不做字符串裁剪；
+ * 它的体积由回合末的摘要沉淀（planCompaction）控制，先被摘要接住，才允许离开窗口。
  *
  * 词条（codex）进场靠三条路：实体连接（在场/被提及/被钉选）、主题标签、用户钉选。
  * 唯一保留的字符串匹配是实体链接：它只回答「文本提到了谁」，用来更新场记单的
@@ -22,8 +26,8 @@ import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet } from
 import { buildWorldGraph, graphNeighbors } from '../world/graph.js';
 import { narratorTailInstruction } from '../prompts/narrator.js';
 import {
-  getActiveSummary, getAssertions, getBranch, getRelations, getRecentTurnsForBranch,
-  getRecentTextForBranch, getState, getThreads, getVoiceMap, getWorldState,
+  getActiveSummary, getAssertions, getBranch, getRelations, getRecentTextForBranch,
+  getState, getThreads, getTurnsForBranch, getVoiceMap, getWorldState,
 } from './store.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -87,25 +91,19 @@ export function buildSystemLayer(
     card = normalizeCard(world?.card || {}),
     indexCap = config.context.layerBudget.system,
     graph = null,
-    currentPlaceId = '',
   } = {},
 ) {
-  const parts = [buildContract(session, world, card)];
-
+  /* ---- 必需单元：契约 + 宪章 + 主角 + 常驻作者笔记。它们先占预算，永不参与尾部截断。 ---- */
+  const fixed = [buildContract(session, world, card)];
   const charter = (card.charter || [])
     .map((c, i) => `${i + 1}. ${c.rule}`)
     .join('\n');
   if (charter) {
-    parts.push(`【世界宪章】这个世界的硬设定，任何场景下都成立，不得违背。\n${charter}`);
+    fixed.push(`【世界宪章】这个世界的硬设定，任何场景下都成立，不得违背。\n${charter}`);
   }
+  const fixedText = fixed.join('\n\n');
 
-  const indexCapNow = Math.max(400, indexCap - estimateTokens(parts.join('\n\n')) - 200);
-  // 有包含关系时用树形索引；否则保持平铺。去重后的 codex 不再重复出现。
-  const index = graph
-    ? renderWorldTree(card, indexCapNow, { skipIds: graph.mergedCodexIds, currentPlaceId })
-    : renderWorldIndex(card, indexCapNow);
-  if (index) parts.push(index);
-
+  const tail = [];
   const player = card.player;
   if (player && (player.name || player.situation || player.inner_voice)) {
     const pl = [`【主角】${player.name}${player.age ? `，${player.age}` : ''}${player.identity ? `｜${player.identity}` : ''}`];
@@ -114,16 +112,31 @@ export function buildSystemLayer(
     if (player.inner_voice) pl.push(`内心声音：${player.inner_voice}`);
     if (player.wants) pl.push(`想要的：${player.wants}`);
     if (player.afraid) pl.push(`害怕的：${player.afraid}`);
-    if (player.knowledge.does_not_know.length) pl.push(`他不知道：${join(player.knowledge.does_not_know)}`);
-    parts.push(pl.join('\n'));
+    if (player.knowledge?.does_not_know?.length) pl.push(`他不知道：${join(player.knowledge.does_not_know)}`);
+    tail.push(pl.join('\n'));
   }
-
   const notes = (card.author_notes || []).filter((n) => n.scope === 'always');
   if (notes.length) {
-    parts.push(`【作者笔记】作者亲手写下的事实与规则，优先级高于一切自动记忆与即兴创作。\n${notes.map((n) => `· ${n.text}`).join('\n')}`);
+    tail.push(`【作者笔记】作者亲手写下的事实与规则，优先级高于一切自动记忆与即兴创作。\n${notes.map((n) => `· ${n.text}`).join('\n')}`);
   }
+  const tailText = tail.join('\n\n');
 
-  return truncateToTokens(parts.join('\n\n'), Math.max(2000, indexCap));
+  /* ---- 索引是可选单元：只吃剩余预算；超了先砍索引，不砍主角/作者笔记。 ---- */
+  const reserve = estimateTokens(tailText) + 32;
+  const indexCapNow = Math.max(200, indexCap - estimateTokens(fixedText) - reserve);
+  // 有包含关系时用树形索引；否则保持平铺。去重后的 codex 不再重复出现。
+  const index = graph
+    ? renderWorldTree(card, indexCapNow, { skipIds: graph.mergedCodexIds })
+    : renderWorldIndex(card, indexCapNow);
+
+  let text = [fixedText, index, tailText].filter(Boolean).join('\n\n');
+  if (estimateTokens(text) > indexCap) {
+    const excess = estimateTokens(text) - indexCap;
+    const keep = estimateTokens(index) - excess - 8;
+    const trimmedIndex = keep > 8 ? truncateToTokens(index, keep) : '';
+    text = [fixedText, trimmedIndex, tailText].filter(Boolean).join('\n\n');
+  }
+  return text;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -350,17 +363,6 @@ function toRecentMessages(rows) {
   return out;
 }
 
-function fitRecent(msgs, capTokens, floor = 3) {
-  if (!msgs.length) return [];
-  let total = msgs.reduce((s, m) => s + estimateMessageTokens(m), 0);
-  let start = 0;
-  while (start < msgs.length && total > capTokens && msgs.length - start > floor) {
-    total -= estimateMessageTokens(msgs[start]);
-    start++;
-  }
-  return msgs.slice(start);
-}
-
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 主入口                                                                */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -475,15 +477,14 @@ export async function assembleContext({
       card,
       indexCap: budget.system,
       graph,
-      currentPlaceId: ledger?.place_id || '',
     }),
   };
 
   /* ---- 前情提要（滚动摘要） ---- */
-  // atTurn 传当前回合：只取覆盖边界不超过本轮的摘要。摘要只影响装配，不改写 turns。
+  // 只取「本轮之前」的摘要：摘要覆盖的是已经写完的回合，不能把尚未演绎的当前轮算进去。
   const summary = getActiveSummary(sessionId, {
     branchId,
-    atTurn: Number.isInteger(turnNo) ? turnNo : 0,
+    atTurn: Number.isInteger(turnNo) && turnNo > 0 ? turnNo - 1 : 0,
   });
   // 摘要层有独立配额：摘要 Agent 可能写超，装配时按 BUDGET_SUMMARY 截断，
   // 不能因为总预算还宽裕就让它越过自己的层预算。
@@ -498,19 +499,33 @@ export async function assembleContext({
     : null;
 
   /* ---- 最近原文 ---- */
-  const rawRows = getRecentTurnsForBranch(sessionId, branchId, forkTurn, config.context.recentRawTurns + 4);
-  const visibleRows = (Number.isInteger(turnNo) && turnNo > 0)
+  // 原文窗口 = 摘要边界之后的**全部**回合：不按「最后 N 轮」取，也不做字符串裁剪。
+  // 它的体积由回合末的摘要沉淀控制；这里一旦再截一次，就会制造「摘要没接住、原文已丢」的空洞。
+  const rawRows = getTurnsForBranch(sessionId, branchId, forkTurn, {
+    from: summary ? summary.covers_turn_to + 1 : 1,
+    kinds: ['player', 'narrator'],
+  });
+  const recentRows = (Number.isInteger(turnNo) && turnNo > 0)
     ? rawRows.filter((r) => r.turn_no < turnNo)
     : rawRows;
-  // 摘要覆盖过的回合不再逐字重复；最近保留回合永远逐字。
-  const recentRows = summary
-    ? visibleRows.filter((r) => r.turn_no > summary.covers_turn_to)
-    : visibleRows;
-  let recentMsgs = fitRecent(toRecentMessages(recentRows), budget.recent);
+  const recentMsgs = toRecentMessages(recentRows);
+  const recentTurnNos = [...new Set(recentRows.map((r) => r.turn_no))];
+  const coverage = {
+    summary_to: summary ? summary.covers_turn_to : 0,
+    recent_from: recentTurnNos.length ? recentTurnNos[0] : null,
+    recent_to: recentTurnNos.length ? recentTurnNos[recentTurnNos.length - 1] : null,
+    turns: recentTurnNos.length,
+  };
 
   /* ---- 本轮输入 ---- */
   const sceneNotes = (card.author_notes || []).filter((n) => n.scope === 'scene' || n.scope === 'session');
-  const directiveText = [str(session.settings?.scene_directive), ...sceneNotes.map((n) => n.text)].filter(Boolean).join('\n');
+  // 逐轮 directive 也必须进尾注：场记单可能因为预算丢掉「本场指令」，
+  // 尾注是最贴近生成点的通道，不能只保护 session 级指令。
+  const directiveText = [...new Set([
+    str(directive),
+    str(session.settings?.scene_directive),
+    ...sceneNotes.map((n) => str(n.text)),
+  ].filter(Boolean))].join('\n');
   let extra = '';
   if (isOpening) {
     extra = str(anchor?.opening_seed)
@@ -532,8 +547,9 @@ export async function assembleContext({
   ];
   let messages = compose();
 
-  /* ---- 超预算降级：场记单 → 摘要 → 最近原文减半 → 截最长非 system ---- */
-  // 最近原文是续演点，优先保住；摘要是压缩过的，截尾损失最小。
+  /* ---- 超预算降级：场记单 → 摘要 → 硬上限兜底 ---- */
+  // 原文窗口不参与软目标降级：它的体积由回合末的摘要沉淀控制。
+  // 摘要滞后时宁可让总预算短暂超过软目标，也不在中间制造空洞。
   const totalNow = () => messages.reduce((s, m) => s + estimateMessageTokens(m), 0);
   const degraded = [];
   if (totalNow() > softMax && sheetMsg) {
@@ -550,15 +566,11 @@ export async function assembleContext({
     messages = compose();
     degraded.push('summary');
   }
-  if (totalNow() > softMax) {
-    recentMsgs = fitRecent(toRecentMessages(recentRows), Math.max(2000, budget.recent * 0.5));
-    messages = compose();
-    degraded.push('recent');
-  }
+  // 硬安全网：只在超过 CONTEXT_MAX_TOKENS 时触发，且不碰 system 与最后一条本轮输入。
   for (let guard = 0; guard < 30 && totalNow() > hardMax; guard++) {
     const candidates = messages
       .map((m, i) => ({ m, i }))
-      .filter(({ m }) => typeof m.content === 'string' && m.role !== 'system');
+      .filter(({ m, i }) => typeof m.content === 'string' && m.role !== 'system' && i !== messages.length - 1);
     if (!candidates.length) break;
     candidates.sort((a, b) => estimateMessageTokens(b.m) - estimateMessageTokens(a.m));
     const m = candidates[0].m;
@@ -613,6 +625,8 @@ export async function assembleContext({
       facts_candidates: facts.length,
       dropped_sections: sheet.meta?.dropped || [],
       branch: branchId,
+      // 覆盖清单：摘要边界 + 原文窗口。两者应当首尾相接；recent_from 必须等于 summary_to + 1。
+      coverage,
       summary: summary ? { id: summary.id, covers_turn_to: summary.covers_turn_to, tokens: breakdown.summary } : null,
       retrieval: retrieval?.text
         ? { queries: retrieval.queries || [], entries: retrieval.entries || [], tokens: breakdown.retrieval }

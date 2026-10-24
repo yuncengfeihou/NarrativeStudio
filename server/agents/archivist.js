@@ -398,8 +398,14 @@ export async function runArchivist({
 
   const res = await chat({
     messages: [
-      { role: 'system', content: archivistSystemPrompt({ castIndex, codexIndex, openThreads, playerName: card.player?.name }) },
-      { role: 'user', content: archivistUserPrompt({ turnNo: no, playerText, branchChoice, narrative }) },
+      { role: 'system', content: archivistSystemPrompt() },
+      {
+        role: 'user',
+        content: archivistUserPrompt({
+          turnNo: no, playerText, branchChoice, narrative,
+          castIndex, codexIndex, openThreads, playerName: card.player?.name,
+        }),
+      },
     ],
     temperature: options.temperature ?? cfg.temperature,
     maxTokens: options.maxTokens ?? cfg.maxTokens,

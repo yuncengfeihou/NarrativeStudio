@@ -153,7 +153,7 @@ const child = spawn(process.execPath, ['server/index.js'], {
     STEPFUN_BASE_URL: `http://127.0.0.1:${upstreamPort}/v1`,
     LLM_MAX_RETRIES: '0',
     NARRATION_MODE: 'single',
-    SUMMARY_EVERY: '999',
+    SUMMARY_HIGH_TOKENS: '999999',
     CONTINUITY_EVERY: '999',
     LORE_SCAN_DEPTH: '1',
   },

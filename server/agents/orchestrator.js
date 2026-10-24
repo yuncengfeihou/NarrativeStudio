@@ -25,7 +25,7 @@ import {
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
   upsertRelation,
 } from '../memory/store.js';
-import { planSummary, runSummarizer } from './summarizer.js';
+import { planCompaction, runSummarizer } from './summarizer.js';
 import { runRetrieval, shouldPrecheckRetrieval } from './retrieval.js';
 
 // sessionId -> 串行链
@@ -383,17 +383,27 @@ async function runTurnInner({
 }
 
 /**
- * 回合末的前情提要。
+ * 回合末的前情提要（原文沉淀）。
  *
- * 触发是结构信号：上一份摘要之后攒够了 SUMMARY_EVERY 轮，且最近 SUMMARY_KEEP_RECENT 轮
- * 之外确实有可压的原文。失败/不够长/期间切线都只跳过，不影响正文。
+ * 触发是 token 水位，不是固定轮数：摘要边界之后的原文超过 high 水位（或轮数上限）时，
+ * 把最旧一批压进摘要，压到 low 水位以下。压缩成功后 covers_turn_to 前移，
+ * 下一次装配的原文窗口从新的边界继续——摘要与原文始终无缝接力。
+ * 失败/不够长/期间切线都只跳过，不影响正文；原文继续保留，不会因此出现空洞。
  */
 async function maybeSummarize({ session, world, turnNo, branchId, emit, signal }) {
-  const every = config.context.summaryEvery;
   const active = getActiveSummary(session.id, { branchId, atTurn: turnNo });
-  const plan = planSummary({
-    turnNo, active, every,
-    keepRecent: config.context.summaryKeepRecent,
+  const covered = Number(active?.covers_turn_to) || 0;
+  const branch = getBranch(session.id, branchId);
+  const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
+  const rows = getTurnsForBranch(session.id, branchId, forkTurn, {
+    from: covered + 1, to: turnNo, kinds: ['player', 'narrator'],
+  }).filter((r) => String(r.content || '').trim());
+  const plan = planCompaction({
+    active, rows,
+    highTokens: config.context.summaryHighTokens,
+    lowTokens: config.context.summaryLowTokens,
+    minRawTurns: config.context.summaryMinRawTurns,
+    maxRawTurns: config.context.summaryMaxRawTurns,
   });
   if (!plan || signal?.aborted) return null;
 
