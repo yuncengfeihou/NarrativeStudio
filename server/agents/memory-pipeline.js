@@ -12,6 +12,7 @@
  */
 import { config } from '../config.js';
 import { chat } from '../llm.js';
+import { currentPlan } from '../memory/context-plan.js';
 import { buildAliasIndex, normalizeCard, PERSON_TYPE, resolveEntity } from '../world/schema.js';
 import { pathsFor } from '../world/state-paths.js';
 import {
@@ -180,8 +181,13 @@ export function detectSceneChange(session, update, turnNo) {
   const every = config.context.sceneEvery;
   if (every > 0 && turnNo > 0 && turnNo - prev.turn_from + 1 >= every) return true;
 
-  // 强制封场：按本场原文 token（场记 Agent 的输入不能无限增长）
-  const maxTokens = config.context.sceneMaxTokens;
+  // 强制封场：按本场原文 token（场记 Agent 的输入不能无限增长）。
+  // 上限同时受两个约束：显式 SCENE_MAX_TOKENS，以及「逐字原文的规划配额」——
+  // 后者从模型窗口推导。小窗口模型会在原文撑爆提示词之前就封场，
+  // 而不是等硬上限 fail-closed 才报错。原文本身永不按 token 裁剪（那是静默失忆）。
+  const sceneMax = config.context.sceneMaxTokens;
+  const planRecent = Math.max(4000, currentPlan({ session }).layers.recent);
+  const maxTokens = sceneMax > 0 ? Math.min(sceneMax, planRecent) : planRecent;
   if (maxTokens > 0) {
     const rows = getTurnsForBranch(sessionId, branchId, forkTurn, {
       from: prev.turn_to + 1, to: turnNo, kinds: ['player', 'narrator'],

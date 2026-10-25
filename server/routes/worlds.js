@@ -21,14 +21,16 @@ import {
 import { normalizeCard, renderCardText } from '../world/schema.js';
 import { lintCard } from '../world/lint.js';
 import { createSessionWithSettings } from '../agents/orchestrator.js';
-import { resolveContextWindow } from '../model-registry.js';
+import { currentPlan } from '../memory/context-plan.js';
 
 export const worldsRouter = Router();
 
 /** 从卡片生成会话的初始 settings。 */
 function settingsFromWorld(world, overrides = {}) {
   const card = normalizeCard(world.card || {});
-  const cap = resolveContextWindow('narrator');
+  // 会话级上限默认取「提示词硬上限」（窗口 − 生成预留 − 安全余量），而不是整个模型窗口；
+  // 否则会话设置里会存一个装配层还要再扣一次的数字。显式值只能在这个上限内收紧。
+  const cap = currentPlan().hardMax;
   const settings = {
     world_id: world.id,
     title: overrides.title || card.title || world.title,

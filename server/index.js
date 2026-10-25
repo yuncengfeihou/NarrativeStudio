@@ -12,6 +12,7 @@ import { smithRouter } from './routes/smith.js';
 import { fontsRouter } from './routes/fonts.js';
 import { staticRouter } from './routes/static.js';
 import { getDb } from './memory/store.js';
+import { currentPlan } from './memory/context-plan.js';
 
 try {
   assertConfig();
@@ -80,6 +81,8 @@ process.on('unhandledRejection', (reason) => {
 
 app.listen(config.port, config.host, () => {
   const shown = config.host === '0.0.0.0' ? 'localhost' : config.host;
+  // 预算从 narrator 绑定模型的窗口推导，启动横幅直接显示推导结果（换模型即变）。
+  const plan = currentPlan();
   console.log(`
   ╔══════════════════════════════════════════════════════════╗
   ║           AI Roleplay Studio — 已启动                     ║
@@ -88,8 +91,9 @@ app.listen(config.port, config.host, () => {
   ║  OpenAI 兼容 API http://${shown}:${config.port}/v1
   ║    模型: ${config.upstream.model}
   ║    上游: ${config.upstream.baseUrl}
-  ║  上下文软目标    ${config.context.softTokens.toLocaleString()} tokens
-  ║  上下文硬上限    ${config.context.maxTokens.toLocaleString()} tokens
+  ║  模型窗口        ${plan.window.toLocaleString()} tokens
+  ║  提示词硬上限    ${plan.hardMax.toLocaleString()} tokens（已扣生成预留 ${plan.outputReserve.toLocaleString()}）
+  ║  上下文软目标    ${plan.softMax.toLocaleString()} tokens${plan.autoSoft ? '（按窗口自动）' : ''}
   ╚══════════════════════════════════════════════════════════╝
   `);
 });

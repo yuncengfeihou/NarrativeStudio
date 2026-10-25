@@ -22,6 +22,7 @@ const engine = await import('../server/memory/context-engine.js');
 const schema = await import('../server/world/schema.js');
 const { config } = await import('../server/config.js');
 const { shouldPrecheckRetrieval } = await import('../server/agents/retrieval.js');
+const { currentPlan, planContext } = await import('../server/memory/context-plan.js');
 const { comparePromptMessages } = await import('../server/memory/prompt-drift.js');
 const sceneSheet = await import('../server/world/scene-sheet.js');
 
@@ -163,7 +164,9 @@ console.log('\n=== 删干净的证据 ===');
   eq(ctx.meta.system_blocks.timeline_past.count, 1, 'meta：前史条数');
   eq(ctx.meta.system_blocks.timeline_past.rendered, 1, 'meta：前史渲染条数');
   ok(ctx.meta.system_blocks.timeline_past.tokens > 0, 'meta：前史块 token');
-  eq(ctx.meta.system_blocks.timeline_past.cap, 240, 'meta：前史块预算上限');
+  eq(ctx.meta.system_blocks.timeline_past.cap,
+    Math.max(240, Math.round(ctx.meta.plan.layers.system * 0.1)),
+    'meta：前史块预算 = system 配额的 10%（下限 240）');
 
   // 系统层包含宪章与索引
   ok(all.includes('【世界宪章】'), '宪章在场');
@@ -397,6 +400,38 @@ console.log('\n=== 场记单内容 ===');
   ok(!sheet.includes('玉佩'), 'reveal=secret 的条目不被链接带出时不出现在单子里');
 }
 
+console.log('\n=== 预算从模型窗口推导（不再写死层配额） ===');
+{
+  const plan = currentPlan();
+  const ctx = await engine.assembleContext({ session: S, world, turnNo: 1, isOpening: true });
+  eq(ctx.meta.plan.window, plan.window, 'meta.plan.window = narrator 模型窗口');
+  eq(ctx.meta.plan.hard_max, plan.hardMax, 'meta.plan.hard_max = 窗口 − 生成预留 − 安全余量');
+  ok(plan.hardMax < plan.window, '硬上限给生成留出空间（不再等于整个窗口）');
+  ok(plan.outputReserve > 0, '生成预留 > 0');
+  eq(ctx.meta.plan.layers, plan.layers, 'meta 记录各层配额');
+  const sum = Object.values(plan.layers).reduce((a, b) => a + b, 0);
+  ok(sum >= plan.softMax, '各层配额合计覆盖软目标（记忆层不会被无故挤掉）');
+  ok(plan.autoSoft === (config.context.softTokens === 0), '软目标为 0 时按窗口自动推导');
+
+  // 小窗口按比例缩放，而不是继续套用大窗口的常量。
+  const small = planContext({ windowTokens: 32000, outputTokens: 8000 });
+  ok(small.layers.archive < plan.layers.archive, '小窗口的场次索引配额同比缩小');
+  ok(small.layers.scene >= 800, '小窗口下场记单仍有下限');
+  ok(small.hardMax < small.window, '小窗口硬上限同样扣除生成预留');
+
+  // 显式会话上限：不能超过窗口。
+  const capped = planContext({ windowTokens: 200000, outputTokens: 12000, sessionMaxTokens: 30000 });
+  eq(capped.hardMax, 30000, '会话上限直接成为提示词硬上限');
+
+  // 实体召回率：默认卡的全部实体都应能从整轮上下文看见（索引 + 场次 + 场记单）。
+  ok(ctx.meta.recall.total > 0, 'meta.recall 记录实体总数');
+  eq(ctx.meta.recall.total, ctx.meta.system_blocks.index.total + ctx.meta.system_blocks.index.muted,
+    'recall 覆盖全部实体（含被静音者）');
+  ok(ctx.meta.recall.rate >= 0.99, `默认卡实体召回率 ${ctx.meta.recall.rate}`);
+  eq(ctx.meta.system_blocks.index.rendered, ctx.meta.system_blocks.index.total - ctx.meta.system_blocks.index.muted,
+    '200K 窗口下世界索引不再丢实体');
+}
+
 console.log('\n=== 体积不随轮数增长（原文窗口由场次边界控制） ===');
 {
   const sid = `s-volume-${Date.now()}`;
@@ -447,8 +482,14 @@ console.log('\n=== 体积不随轮数增长（原文窗口由场次边界控制�
   ok(sizes.every((s) => s.system < 4200), '系统层受配额约束');
   ok(sizes.every((s) => s.scene < 4000), '场记单受配额约束');
   // 场次索引随场数增长，但有上界（超了靠降级，不是无限膨胀）。
-  ok(sizes.every((s) => s.archive <= config.context.layerBudget.archive + 40),
-    '场次索引受独立配额约束');
+  const plan = currentPlan();
+  ok(sizes.every((s) => s.archive <= plan.layers.archive + 40),
+    '场次索引受规划配额约束');
+  // 200K 窗口下 500 轮（约 83 场）必须完整可寻址：不降级、不丢行。
+  eq(sizes[sizes.length - 1].coverage.scene_index_dropped, 0,
+    '500 轮：场次索引没有整行丢弃（长程记忆完整）');
+  eq(sizes[sizes.length - 1].coverage.scene_index_degraded, 0,
+    '500 轮：场次索引没有降级粒度');
 }
 
 console.log('\n=== 覆盖不变量：场次覆盖过的回合不再逐字，边界之后全部逐字 ===');
@@ -523,7 +564,22 @@ console.log('\n=== system：主角与作者笔记优先于世界索引 ===');
   ok(sys.includes('怕水怕高怕欠人情'), '主角的「害怕」没有被截断');
   ok(sys.includes('七年前的真相'), '主角的知识边界没有被截断');
   ok(sys.includes('作者必须保留的笔记'), '作者笔记没有被截断');
-  ok(!sys.includes('摘要'.repeat(5)), '世界索引在必需单元之后退化为只留名字');
+  // 预算按模型窗口推导后，200K 窗口下这张 72 实体的卡不该被截断——静默丢实体才是失真。
+  eq(ctx.meta.system_blocks.index.dropped, 0, '预算充足时世界索引不丢实体');
+
+  // 预算收紧时：索引先退化为只留名字，但主角/知识边界/作者笔记必须保住。
+  const tight = await engine.assembleContext({
+    session: {
+      ...bs, branch_id: 'main', anchor_id: 'p0',
+      settings: { ...bs.settings, context_max_tokens: 2600 },
+    },
+    world: bw, turnNo: 1, isOpening: true,
+  });
+  const tsys = tight.messages[0].content;
+  ok(tsys.includes('怕水怕高怕欠人情'), '收紧后主角的「害怕」仍在');
+  ok(tsys.includes('七年前的真相'), '收紧后主角的知识边界仍在');
+  ok(tsys.includes('作者必须保留的笔记'), '收紧后作者笔记仍在');
+  ok(tight.meta.system_blocks.index.dropped > 0, '收紧后世界索引退化为只留名字');
 }
 
 console.log('\n=== canon / runtime 分离：运行态不改 system 前缀 ===');

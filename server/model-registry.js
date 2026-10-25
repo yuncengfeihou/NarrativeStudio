@@ -355,15 +355,18 @@ export function getEffectiveConfig() {
     };
   }
 
-  const hardMax = resolveContextWindow('narrator');
+  const windowTokens = resolveContextWindow('narrator');
   return {
     source,
     providers,
     models,
     agents,
     context: {
-      hard_max_tokens: hardMax,
-      soft_target_tokens: Math.min(config.context.softTokens, hardMax),
+      // 模型窗口是唯一硬事实。提示词硬上限 / 软目标 / 各层配额由
+      // server/memory/context-plan.js 从窗口推导，并由路由层合并进这个视图
+      // （预算模块依赖 model-registry，反过来 import 会形成循环）。
+      window_tokens: windowTokens,
+      output_reserve_tokens: agents.narrator.maxTokens ?? config.agents.narrator.maxTokens,
       model_id: agents.narrator.modelId,
       model: agents.narrator.model,
     },

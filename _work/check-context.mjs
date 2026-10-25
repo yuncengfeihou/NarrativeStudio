@@ -18,6 +18,7 @@ const turns = Number(process.argv[2]) || 500;
 
 const store = await import('../server/memory/store.js');
 const engine = await import('../server/memory/context-engine.js');
+const { currentPlan } = await import('../server/memory/context-plan.js');
 const { normalizeCard } = await import('../server/world/schema.js');
 const fs = await import('node:fs');
 
@@ -68,7 +69,7 @@ for (const n of samples) {
     session: S, world, turnNo: n, playerText: '我沿着雨街往东走。',
   });
   const b = ctx.budget;
-  results.push({ n, ...b });
+  results.push({ n, ...b, recall: ctx.meta.recall, index: ctx.meta.system_blocks?.index, coverage: ctx.meta.coverage });
   const c = ctx.meta.coverage || {};
   const seam = c.recent_from == null || c.recent_from === c.scene_to + 1 ? '✓' : '✗';
   console.log(
@@ -86,11 +87,28 @@ console.log(`\n首轮 ${first} → 第 ${last.n} 轮 ${last.total} tok`
   + `（增长 ${((growth - 1) * 100).toFixed(1)}%）`);
 
 // 场次索引随场数增长，但有明确上界；其余层与轮数无关。
+const plan = currentPlan();
 const maxArchive = Math.max(...results.map((r) => r.archive));
-console.log(`场次索引峰值 ${maxArchive} tok（配额 1800，靠降级而不是硬砍收敛）`);
+console.log(`场次索引峰值 ${maxArchive} tok（规划配额 ${plan.layers.archive}，靠降级而不是硬砍收敛）`);
+const lastIndex = last.index || {};
+console.log(`世界索引 ${lastIndex.rendered ?? '?'}/${lastIndex.total ?? '?'} 实体`
+  + `（丢 ${lastIndex.dropped ?? 0}），实体召回率 ${last.recall?.rate ?? '?'}`);
+console.log(`场次索引丢行 ${last.coverage?.scene_index_dropped ?? 0}、降级 ${last.coverage?.scene_index_degraded ?? 0}`);
 
 if (growth > 6) {
   console.error('✗ 体积随轮数增长过多，不符合设计');
+  process.exit(1);
+}
+if (maxArchive > plan.layers.archive + 40) {
+  console.error('✗ 场次索引超出规划配额，降级没有收敛');
+  process.exit(1);
+}
+if (last.coverage?.scene_index_dropped) {
+  console.error('✗ 场次索引整行丢弃：长程记忆被静默裁掉');
+  process.exit(1);
+}
+if ((last.recall?.rate ?? 0) < 0.99) {
+  console.error('✗ 实体召回率低于 99%：有实体在本轮上下文中完全不可见');
   process.exit(1);
 }
 console.log('✓ 体积有上界：场次索引随场数增长并被配额收敛，其余层与轮数无关');

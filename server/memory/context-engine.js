@@ -23,13 +23,13 @@
  * 在场者与随身物，不回答「该注入哪段设定」。
  */
 import { config } from '../config.js';
-import { resolveContextWindow } from '../model-registry.js';
 import { estimateMessageTokens, estimateTokens, truncateToTokens } from '../tokens.js';
 import { normalizeCard, buildAliasIndex, linkEntities, sceneThemeTags } from '../world/schema.js';
 import { buildEffectiveWorld, emptyPersonEntry } from '../world/effective.js';
 import { renderWorldIndex, renderWorldTree, renderTimelinePast, selectCodex, renderSceneSheet, renderSceneIndex, renderRecentScenes } from '../world/scene-sheet.js';
 import { buildWorldGraph, graphNeighbors } from '../world/graph.js';
 import { isFunctionalPredicate } from './predicates.js';
+import { currentPlan } from './context-plan.js';
 import { lintState } from './lint-state.js';
 import { comparePromptMessages } from './prompt-drift.js';
 import { evaluateFates, renderOmens } from '../world/fates.js';
@@ -115,7 +115,8 @@ export function buildContract(session, world, card = normalizeCard(world?.card |
 export function buildSystemLayer(
   session, world, {
     card = normalizeCard(world?.card || {}),
-    indexCap = config.context.layerBudget.system,
+    // 默认取当前规划（装配器总会显式传）；单独调用时也不至于把索引清空。
+    indexCap = currentPlan().layers.system,
     graph = null,
     pastText = '',
   } = {},
@@ -213,10 +214,41 @@ function measureIndexCoverage(card, indexText, capTokens, mode) {
   };
 }
 
+/**
+ * 实体召回率：最终送模文本里出现了多少个卡内实体的名字。
+ * 与 measureIndexCoverage 的区别：后者只看 system 的世界索引（自动入口），
+ * 这里看整轮上下文（索引 + 场次索引 + 逐字原文 + 场记单），回答「模型这一拍
+ * 到底看得见多少实体」。只进 meta，不进提示词，不参与任何注入决策；
+ * 名字是子串命中，是近似指标，不是「模型一定知道」。
+ */
+function measureEntityRecall(card, messages) {
+  const entities = (card?.entities || []).filter((e) => str(e.name || e.id).trim());
+  const text = (messages || [])
+    .map((m) => (typeof m.content === 'string' ? m.content : ''))
+    .join('\n');
+  const byType = {};
+  let visible = 0;
+  for (const e of entities) {
+    const name = str(e.name || e.id).trim();
+    const type = str(e.type) || 'custom';
+    if (!byType[type]) byType[type] = { visible: 0, total: 0 };
+    byType[type].total++;
+    if (text.includes(name)) {
+      visible++;
+      byType[type].visible++;
+    }
+  }
+  return {
+    total: entities.length,
+    visible,
+    rate: entities.length ? Math.round((visible / entities.length) * 1000) / 1000 : null,
+    by_type: byType,
+  };
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 2. 账本（场景状态）                                                     */
 /* ══════════════════════════════════════════════════════════════════════ */
-
 /** 读当前场景账本；没有快照时退回起点锚点的 snapshot。 */
 function loadLedger(sessionId, anchor, { branchId, atTurn }) {
   const rec = getState(sessionId, { branchId, atTurn });
@@ -557,15 +589,13 @@ export async function assembleContext({
   session, world, turnNo, playerText, images, branchChoice, isOpening = false, directive = '',
   retrieval = null, previousMessages = null,
 }) {
-  const budget = config.context.layerBudget;
-  // 硬上限由 narrator 绑定模型的 contextWindow 决定（未保存运行期配置时 = CONTEXT_MAX_TOKENS）。
-  // 会话可以请求更小的上限，但不能超过模型窗口。
-  const modelCap = resolveContextWindow('narrator');
-  const requestedMax = Number(session?.settings?.context_max_tokens);
-  const hardMax = Number.isFinite(requestedMax) && requestedMax > 0
-    ? Math.min(requestedMax, modelCap)
-    : modelCap;
-  const softMax = Math.min(config.context.softTokens, hardMax);
+  // 预算从 narrator 绑定模型的窗口推导：窗口 − 生成预留 = 提示词硬上限，
+  // 各层按职责比例分（见 context-plan.js）。会话可以请求更小的上限，但不能超过窗口。
+  // 没有任何一层再被写死成常量——换模型即换预算，不需要改 .env。
+  const plan = currentPlan({ session });
+  const budget = plan.layers;
+  const hardMax = plan.hardMax;
+  const softMax = plan.softMax;
   // 超硬上限策略：fail（默认，拒绝本轮并报错）| truncate（旧行为，调试/应急）。
   const hardCapMode = config.context.overHardCap === 'truncate' ? 'truncate' : 'fail';
   const sessionId = session.id;
@@ -717,7 +747,10 @@ export async function assembleContext({
   // system 一旦读运行态，前缀每轮都失效（实测 1000 轮里 system 变 251 次）。
   // 前史块（timeline canon=past）也来自模板快照：它是「开局之前已经成立」的
   // canon，不是本局演出结果。future/branch 永不渲染（红线 3）。
-  const timelinePast = renderTimelinePast(templateCard, 240);
+  // 前史块（canon=past）与索引共享 system 预算，给它 system 配额的 10%（下限 240）：
+  // 前史是「开局之前已成立」的 canon，条数由作者写，不该被 240 这个旧常量截断。
+  const pastCap = Math.max(240, Math.round(budget.system * 0.10));
+  const timelinePast = renderTimelinePast(templateCard, pastCap);
   const systemLayer = buildSystemLayer(session, world, {
     card: templateCard,
     indexCap: budget.system,
@@ -873,7 +906,7 @@ export async function assembleContext({
       const err = new Error(
         `上下文超过硬上限 ${hardMax} tok（当前约 ${over} tok）。场次索引与逐字原文是记忆载体，`
         + `不做字符串截断；已整层收窄：[${narrowed.join(', ') || '无'}]。`
-        + `请先封场（减少当前场原文）、换更大上下文的模型，或调低 BUDGET_RECENT。`,
+        + `请先封场（减少当前场原文）、换更大上下文的模型，或调低 SCENE_MAX_TOKENS。`,
       );
       err.code = 'CONTEXT_OVER_HARD_CAP';
       err.meta = {
@@ -979,7 +1012,7 @@ export async function assembleContext({
       // 前史块落位：只进 system 世界索引（与世界索引共享 system 预算），
       // 是 canon=past 的唯一入口；future/branch 不在这里计数（它们不进提示词）。
       system_blocks: {
-        timeline_past: { ...timelinePast.meta, cap: 240 },
+        timeline_past: { ...timelinePast.meta, cap: pastCap },
         // 世界索引的覆盖率：卡越大，被截断的实体越多。只进 meta，不进提示词。
         index: systemLayer.meta.index_coverage,
       },
@@ -1036,6 +1069,20 @@ export async function assembleContext({
       },
       soft_max: softMax,
       hard_max: hardMax,
+      // 预算规划：从模型窗口推导的硬上限 / 软目标 / 各层配额（只进 meta，不进提示词）。
+      // 换模型即换预算；UI 与排查都以这里为准，不再有独立的 BUDGET_* 常量。
+      plan: {
+        window: plan.window,
+        output_reserve: plan.outputReserve,
+        safety: plan.safety,
+        hard_max: plan.hardMax,
+        soft_max: plan.softMax,
+        auto_soft: plan.autoSoft,
+        layers: { ...plan.layers },
+        shares: { ...plan.shares },
+      },
+      // 实体召回率：整轮上下文里能看见多少卡内实体（近似子串统计，只进 meta）。
+      recall: measureEntityRecall(templateCard, messages),
       // 硬上限策略与「整层收窄」记录：fail 模式下本字段只出现在错误 meta 里。
       hard_cap: { mode: hardCapMode, narrowed },
     },

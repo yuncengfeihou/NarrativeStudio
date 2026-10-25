@@ -284,7 +284,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 // retrieval        = { text, queries, entries } | null   // 模型主动检索的辞书全文（当拍）
 // previousMessages = 上一轮真实发出的 messages | null     // 仅用于计算前缀复用率，不影响装配内容
 // -> { messages,
-//      budget:{system,archive,summary,recent,scene,retrieval,current,total},   // summary 恒为 0（层已移除）
+//      budget:{system,archive,summary,recent,scene,retrieval,current,total},   // 本轮**实际渲染**体积；summary 恒为 0（层已移除）
 //      state, ledger, anchor, recentTurns, echoes,
 //      meta:{present, mentioned, theme_tags, codex, codex_candidates,
 //            codex_rendered, codex_dropped, codex_brief_candidates,
@@ -305,6 +305,9 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //                   drift:{verdict,index,char_offset,left_excerpt,right_excerpt,shared_messages,
 //                          prev_count,next_count}},
 //            summary: null, retrieval, degraded, soft_max, hard_max,
+//            plan:{window, output_reserve, safety, hard_max, soft_max, auto_soft,
+//                  layers:{system,archive,archiveDetail,recent,scene,retrieval,current}, shares:{...}},
+//            recall:{total, visible, rate, by_type:{<type>:{visible,total}}},
 //            hard_cap:{mode:'fail'|'truncate', narrowed:['scene_detail'|'scene_sheet'|'retrieval']},
 //            messages:[{index, role, owner, tokens}]}} }
 ```
@@ -337,6 +340,17 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 只写 `turns.meta_json`，不进提示词；用于回答「这条消息算谁的预算」，也是新增内容必须
 落进某一层配额的可核对证据。
 
+`meta.plan` 是**本轮预算规划**（`server/memory/context-plan.js` 纯函数 `planContext()` 推导）：
+`window` 生效 narrator 模型窗口、`output_reserve` 生成预留（narrator.maxTokens，上限 window/4）、
+`safety` 安全余量、`hard_max` 提示词硬上限 = window − output_reserve − safety、
+`soft_max` 软目标（`CONTEXT_SOFT_TOKENS=0` 时自动取 hard_max × 55%）、`auto_soft` 是否自动、
+`layers` 各层配额、`shares` 职责份额。换模型即换预算，**没有独立的 BUDGET_* env 常量**。
+`budget`（实际渲染体积）与 `plan.layers`（配额）是两回事，排查时对照着看。
+
+`meta.recall` 是**实体召回率**：统计卡内实体 `name` 子串在本轮整条 messages（system +
+场次索引 + 原文 + 场记单 + 检索）里出现的数量，返回 `{total, visible, rate, by_type}`。
+近似指标，只进 `turns.meta_json`；世界索引的完整渲染情况另有 `meta.system_blocks.index`。
+
 `buildSystemLayer(...)` 返回 `{ text, meta:{ index_coverage } }`（不再是裸字符串）。
 `index_coverage` 是世界索引的覆盖率事后统计：`total` 卡内实体数、`rendered` 名字出现在
 最终索引文本里的实体数、`muted` 被静音的设定集条目数、`dropped` 未出现的数量、
@@ -352,8 +366,8 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 - 只读 `session.card_snapshot`，**不读 world_state / scenes**：system 必须在连续 10 轮里逐字节不变。
 - `canon === 'future'` / `'branch'` **永不渲染**（红线 3：future 只作改编卡的校勘参考，
   既不是既定事实，也不是演绎目标）；提示词里不出现 future 事件或「必达节拍」指令。
-- 前史与世界索引**共享 system 预算**：先按上限 240 tok 从最新往前取（塞不下的旧行整条丢弃，
-  不切半句），索引再吃剩余空间；绝不挤掉契约/宪章/主角/常驻作者笔记。
+- 前史与世界索引**共享 system 预算**：前史先按 `max(240, system 配额 × 10%)` 从最新往前取
+  （塞不下的旧行整条丢弃，不切半句），索引再吃剩余空间；绝不挤掉契约/宪章/主角/常驻作者笔记。
 
 ### 记忆覆盖不变量
 
@@ -375,16 +389,18 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   不是第四条自动注入路径，代码不因文本匹配自动塞设定。
 - codex 条目按预估成本决定条数（`scene * 0.45 / 90`），高分优先，低分整条放弃。
 - 超预算降级：软目标内裁场次细节 → 裁场记单（原文窗口与场次索引不参与软目标裁剪）。
-  超硬上限（`CONTEXT_MAX_TOKENS`）先**整层**收窄：删场景细节 → 删场记单 → 删检索，
+  超硬上限（`meta.plan.hard_max`）先**整层**收窄：删场景细节 → 删场记单 → 删检索，
   记 `degraded:['scene_detail_dropped'|'scene_sheet_dropped'|'retrieval_dropped']`；
   仍超则默认 **fail-closed**：`assembleContext()` 抛 `CONTEXT_OVER_HARD_CAP`
   （`err.meta` 含 total/hard_max/soft_max/mode/narrowed/degraded），SSE 收到 error 事件，
   **绝不把半句话送进模型**。`CONTEXT_OVER_HARD_CAP=truncate` 才回退旧行为（截断 70% +
   `degraded:['over_hard_cap']`），仅调试/应急。
-- **硬上限取生效模型窗口**：`assembleContext()` 用
-  `min(session.settings.context_max_tokens 或 生效 narrator 模型 contextWindow)`，
-  其中 contextWindow 来自运行期模型配置（见「模型选择」）；新建会话与 `settingsFromWorld()`
-  写入的 `context_max_tokens` 同样按该窗口 clamped。
+- **硬上限从模型窗口推导**：`hard_max = 生效 narrator 模型 contextWindow − 生成预留 − 安全余量`
+  （见 `meta.plan`）；会话 `settings.context_max_tokens` 只能**收紧**该上限
+  （`hardMax = min(sessionMax, window − 生成预留 − 安全余量)`），不能突破生成预留；
+  新建会话与 `settingsFromWorld()` 写入的 `context_max_tokens` 同样按该推导上限 clamped。
+- 各层配额 = 软目标 × 职责份额（system 32% / archive 30% / archiveDetail 6% / scene 22% /
+  retrieval 4% / current 6%）；`recent`（40%）只是强制封场的规划上限，**不裁原文**。
 - system 层先为契约/宪章/主角/常驻作者笔记预留预算；世界索引与前史只吃剩余空间，
   超了先砍索引、再丢最旧的前史行，绝不从尾部截断主角或作者笔记。
 - 场记单的可选段落按整条取舍（辞书/回声少一条，不切半句）；`directive` 排在可选设定之前，
@@ -554,8 +570,8 @@ Agent 函数层的 `options.model` / `options.temperature` / `options.maxTokens`
 `STEPFUN_MODEL`）。分段演绎的 `maxTokens` 取 `min(该 Agent 生效 maxTokens, SEGMENTED_ROUND_MAX_TOKENS)`。
 `/v1` 透传路径没有 `agent`，`llm.js` 只解析 `model` / `baseUrl` / `apiKey` / `timeoutMs` / `maxRetries`，
 不注入任何采样默认值；非流式沿用客户端 `model`（未登记的名字原样转发），流式透传原样转发请求体。
-`GET /api/config` 的旧字段（`models` / `defaults` / `limits` / `budget` / `narration`）按生效配置计算，
-`runtime` 字段给设置页用。
+`GET /api/config` 的旧字段（`models` / `defaults` / `limits` / `budget` / `budget_shares` / `narration`）
+按生效配置与当前模型窗口推导，`runtime` 字段给设置页用。
 
 ## Orchestrator 接口
 
@@ -604,8 +620,13 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 
 ```
 GET    /api/config
-       // -> {models:{default, reasoning_efforts}, defaults, limits, budget, narration,   ← 旧字段，按生效配置计算
+       // -> {models:{default, reasoning_efforts}, defaults, limits, budget, budget_shares, narration,  ← 旧字段，按生效配置计算
        //     runtime:{source:'db'|'env', providers(masked), models, agents, context, env, options}}
+       // budget / budget_shares：由 context-plan.js 从模型窗口推导的各层配额与职责份额（不是 env 常量）
+       // limits：{context_max_tokens(=plan.hardMax), context_soft_tokens(=plan.softMax),
+       //          context_window_tokens, context_output_reserve_tokens, narrator_max_tokens}
+       // runtime.context：{window_tokens, output_reserve_tokens, hard_max_tokens, soft_target_tokens,
+       //                   auto_soft, layers, shares, model_id, model}
        // runtime 给设置页：providers 只有 {apiKey:'', hasKey, keyHint}，永不含明文密钥
 PUT    /api/config                        body:{providers, models, agents}（或 {runtime:{...}}）
        // -> {ok:true, runtime}；全量替换运行期配置（meta 表 runtime_config_v1），下一次调用即生效

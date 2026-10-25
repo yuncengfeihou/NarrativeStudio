@@ -45,7 +45,13 @@ console.log('\n=== 配置 ===');
   // 档位会被本地 .env 覆盖（如 max），只断言暴露且是合法档位。
   ok(['low', 'medium', 'high', 'max'].includes(data.defaults?.archivist_effort), '配置暴露 archivist 档位');
   ok(['low', 'medium', 'high', 'max'].includes(data.defaults?.narrator_effort), '配置暴露 narrator 档位');
-  ok(data.budget?.system === 3200, '配置暴露 v4 四层预算');
+  ok(data.budget?.system > 0, '配置暴露由模型窗口推导的各层配额');
+  // recent 是「当前场逐字原文」的规划上限（用于决定何时强制封场），不是装配时截断的层，
+  // 因此它不计入「强制配额份额合计」。
+  const enforced = Object.entries(data.budget_shares || {}).filter(([k]) => k !== 'recent');
+  ok(Math.abs(enforced.reduce((a, [, v]) => a + v, 0) - 1) < 1e-9,
+    '强制配额各层份额合计 100%');
+  ok(data.budget_shares?.recent > 0, '原文窗口有规划上限（只用于封场，不裁原文）');
   ok(!('lore' in (data.budget || {})), '预算里没有 lore 层');
   ok(!('director' in (data.budget || {})), '预算里没有 director 层');
   ok(data.defaults?.continuity_every === 10, '校勘节奏可配置');
@@ -91,8 +97,14 @@ console.log('\n=== 运行期模型配置（DB 覆盖层） ===');
       ok(after.runtime.source === 'db', '无需重启：GET 立即读到 DB 配置');
       ok(after.models.default === 'api-test-model', '旧字段 models.default 跟随生效模型');
       ok(after.defaults.narrator_effort === 'low', '旧字段 narrator 档位跟随 DB 绑定');
-      ok(after.limits.context_max_tokens === 48000, '旧字段硬上限跟随绑定模型 contextWindow');
-      ok(after.budget.system === 3200, '预算字段不受模型配置影响');
+      ok(after.limits.context_window_tokens === 48000, '窗口跟随绑定模型 contextWindow');
+      ok(after.limits.context_max_tokens === after.runtime.context.hard_max_tokens,
+        '硬上限 = 窗口扣除生成预留后的提示词上限');
+      ok(after.limits.context_max_tokens < 48000, '硬上限不再等于整个窗口');
+      ok(after.budget.system > 0 && after.budget.system !== 3200,
+        '各层配额随窗口推导，不是写死的常量');
+      ok(after.budget.system === after.runtime.context.layers.system,
+        'budget 与 runtime.context.layers 同源');
 
       const keep = await req('PUT', '/api/config', {
         providers: [{ id: 'test-provider', name: '接口测试服务商', baseUrl: 'https://api.example.com/v1', apiKey: '***', protocol: 'openai' }],

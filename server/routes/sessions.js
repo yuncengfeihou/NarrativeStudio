@@ -7,8 +7,9 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import {
-  EFFORTS, getEffectiveConfig, resetRuntimeConfig, resolveAgent, resolveContextWindow, saveRuntimeConfig,
+  EFFORTS, getEffectiveConfig, resetRuntimeConfig, resolveAgent, saveRuntimeConfig,
 } from '../model-registry.js';
+import { currentPlan } from '../memory/context-plan.js';
 import {
   auditSession, canonizeSession, createSessionWithSettings, forkSessionSafe, getMemoryStats,
   getSessionSnapshot, recallSession, runTurn,
@@ -29,6 +30,23 @@ function intOr(v, fallback) {
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
+/** 生效配置视图 + 预算规划：窗口是硬事实，硬上限/软目标/各层配额从它推导。 */
+function runtimeWithPlan() {
+  const runtime = getEffectiveConfig();
+  const plan = currentPlan();
+  return {
+    ...runtime,
+    context: {
+      ...runtime.context,
+      hard_max_tokens: plan.hardMax,
+      soft_target_tokens: plan.softMax,
+      auto_soft: plan.autoSoft,
+      layers: { ...plan.layers },
+      shares: { ...plan.shares },
+    },
+  };
+}
+
 /* ------------------------------ 配置 ------------------------------ */
 
 /**
@@ -41,7 +59,7 @@ sessionsRouter.get('/config', (req, res) => {
   const narrator = resolveAgent('narrator');
   const archivist = resolveAgent('archivist');
   const branch = resolveAgent('branch');
-  const contextMax = resolveContextWindow('narrator');
+  const plan = currentPlan();
   res.json({
     models: {
       default: narrator.model,
@@ -51,8 +69,8 @@ sessionsRouter.get('/config', (req, res) => {
       narrator_effort: narrator.effort ?? config.agents.narrator.reasoningEffort,
       archivist_effort: archivist.effort ?? config.agents.archivist.reasoningEffort,
       branch_effort: branch.effort ?? config.agents.branch.reasoningEffort,
-      archive_budget: config.context.layerBudget.archive,
-      archive_detail_budget: config.context.layerBudget.archiveDetail,
+      archive_budget: plan.layers.archive,
+      archive_detail_budget: plan.layers.archiveDetail,
       scene_every: config.context.sceneEvery,
       scene_max_tokens: config.context.sceneMaxTokens,
       continuity_every: config.context.continuityEvery,
@@ -60,11 +78,16 @@ sessionsRouter.get('/config', (req, res) => {
       world_tick_every: config.context.worldTickEvery,
     },
     limits: {
-      context_max_tokens: contextMax,
-      context_soft_tokens: Math.min(config.context.softTokens, contextMax),
+      // 提示词硬上限（窗口 − 生成预留 − 安全余量）；窗口本身单独给出。
+      context_max_tokens: plan.hardMax,
+      context_soft_tokens: plan.softMax,
+      context_window_tokens: plan.window,
+      context_output_reserve_tokens: plan.outputReserve,
       narrator_max_tokens: narrator.maxTokens,
     },
-    budget: config.context.layerBudget,
+    // 各层配额：由窗口推导（不是 env 常量）。比例见 context-plan.js。
+    budget: plan.layers,
+    budget_shares: plan.shares,
     narration: {
       default_mode: config.narration.mode,
       max_rounds: config.narration.maxRounds,
@@ -72,14 +95,15 @@ sessionsRouter.get('/config', (req, res) => {
       tool_history_tokens: config.narration.toolHistoryTokens,
       tool_result_max_tokens: config.narration.toolResultMaxTokens,
     },
-    runtime: getEffectiveConfig(),
+    runtime: runtimeWithPlan(),
   });
 });
 
 /** PUT /api/config —— 全量保存运行期模型配置（立即生效，不需要重启）。 */
 sessionsRouter.put('/config', (req, res) => {
   try {
-    res.json({ ok: true, runtime: saveRuntimeConfig(req.body || {}) });
+    saveRuntimeConfig(req.body || {});
+    res.json({ ok: true, runtime: runtimeWithPlan() });
   } catch (err) {
     const status = err?.status === 400 ? 400 : 500;
     if (status === 500) console.warn(`[config] 保存失败：${err?.message || err}`);
@@ -90,7 +114,8 @@ sessionsRouter.put('/config', (req, res) => {
 /** DELETE /api/config —— 删除运行期配置，回到 .env 默认（立即生效）。 */
 sessionsRouter.delete('/config', (req, res) => {
   try {
-    res.json({ ok: true, runtime: resetRuntimeConfig() });
+    resetRuntimeConfig();
+    res.json({ ok: true, runtime: runtimeWithPlan() });
   } catch (err) {
     console.warn(`[config] 重置失败：${err?.message || err}`);
     res.status(500).json({ error: { message: err?.message || String(err) } });
@@ -110,7 +135,7 @@ sessionsRouter.post('/sessions', (req, res) => {
   const world = wid ? getWorld(wid) : null;
   if (wid && !world) return res.status(404).json({ error: { message: 'world not found' } });
   const card = world?.card || {};
-  const cap = resolveContextWindow('narrator');
+  const cap = currentPlan().hardMax;
   const sessionSettings = {
     title: title || card.title || '未命名剧情',
     narrator_effort: 'high',

@@ -493,6 +493,11 @@ function buildAssemblyMeta(context, narrator) {
     retrieval: meta.retrieval || null,
     soft_max: meta.soft_max ?? null,
     hard_max: meta.hard_max ?? null,
+    // 预算推导与召回审计：换模型后仍能从回合记录回答「当时给了多少、漏了什么」。
+    plan: meta.plan || null,
+    recall: meta.recall || null,
+    index: meta.system_blocks?.index || null,
+    dropped_sections: meta.dropped_sections || [],
     // P0-2/P0-1 的可观测结果随回合持久化：缓存前缀归因与硬上限处置。
     cache: meta.cache || null,
     hard_cap: meta.hard_cap || null,

@@ -84,8 +84,8 @@ console.log('\n=== 1. 未保存配置：与 .env / config.agents 逐项相等 ==
   eq(view.models[0].model, config.upstream.model, '种子模型 = STEPFUN_MODEL');
   eq(view.models[0].contextWindow, config.context.maxTokens, '种子 contextWindow = CONTEXT_MAX_TOKENS');
   eq(view.models[0].maxOutput, envMaxOutput, '种子 maxOutput = 各 Agent maxTokens 最大值');
-  eq(view.context.hard_max_tokens, config.context.maxTokens, 'hard_max_tokens = CONTEXT_MAX_TOKENS');
-  eq(view.context.soft_target_tokens, Math.min(config.context.softTokens, config.context.maxTokens), 'soft_target_tokens 被硬上限夹住');
+  eq(view.context.window_tokens, config.context.maxTokens, 'window_tokens = CONTEXT_MAX_TOKENS');
+  eq(view.context.output_reserve_tokens, config.agents.narrator.maxTokens, 'output_reserve_tokens = narrator max_tokens');
   eq(view.options.efforts, EFFORTS, 'efforts 枚举');
   eq(view.options.protocols, PROTOCOLS, 'protocols 枚举');
   eq(view.options.agent_keys, AGENT_KEYS, 'agent_keys 枚举');
@@ -144,8 +144,9 @@ console.log('\n=== 2. 保存：掩码 + DB 生效 + 未绑定的 Agent 继续走
   eq(branch.model, config.agents.branch.model || config.upstream.model, '未绑定的 branch 模型不变');
 
   eq(resolveContextWindow('narrator'), 32000, '硬上限跟随绑定模型的 contextWindow');
-  eq(getEffectiveConfig().context.hard_max_tokens, 32000, 'GET 视图 hard_max_tokens 同步');
-  eq(getEffectiveConfig().context.soft_target_tokens, Math.min(config.context.softTokens, 32000), '软目标仍被夹住');
+  eq(getEffectiveConfig().context.window_tokens, 32000, 'GET 视图 window_tokens 同步');
+  // 提示词硬上限/软目标由 context-plan 从窗口推导，路由层合并；这里只验证窗口这个硬事实。
+  eq(getEffectiveConfig().context.output_reserve_tokens, 4000, 'GET 视图生成预留跟随绑定 maxTokens');
 
   const target = resolveModelTarget({ agent: 'narrator' });
   eq(target.baseUrl, 'https://api.example.com/v1', 'resolveModelTarget.baseUrl 走 DB');
@@ -276,7 +277,7 @@ console.log('\n=== 5. 多服务商 / 多模型 / 停用回落 / 重置 ===');
   eq(store.getMeta('runtime_config_v1'), null, 'reset 删除 meta 键（等价于从未保存）');
   eq(resolveAgent('narrator').effort, config.agents.narrator.reasoningEffort, 'reset 后参数回到 .env');
   eq(resolveContextWindow('narrator'), config.context.maxTokens, 'reset 后硬上限回到 .env');
-  eq(getEffectiveConfig().context.hard_max_tokens, config.context.maxTokens, 'reset 后 GET 视图回到 .env');
+  eq(getEffectiveConfig().context.window_tokens, config.context.maxTokens, 'reset 后 GET 视图回到 .env');
 }
 
 console.log('\n=== 6. 幂等：重复保存同一份配置结果稳定 ===');

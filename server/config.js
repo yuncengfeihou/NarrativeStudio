@@ -32,28 +32,19 @@ export const config = {
   //
   // 预算口径：`tokens.js` 已按真实上游标定（TOKEN_SCALE=0.72），
   // 下列数字与上游 prompt_tokens 基本同尺度，不再是「虚高的配额」。
+  //
+  // 各层配额不再是一组独立常量：它们由**模型窗口**推导（server/memory/context-plan.js）。
+  // 旧实现把 system 钉死在 3400，换到 200K 窗口的模型后等于永久浪费 95% 窗口，
+  // 而长局记忆真正需要的场次索引反而被 1800 卡死。现在只保留「软目标」这一个旋钮：
+  // 0 = 按提示词硬上限自动取 55%；显式值仍可作为「这一局装到多少就开始降级」的预期。
   context: {
     maxTokens: int(env.CONTEXT_MAX_TOKENS, 200000),
-    softTokens: int(env.CONTEXT_SOFT_TOKENS, 64000),
+    softTokens: int(env.CONTEXT_SOFT_TOKENS, 0),
     // 超硬上限策略：fail（默认）= 拒绝本轮并给出处置建议；truncate = 旧行为，
     // 从最长非 system 消息截断 70% 并记 degraded='over_hard_cap'（调试/应急用，会送半句话）。
     overHardCap: String(env.CONTEXT_OVER_HARD_CAP || 'fail').toLowerCase() === 'truncate'
       ? 'truncate'
       : 'fail',
-
-    // 每层 token 配额（软上限）。装配器按此逐层裁剪，不会互相挤占。
-    layerBudget: {
-      system: int(env.BUDGET_SYSTEM, 3400),      // 契约 + 命题 + 宪章 + 世界索引 + 主角（canon）
-      // 场次索引：长程记忆的载体。一行一场、只追加、永不互相改写。
-      // 起手 1800（约 24 行 major 或 40 行 normal），场数多了靠降级而不是硬砍。
-      archive: int(env.BUDGET_ARCHIVE, 1800),
-      // 最近 1–2 场的细节：放在原文之后、场记单之前，贴近生成点。
-      archiveDetail: int(env.BUDGET_ARCHIVE_DETAIL, 900),
-      recent: int(env.BUDGET_RECENT, 24000),     // 当前场次逐字原文（按场次边界，不做字符串截断）
-      scene: int(env.BUDGET_SCENE, 3000),        // 场记单（运行态 + 辞书 + 回声 + 原声）
-      retrieval: int(env.BUDGET_RETRIEVAL, 1000), // 模型主动检索到的辞书全文（当拍）
-      current: int(env.BUDGET_CURRENT, 2000),    // 本轮输入 + 尾注
-    },
 
     // 辞书主动检索：auto = 只在大卡上启用；on/off 可被会话 settings.codex_retrieval 覆盖。
     retrievalMinCodex: int(env.RETRIEVAL_MIN_CODEX, 24),

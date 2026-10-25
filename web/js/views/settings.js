@@ -984,13 +984,20 @@ export default {
       const ctx = cfg.runtime?.context || {};
       const hard = ctx.hard_max_tokens ?? cfg.limits?.context_max_tokens ?? 0;
       const soft = ctx.soft_target_tokens ?? cfg.limits?.context_soft_tokens ?? 0;
+      const windowTok = ctx.window_tokens ?? cfg.limits?.context_window_tokens ?? 0;
+      const reserve = ctx.output_reserve_tokens ?? cfg.limits?.context_output_reserve_tokens ?? 0;
 
       wrap.appendChild(el('div', {},
         el('div.group-title', {}, '上下文'),
         el('div.group-card', {},
-          infoRow('硬上限', `${fmtNumber(hard)} tok`,
-            `来自演绎模型的上下文窗口${ctx.model ? `（${ctx.model}）` : ''}；超过这一轮会被拒绝，绝不把半句话送进模型`),
-          infoRow('软目标', `${fmtNumber(soft)} tok`, '每轮装配的目标体积；超出时先收窄易变尾部，再收窄历史'),
+          infoRow('模型窗口', `${fmtNumber(windowTok)} tok`,
+            `来自演绎模型${ctx.model ? `（${ctx.model}）` : ''}；预算从这里推导，不再写死各层常量`),
+          infoRow('提示词硬上限', `${fmtNumber(hard)} tok`,
+            `窗口 − 生成预留 ${fmtNumber(reserve)} tok − 安全余量；超过这一轮会被拒绝，绝不把半句话送进模型`),
+          infoRow('软目标', `${fmtNumber(soft)} tok`,
+            ctx.auto_soft
+              ? '按窗口自动取 55%；超出时先收窄易变尾部，再收窄历史'
+              : '每轮装配的目标体积（.env 指定）；超出时先收窄易变尾部，再收窄历史'),
         ),
       ));
 
@@ -999,16 +1006,17 @@ export default {
         wrap.appendChild(el('div', {},
           el('div.group-title', {}, '各层 token 配额'),
           el('div.group-card', {},
-            infoRow('世界规则', `${fmtTokens(b.system)} tok`, '演绎契约 + 故事方向 + 世界规则 + 世界索引 + 主角'),
+            infoRow('世界规则', `${fmtTokens(b.system)} tok`, '演绎契约 + 故事方向 + 世界规则 + 世界索引 + 前史 + 主角'),
             infoRow('场次索引', `${fmtTokens(b.archive)} tok`, '一行一场，只追加；这是长程记忆的载体'),
             infoRow('最近场次细节', `${fmtTokens(b.archiveDetail)} tok`, '刚才那一场怎么收的'),
-            infoRow('最近原文', `${fmtTokens(b.recent)} tok`, '当前场次逐字原文，按场次边界裁剪'),
-            infoRow('本场状态', `${fmtTokens(b.scene)} tok`, '账本 + 在场者 + 设定集候选 + 原声'),
+            infoRow('最近原文', `${fmtTokens(b.recent)} tok`, '当前场次逐字原文的规划上限；只用于决定何时强制封场，不裁原文'),
+            infoRow('本场状态', `${fmtTokens(b.scene)} tok`, '账本 + 在场者 + 设定集候选 + 关系 + 知识边界 + 原声'),
             infoRow('检索结果', `${fmtTokens(b.retrieval)} tok`, '模型主动查到的设定全文，当拍蒸发'),
             infoRow('本轮输入', `${fmtTokens(b.current)} tok`, '你的行动 + 本场指令 + 尾注'),
           ),
           el('div.group-note', {},
-            '各层独立配额，互不挤占。历史不会被「再摘要一次」：场次索引只追加，'
+            '各层按职责比例从模型窗口推导（合计 = 软目标），记忆载体优先：'
+            + '场次索引与逐字原文占 70%。历史不会被「再摘要一次」：场次索引只追加，'
             + '原文按场次边界收，收不下的部分先降级粒度而不是静默丢字。'),
         ));
       }

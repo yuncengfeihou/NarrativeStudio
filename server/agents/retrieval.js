@@ -10,6 +10,7 @@
 import { config } from '../config.js';
 import { chat } from '../llm.js';
 import { truncateToTokens } from '../tokens.js';
+import { currentPlan } from '../memory/context-plan.js';
 import { lookupCodex, renderCodexHit } from '../world/scene-sheet.js';
 import { buildAliasIndex, linkEntities } from '../world/schema.js';
 import { retrievalSystemPrompt, retrievalUserPrompt } from '../prompts/retrieval.js';
@@ -111,7 +112,8 @@ export async function runRetrieval({
   const body = hits.map(({ entry }) => renderCodexHit(entry)).join('\n');
   const text = truncateToTokens(
     `【检索结果】以下是主演主动查阅的设定原文，只作此刻参考，不要整段复述。\n\n${body}`,
-    config.context.layerBudget.retrieval,
+    // 检索层的配额同样来自模型窗口推导（当拍蒸发，不占常驻预算）。
+    currentPlan().layers.retrieval,
   );
   return {
     text,

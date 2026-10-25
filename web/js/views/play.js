@@ -40,6 +40,7 @@ export default {
     let selectedBranch = null;
     let attachments = [];
     let memStats = null;
+    let ctxLimits = null;
     let statusView = null;
     let lastTurnNo = 0;
     let contextMeta = null;
@@ -175,6 +176,12 @@ export default {
       return { unmount() {} };
     }
     hideLoading();
+
+    // 预算上限由服务端从模型窗口推导（context-plan.js），前端不再写死默认值。
+    try {
+      const cfg = await api.getConfig();
+      ctxLimits = cfg?.limits || null;
+    } catch { /* 忽略：退回会话统计里的值 */ }
 
     world = detail.world || null;
     memStats = detail.memoryStats;
@@ -1195,7 +1202,7 @@ export default {
      * 上下文 / 记忆
      * ===================================================================== */
     function paintRing() {
-      const max = Number(memStats?.context_max) || 200000;
+      const max = Number(memStats?.context_max) || Number(ctxLimits?.context_max_tokens) || 0;
       const used = Number(memStats?.context_tokens) || 0;
       const ratio = max > 0 ? Math.min(1, used / max) : 0;
       clear(ringSlot);
@@ -1209,13 +1216,13 @@ export default {
     }
 
     function paintCtxMeter() {
-      const soft = Number(memStats?.context_soft) || 52000;
+      const soft = Number(memStats?.context_soft) || Number(ctxLimits?.context_soft_tokens) || 0;
       const used = assemblerBudget?.total ?? (Number(memStats?.context_tokens) || 0);
       const ratio = soft > 0 ? Math.min(1, used / soft) : 0;
       ctxMeterFill.style.width = `${(ratio * 100).toFixed(1)}%`;
       ctxMeterFill.style.background = ratio > 0.9 ? 'var(--warn)' : 'var(--accent)';
       const val = composerWrap.querySelector('.ctx-meter-val');
-      if (val) val.textContent = `${fmtTokens(used)} / ${fmtTokens(soft)}`;
+      if (val) val.textContent = soft > 0 ? `${fmtTokens(used)} / ${fmtTokens(soft)}` : fmtTokens(used);
     }
 
     /* ---------------------------------------------------------------------
