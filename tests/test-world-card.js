@@ -307,6 +307,33 @@ console.log('\n=== 场记单 ===');
   });
   ok(tiny.text.includes('在场'), '小配额保留在场');
   ok(estimate(tiny.text) <= 320, `小配额受控（${estimate(tiny.text)} tok）`);
+
+  // 人群场：在场段绝不整段消失，按 完整 → 紧凑 → 极简 内部降级
+  const crowd = Array.from({ length: 9 }, (_, i) => ({
+    type: 'person', name: `群演${i + 1}`, role: '宾客',
+    identity: { appearance: '锦缎长衫，袖口绣着暗纹', station: '座上客' },
+    voice: { rhythm: '慢条斯理' },
+    psyche: { traits: ['谨慎', '爱看热闹', '说话留半句'] },
+    agenda: [{ goal: '看清主位上的动静', method: '不先开口', pressure: 0.7 }],
+    knowledge: { knows: ['这场宴席的来客'], does_not_know: ['主位上的旧事'] },
+  }));
+  const crowdCard = schema.normalizeCard({ title: 'crowd', entities: crowd });
+  const crowdOut = sheet.renderSceneSheet({
+    ledger: { place: '宴席' },
+    present: personsOf(crowdCard),
+    capTokens: 3000,
+    absentees: [{ name: '凌玥', state: 'dead', note: '被刺客刺杀，当场死亡' }],
+  });
+  ok(crowdOut.text.includes('在场'), '人群场：在场段不被整段丢弃');
+  ok(!crowdOut.meta.dropped.includes('cast'), '人群场：cast 从不进 dropped');
+  ok(['full', 'compact', 'minimal'].includes(crowdOut.meta.cast_mode), '人群场：记录 cast 档位');
+  ok(crowdOut.text.includes('已故／离场：凌玥'), '缺席者在场记单里可见');
+
+  const crowdTight = sheet.renderSceneSheet({
+    ledger: { place: '宴席' }, present: personsOf(crowdCard), capTokens: 700,
+  });
+  ok(crowdTight.text.includes('在场'), '小配额下人群场仍保留在场');
+  ok(crowdTight.meta.cast_mode !== 'full', '小配额下 cast 降级（不是整段丢）');
 }
 
 function estimate(s) {
@@ -387,6 +414,29 @@ console.log('\n=== 卡级 lint ===');
     timeline: [], claims: [], edges: [], anchors: [],
   });
   ok(new Set(dup.issues.map((i) => i.code)).has('duplicate_id'), '报告重复 id');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 卡级 lint：世界索引容量 ===');
+{
+  // 400 个实体：名字清单本身就会超出 1200 tok 名义容量。
+  const many = schema.normalizeCard({
+    title: 'big',
+    entities: Array.from({ length: 400 }, (_, i) => ({
+      type: i % 5 === 0 ? 'person' : 'concept',
+      name: `实体${String(i).padStart(3, '0')}长名字`,
+    })),
+  });
+  const report = lintLib.lintCard(many);
+  const overflow = report.issues.find((i) => i.code === 'index_overflow');
+  ok(!!overflow, '实体会挤爆世界索引时给出提示');
+  eq(overflow?.severity, 'major', '索引容量不是 blocker（不拦保存）');
+  ok((overflow?.dropped || 0) > 0, '报告被截掉的实体数量');
+
+  const small = lintLib.lintCard(schema.normalizeCard({
+    title: 'small', entities: [{ type: 'person', name: '凌玥' }, { type: 'place', name: '雨街' }],
+  }));
+  ok(!small.issues.some((i) => i.code === 'index_overflow'), '小卡不报索引容量问题');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

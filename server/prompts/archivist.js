@@ -13,7 +13,13 @@ import { PREDICATES } from '../memory/predicates.js';
 export { PREDICATES };
 
 export const VISIBILITIES = ['public', 'engine', 'secret'];
-export const STATE_FIELDS = ['condition', 'mood', 'location', 'goal'];
+/**
+ * 人物「生死/在场之外」的受控字段。
+ * life_state 是唯一让代码能可靠判定死亡/离场的字段：自由文本（「死了」「战死」）
+ * 不可枚举，靠关键词判定会漏、也会误伤（AGENTS §1.2 不堆识别器）。
+ */
+export const LIFE_STATES = ['alive', 'injured', 'dead', 'gone'];
+export const STATE_FIELDS = ['condition', 'mood', 'location', 'goal', 'life_state'];
 
 /**
  * 史官的 system 只放稳定内容：身份、schema、字段规范。
@@ -58,7 +64,7 @@ schema：
   "assertions": [
     {"subject": "凌玥", "predicate": "知道", "object": "七年前是她母亲把伍卿丢在街上", "confidence": 0.95, "visibility": "public", "evidence": "她盯着那条街看了一眼"}
   ],
-  "states": [{"who": "伍卿", "field": "condition", "value": "湿透，腿在抖"}],
+  "states": [{"who": "伍卿", "field": "condition", "value": "湿透，腿在抖"}, {"who": "凌玥", "field": "life_state", "value": "dead"}],
   "relations": [{"from": "凌玥", "to": "伍卿", "kind": "旧识·执念", "sentiment": 0.8, "note": "她第一次没有甩开他的手"}],
   "threads": [{"action": "plant", "title": "玉佩在暗处发绿光", "weight": 0.9, "note": "只在夜里发作"}],
   "quotes": [{"who": "凌玥", "text": "「卿儿，过来。」"}],
@@ -82,14 +88,17 @@ schema：
 ## ledger.characters
 - 只写本轮**状态发生变化**的角色，键用规范名。
 - 字段限定 condition（身体状况/穿着）/ mood（情绪）/ location（所在）/ goal（此刻想要什么）。
+  生死与离场用 life_state（见下），不要塞进 condition。
 
 ## states
 - 与 ledger.characters 二选一即可，都写则以 states 为准。字段限定：${STATE_FIELDS.join(' / ')}
+- life_state 只取这四种值之一：${LIFE_STATES.join(' / ')}（活着 / 受伤 / 已死 / 已离场）。
+  任何角色**死亡或离场**都必须写 life_state，否则下一拍他还会被当成在场者说话。
 
 ## changes（世界线的运行期状态）
 - 用来记「这个世界后来变了什么」，只写本轮正文明确支撑的变化。
 - kind / path 白名单（不在表内的会被代码拒绝）：
-  - person: status / condition / mood / location / goal / summary / role / aliases；
+  - person: status / condition / mood / location / goal / life_state / summary / role / aliases；
     knowledge.knows / knowledge.does_not_know / knowledge.believes_falsely；
     psyche.wants / psyche.fears / psyche.hides / psyche.values
   - 事实实体（place / institution / item / faction / concept / custom，运行态）:
@@ -98,12 +107,15 @@ schema：
   - 事实实体的 summary / detail / facets.history 是作者定义，运行期不可写；
     新条目用 introduce 一次写清。
   - player: situation / capability / inner_voice / wants / afraid；
-    status / condition / mood / location / goal；
+    status / condition / mood / location / goal / life_state；
     knowledge.knows / knowledge.does_not_know
   - world: status（城邦/阵营/天下的整体局势，例如「全城戒严」）
 - op：set 写标量；add / remove 写列表；introduce 让剧情里第一次出现的实体进入当前世界线。
 - 角色在正文里学到/误解/遗忘一件事，必须写 knowledge.*；不要只写进 assertions 就完事。
-- 死亡、重伤、失势、身份变化写 person.status；不要让世界索引一直显示开局标签。
+- **死亡 / 重伤 / 离场**：先用 life_state 标 dead / injured / gone，再用 person.status 写细节
+  （怎么死的、尸体在哪里、谁看见了）；只写自由文本 code 判定不了，死人在后续回合仍会开口。
+- 死亡、失势、身份变化也要提醒「不要让世界索引一直显示开局标签」——索引是冻结的，
+  正文与场记单以运行态为准。
 - 新地点/新物件/新人物用 introduce，给出 name 与最小 fields；kind 用实体类型（人物 person，
   其余 place / institution / item / faction / concept / custom）。它们只属于这一局，不会写回世界卡。
 - 身份根（id / name / identity / voice）不可写。运行时改名请用 aliases，不要改 name。

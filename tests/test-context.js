@@ -240,6 +240,42 @@ console.log('\n=== 实体链接只改在场者 ===');
   ok(b.meta.present.some((c) => c.name === '伍卿'), '账本里的主角仍在场');
 }
 
+console.log('\n=== 装配清单：系统层索引覆盖 + 场记单元信息 ===');
+{
+  const ctx = await engine.assembleContext({ session: S, world, turnNo: 1, isOpening: true });
+  const idx = ctx.meta.system_blocks.index;
+  eq(idx.total, card.entities.length, '索引覆盖统计实体总数与卡一致');
+  ok(idx.rendered > 0 && idx.rendered <= idx.total, 'rendered 落在 0..total');
+  ok(idx.tokens > 0 && idx.cap > 0, '索引自带 token 与容量');
+  ok(Array.isArray(idx.dropped_names), '被截断的实体名可审计');
+  eq(ctx.meta.scene_sheet, { cast_mode: 'full', absentees: [] }, '场记单元信息：完整在场、无缺席者');
+}
+
+console.log('\n=== 死亡：life_state 让死亡进入提示词 ===');
+{
+  const sid = `s-death-${Date.now()}`;
+  const s2 = store.createSession({ id: sid, title: 'death', worldId: world.id });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
+    path: 'life_state', op: 'set', value: 'dead', turn: 5, source: 'test', evidence: 'test',
+  });
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
+    path: 'status', op: 'set', value: '被刺客刺杀，当场死亡', turn: 5, source: 'test', evidence: 'test',
+  });
+  const made = { ...s2, branch_id: 'main', anchor_id: 'prologue' };
+  const ctx = await engine.assembleContext({
+    session: made, world, turnNo: 6, playerText: '我回头找凌玥。',
+  });
+  ok(!ctx.meta.present.some((c) => c.name === '凌玥'), '死亡角色不再占在场位');
+  eq(ctx.meta.scene_sheet.absentees, [{ name: '凌玥', state: 'dead' }], '场记单元信息记录缺席原因');
+  const text = ctx.messages.map((m) => m.content).join('\n');
+  ok(text.includes('已故／离场'), '提示词里出现缺席者行（死亡可见）');
+  ok(text.includes('被刺客刺杀，当场死亡'), '缺席者行带 status 细节');
+}
+
 console.log('\n=== 在场：present 优先于账本 characters ===');
 {
   const sid = `s-presence-${Date.now()}`;
@@ -885,6 +921,26 @@ console.log('\n=== 渲染前体检：死亡角色不再占在场位 ===');
   ok(stuck.warnings.some((w) => w.kind === 'scene_not_advancing'), '场次未前进 → 告警');
 
   eq(ledger.characters.黎婆.condition, '死亡，手心里残留无纹玉佩', '不改调用方的账本对象');
+
+  // 结构化主判：life_state 直接判死/离场，不再依赖 status 关键词
+  const structured = lintState({
+    ledger: { characters: { 黎婆: { life_state: 'dead' } } },
+    present: [
+      { id: 'li-po', name: '黎婆', life_state: 'dead', knowledge: {} },
+      { id: 'ling-yue', name: '凌玥', knowledge: {} },
+    ],
+    assertions: [], scenes: [], turnNo: 12,
+  });
+  ok(structured.fixes.some((f) => f.kind === 'remove_dead_from_present' && f.source === 'life_state'),
+    'life_state=dead 判死（结构化，不靠关键词）');
+  eq(structured.present.map((c) => c.name), ['凌玥'], '结构化判死同样从在场移除');
+
+  const alive = lintState({
+    ledger: { characters: {} },
+    present: [{ id: 'a', name: '甲', life_state: 'alive', status: '她假装死亡骗过守卫', knowledge: {} }],
+    assertions: [], scenes: [], turnNo: 1,
+  });
+  eq(alive.present.map((c) => c.name), ['甲'], 'life_state=alive 不被 status 里的「死亡」误伤');
 }
 
 console.log('\n=== voice 层进场：称呼与「绝不说」 ===');

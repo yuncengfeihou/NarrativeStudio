@@ -12,6 +12,9 @@ import { ENTITY_TYPES, PERSON_TYPE } from './schema.js';
 
 const PERSON_SCALARS = [
   'status', 'condition', 'mood', 'location', 'goal', 'summary', 'role',
+  // 受控词表（alive / injured / dead / gone）：死亡/离场需要「能被代码可靠判定」，
+  // 不能只靠 status 自由文本。见 prompts/archivist.js 的 LIFE_STATES。
+  'life_state',
 ];
 
 /**
@@ -27,7 +30,7 @@ const FACT_SCALARS = [
 
 const PLAYER_SCALARS = [
   'situation', 'capability', 'inner_voice', 'wants', 'afraid', 'age', 'identity',
-  'status', 'condition', 'mood', 'location', 'goal',
+  'status', 'condition', 'mood', 'location', 'goal', 'life_state',
 ];
 
 // 时间/地点/天气/张力属于场次账本（states），不在这里重复维护。

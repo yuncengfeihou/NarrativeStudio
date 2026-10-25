@@ -20,10 +20,15 @@ import {
   invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
 } from '../memory/store.js';
 import {
-  PREDICATES, STATE_FIELDS, VISIBILITIES, archivistSystemPrompt, archivistUserPrompt,
+  LIFE_STATES, PREDICATES, STATE_FIELDS, VISIBILITIES, archivistSystemPrompt, archivistUserPrompt,
 } from '../prompts/archivist.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
+/** 生死/离场只认受控词；不做中文同义词映射（那会变成又一份名字名单）。 */
+const asLifeState = (v) => {
+  const s = str(v).toLowerCase();
+  return LIFE_STATES.includes(s) ? s : '';
+};
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
 const arr = (v) => (Array.isArray(v) ? v : []);
 const isPlainObject = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
@@ -117,6 +122,13 @@ export function sanitizeState(s, aliasIndex) {
   const field = str(o.field);
   const value = str(o.value);
   if (!who || !STATE_FIELDS.includes(field) || !value) return null;
+  if (field === 'life_state') {
+    const state = asLifeState(value);
+    // 枚举外的写法（例如模型写「已死」「战死」）不静默丢：退回 status 保留原文，
+    // 让场记单还能显示，同时旧关键词兜底仍可能接住。不在此处做同义词映射。
+    if (!state) return { who, field: 'status', value: value.slice(0, 200) };
+    return { who, field, value: state };
+  }
   return { who, field, value: value.slice(0, 200) };
 }
 
@@ -239,6 +251,16 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
   if (kind !== PERSON_TYPE && path === 'reveal') {
     value = CODEX_REVEALS.includes(str(value)) ? str(value) : null;
     if (!value) return null;
+  }
+  if (path === 'life_state') {
+    const state = asLifeState(value);
+    // 与 sanitizeState 同口径：枚举外不静默丢，退回 status 保留原文。
+    if (!state) {
+      const raw = str(value);
+      if (!raw) return null;
+      return { kind, entity_id: entityId, path: 'status', op: 'set', value: raw.slice(0, 300) };
+    }
+    value = state;
   }
   if (value == null) return null;
   if (typeof value === 'string') {
@@ -379,12 +401,14 @@ export function parseArchivistUpdate(content) {
   const ledger = obj(p.ledger);
   const characters = {};
   for (const [who, fields] of Object.entries(obj(ledger.characters))) {
-    characters[who] = {
-      condition: str(obj(fields).condition),
-      mood: str(obj(fields).mood),
-      location: str(obj(fields).location),
-      goal: str(obj(fields).goal),
-    };
+    const f = obj(fields);
+    // 字段白名单与 STATE_FIELDS 同源；只收非空值，避免空串把账本里的旧值覆盖掉。
+    const out = {};
+    for (const key of STATE_FIELDS) {
+      const v = str(f[key]);
+      if (v) out[key] = v;
+    }
+    characters[who] = out;
   }
 
   return {

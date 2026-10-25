@@ -273,6 +273,14 @@ console.log('\n=== 史官：净化与合并 ===');
   const s = arch.sanitizeState({ who: '玥姐姐', field: 'mood', value: ' 急切 ' }, idx);
   eq(s, { who: '凌玥', field: 'mood', value: '急切' }, '状态键按别名归一并去空白');
   ok(arch.sanitizeState({ who: '凌玥', field: '心情', value: 'x' }, idx) === null, '字段不在白名单 → 拒绝');
+
+  // life_state：受控词表，死亡/离场不再依赖自由文本关键词
+  eq(arch.sanitizeState({ who: '凌玥', field: 'life_state', value: 'dead' }, idx),
+    { who: '凌玥', field: 'life_state', value: 'dead' }, '受控生死值放行');
+  eq(arch.sanitizeState({ who: '凌玥', field: 'life_state', value: ' DEAD ' }, idx),
+    { who: '凌玥', field: 'life_state', value: 'dead' }, '受控值大小写归一');
+  eq(arch.sanitizeState({ who: '凌玥', field: 'life_state', value: '已死' }, idx),
+    { who: '凌玥', field: 'status', value: '已死' }, '枚举外不静默丢：回退 status 保留原文');
 }
 
 {
@@ -355,7 +363,7 @@ console.log('\n=== 史官：解析容错 ===');
 {
   const good = arch.parseArchivistUpdate(JSON.stringify({
     scene_change: { changed: true, reason: '地点转移', place: '凌家院子', tension: 0.6 },
-    ledger: { characters: { 凌玥: { mood: '克制' } }, last_hook: '钩子' },
+    ledger: { characters: { 凌玥: { mood: '克制', life_state: 'dead', goal: '' } }, last_hook: '钩子' },
     assertions: [{ subject: '凌玥', predicate: '知道', object: '真相', confidence: 0.95, evidence: '她看了一眼' }],
     states: [{ who: '伍卿', field: 'condition', value: '湿透' }],
     relations: [{ from: '凌玥', to: '伍卿', kind: '旧识·执念', sentiment: 0.8, note: '第一次没有甩开' }],
@@ -365,6 +373,8 @@ console.log('\n=== 史官：解析容错 ===');
   }));
   ok(good.scene_change.changed === true, '解析 scene_change');
   eq(good.assertions.length, 1, '解析断言');
+  eq(good.ledger.characters['凌玥'], { mood: '克制', life_state: 'dead' },
+    '账本人物收 life_state，空字段不进覆盖（避免用空串抹掉旧状态）');
   eq(good.quotes[0].who, '凌玥', '解析原声');
   eq(good.uncertain, ['她这七年做了什么'], '解析未确定项');
 
@@ -631,6 +641,25 @@ console.log('\n=== 世界状态：变更校验 ===');
   );
   eq(player.kind, 'player', '玩家角色命中玩家路径');
   eq(player.entity_id, 'player', '玩家实体统一为 player');
+
+  // life_state 是受控路径：合法值原样落库，非法写法回退 status 而不是丢弃
+  const dead = arch.sanitizeChange(
+    { kind: 'person', id: '凌玥', path: 'life_state', op: 'set', value: 'dead' },
+    { aliasIndex: idx },
+  );
+  eq(dead.path, 'life_state', '生死走受控路径');
+  eq(dead.value, 'dead', '受控值原样保留');
+  const oddDeath = arch.sanitizeChange(
+    { kind: 'person', id: '凌玥', path: 'life_state', op: 'set', value: '战死' },
+    { aliasIndex: idx },
+  );
+  eq(oddDeath.path, 'status', '枚举外的生死值回退 status（保留信息）');
+  eq(oddDeath.value, '战死', '回退后原文仍在');
+  const playerHurt = arch.sanitizeChange(
+    { kind: 'player', id: '伍卿', path: 'life_state', op: 'set', value: 'injured' },
+    { aliasIndex: idx, playerName: '伍卿' },
+  );
+  eq(playerHurt.value, 'injured', '玩家也支持 life_state');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

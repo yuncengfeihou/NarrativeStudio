@@ -310,6 +310,42 @@ function renderCastLine(c, ledgerChar, voices) {
   return lines.join('\n');
 }
 
+/** 紧凑档：名字（身份）+ 一句状态 + 口吻。人群场用。 */
+function renderCastCompact(c, ledgerChar) {
+  const condition = ledgerChar?.condition || c.condition;
+  const mood = ledgerChar?.mood || c.mood;
+  const location = ledgerChar?.location || c.location;
+  const state = [condition, mood, location ? `@${location}` : '',
+    c.status && c.status !== '临时登场' ? c.status : ''].filter(Boolean);
+  const tail = [state.length ? join(state, '｜') : '', str(c.voice?.rhythm)].filter(Boolean).join('；');
+  return `· ${c.name}${c.role ? `（${c.role}）` : ''}${tail ? `：${tail}` : ''}`;
+}
+
+/** 最低档：只留名字 + 此刻状态。「谁在场」是这一层唯一不能丢的信息。 */
+function renderCastMinimal(c, ledgerChar) {
+  const condition = ledgerChar?.condition || c.condition;
+  const mood = ledgerChar?.mood || c.mood;
+  const location = ledgerChar?.location || c.location;
+  const state = [condition, mood, location ? `@${location}` : ''].filter(Boolean);
+  return `· ${c.name}${state.length ? `（${state.join('｜')}）` : ''}`;
+}
+
+/**
+ * 已故 / 离场一行：只解释「名单里为什么少了一个人」，不展开小传。
+ * 运行态生死由 world_state 的 life_state 投影而来；不是名单里每个死者都值得占位，
+ * 所以最多 3 人 + 计数，且跟着在场段一起取舍。
+ */
+function renderAbsentLine(absentees = []) {
+  const list = (absentees || []).filter((a) => a && a.name);
+  if (!list.length) return '';
+  const shown = list.slice(0, 3).map((a) => {
+    const kind = a.state === 'gone' ? '已离场' : '已故';
+    const note = str(a.note) ? `：${truncateToTokens(str(a.note), 18)}` : '';
+    return `${a.name}（${kind}${note}）`;
+  });
+  return `已故／离场：${shown.join('；')}${list.length > 3 ? ` 等 ${list.length} 人` : ''}`;
+}
+
 function renderCodexEntry(entry) {
   const head = entry.reveal === 'secret' ? `· 【只你可知，不得说破】${entry.name}` : `· ${entry.name}`;
   const lines = [head];
@@ -392,7 +428,7 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
 export function renderSceneSheet({
   ledger = {}, present = [], relations = [], threads = [], codex = [], codexBrief = [],
   voices = {}, echoes = [], facts = [], worldRuntime = {}, playerNow = null,
-  knowledgeMatrix = null, omens = null, directive = '', capTokens = 2200,
+  knowledgeMatrix = null, omens = null, directive = '', absentees = [], capTokens = 2200,
 } = {}) {
   const L = ledger || {};
   const meta = {
@@ -436,7 +472,11 @@ export function renderSceneSheet({
   }
   const playerLine = playerBits.length ? `主角此刻：${playerBits.join('｜')}` : '';
 
-  const castBlock = present.map((c) => renderCastLine(c, L.characters?.[c.id], voices)).join('\n');
+  const castFull = present.map((c) => renderCastLine(c, L.characters?.[c.id], voices)).join('\n');
+  const castCompact = present.map((c) => renderCastCompact(c, L.characters?.[c.id])).join('\n');
+  const castMinimal = present.map((c) => renderCastMinimal(c, L.characters?.[c.id])).join('\n');
+  const absentLine = renderAbsentLine(absentees);
+  const castBody = (body) => [body ? `在场\n${body}` : '', absentLine].filter(Boolean).join('\n');
 
   const relLines = (relations || [])
     .filter((r) => present.some((p) => p.name === r.from_name || p.id === r.from_name || p.name === r.to_name || p.id === r.to_name))
@@ -497,7 +537,19 @@ export function renderSceneSheet({
   if (whenLine) sections.push({ key: 'when', text: whenLine, need: true });
   if (runtimeLine) sections.push({ key: 'world', text: runtimeLine, need: true });
   if (playerLine) sections.push({ key: 'player', text: playerLine, need: true });
-  if (castBlock) sections.push({ key: 'cast', text: `在场\n${castBlock}`, need: true });
+  // 在场段是「这一刻」的骨架，但站的人多时不能整段丢：先降级到紧凑/只留名字。
+  // 人群场（宴席/朝堂）先牺牲的必须是可选设定，不是在场者。
+  const castVariants = [];
+  if (castFull) {
+    castVariants.push({ mode: 'full', text: castBody(castFull) });
+    if (castCompact !== castFull) castVariants.push({ mode: 'compact', text: castBody(castCompact) });
+    if (castMinimal !== castCompact) castVariants.push({ mode: 'minimal', text: castBody(castMinimal) });
+  } else if (absentLine) {
+    castVariants.push({ mode: 'minimal', text: absentLine });
+  }
+  if (castVariants.length) {
+    sections.push({ key: 'cast', text: castVariants[0].text, need: true, variants: castVariants });
+  }
   if (relLines.length) sections.push({ key: 'relations', text: `关系\n${relLines.join('\n')}` });
   if (threadLines.length) sections.push({ key: 'threads', text: `未回收的线索\n${threadLines.join('\n')}` });
   if (factLines.length) sections.push({ key: 'facts', text: `已成立的事实\n${factLines.join('\n')}` });
@@ -512,36 +564,66 @@ export function renderSceneSheet({
   // directive 声明「优先级最高」，就必须排在可选设定之前；放不下时它还能靠尾注通道活下来。
   // 主角运行态必须紧跟时间地点（它是「此刻」的一部分），不能被裁掉。
   const order = ['when', 'world', 'player', 'cast', 'directive', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'echoes'];
+  // 「此刻」骨架先占位：它们在第一轮吃预算，可选段只能在剩下的空间里排。
+  // 旧实现按 order 一次过，人群场会先丢在场段、给后面的设定/知识/关系腾地方——
+  // 9 人同场时旁白会失去全部人物锚点，而知识边界和辞书反而回来，优先级是反的。
+  const NEED_KEYS = new Set(['when', 'world', 'player', 'cast']);
   const kept = [];
+  const dropped = [];
   let used = headerCost;
+  let castMode = null;
+
   for (const key of order) {
+    if (!NEED_KEYS.has(key)) continue;
+    const sec = sections.find((s) => s.key === key);
+    if (!sec) continue;
+    if (!sec.variants) {
+      const cost = estimateTokens(sec.text) + 2;
+      if (used + cost <= capTokens) { kept.push(sec); used += cost; } else dropped.push(key);
+      continue;
+    }
+    // 在场段按档位挑：第一个装得下的；都装不下就把最低档裁到剩余空间
+    // （只可能发生在极小预算，正常人群场只需降到「只留名字」）。
+    let chosen = sec.variants.find((v) => used + estimateTokens(v.text) + 2 <= capTokens);
+    if (!chosen) {
+      const room = capTokens - used - 2;
+      const minimal = sec.variants[sec.variants.length - 1];
+      chosen = room > 8
+        ? { mode: `${minimal.mode}_trunc`, text: truncateToTokens(minimal.text, room) }
+        : null;
+    }
+    if (!chosen) { dropped.push(key); continue; }
+    castMode = chosen.mode;
+    kept.push({ key, text: chosen.text });
+    used += estimateTokens(chosen.text) + 2;
+  }
+
+  for (const key of order) {
+    if (NEED_KEYS.has(key)) continue;
     const sec = sections.find((s) => s.key === key);
     if (!sec) continue;
     const cost = estimateTokens(sec.text) + 2;
     if (used + cost <= capTokens) { kept.push(sec); used += cost; continue; }
 
     const room = capTokens - used - 2;
-    if (room <= 60) continue;
+    if (room <= 60) { dropped.push(key); continue; }
     // 辞书/回声按整条取舍：宁可少一条，也不留下半条设定。
-    if (key === 'codex' || key === 'codexBrief') {
-      const fitted = fitEntries(sec.text, room, '· ');
-      if (fitted) {
-        kept.push({ ...sec, text: fitted });
-        used += estimateTokens(fitted) + 2;
-      }
-    } else if (key === 'echoes') {
-      const fitted = fitEntries(sec.text, room, '（');
-      if (fitted) {
-        kept.push({ ...sec, text: fitted });
-        used += estimateTokens(fitted) + 2;
-      }
+    const fitted = (key === 'codex' || key === 'codexBrief' || key === 'echoes')
+      ? fitEntries(sec.text, room, key === 'echoes' ? '（' : '· ')
+      : '';
+    if (fitted) {
+      kept.push({ ...sec, text: fitted });
+      used += estimateTokens(fitted) + 2;
+    } else {
+      // 其余段落整段丢弃；不截半句。
+      dropped.push(key);
     }
-    // 其余段落整段丢弃；不截半句。
   }
 
-  const keptKeys = new Set(kept.map((s) => s.key));
   meta.kept = kept.map((s) => s.key);
-  meta.dropped = sections.filter((s) => !keptKeys.has(s.key)).map((s) => s.key);
+  meta.dropped = dropped;
+  meta.cast_mode = castMode;
+  meta.absentees = (absentees || []).length;
   const codexText = kept.find((s) => s.key === 'codex')?.text || '';
   meta.codex_rendered = codexText
     ? codexText.split('\n').filter((line) => line.startsWith('· ')).length

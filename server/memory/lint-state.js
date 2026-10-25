@@ -23,7 +23,6 @@ const DEAD_MARKERS = ['死亡', '已死', '身亡', '断气', '咽气', '阵亡'
 const GONE_MARKERS = ['离场', '离开', '退场'];
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
-
 /**
  * @param {object} args
  * @param {object} args.ledger       当前场次账本（states 表的最新一条）
@@ -45,19 +44,24 @@ export function lintState({
   let nextCast = [...(present || [])];
 
   /* ---- 1. 死亡/离场的角色仍在 present ---- */
+  // 主判：world_state 投影过来的 life_state（受控词 alive/injured/dead/gone，史官每拍写）。
+  // 兜底：旧数据或模型漏写 life_state 时的 status 自由文本关键词——名单冻结，不再扩充
+  // （AGENTS §1.2：不堆叠识别器）。结构化值优先，避免关键词误伤正常台词。
   const goneIds = new Set();
   for (const c of nextCast) {
     const charState = characters[c.name] || characters[c.id] || {};
-    const status = str(c.status) || str(charState.condition);
-    const isDead = DEAD_MARKERS.some((m) => status.includes(m));
-    const isGone = GONE_MARKERS.some((m) => status.includes(m));
+    const life = str(c.life_state) || str(charState.life_state);
+    const status = str(c.status) || str(charState.condition) || str(charState.status);
+    const isDead = life ? life === 'dead' : DEAD_MARKERS.some((m) => status.includes(m));
+    const isGone = life ? life === 'gone' : GONE_MARKERS.some((m) => status.includes(m));
     if (isDead || isGone) {
       goneIds.add(c.id);
       goneIds.add(c.name);
       fixes.push({
         kind: isDead ? 'remove_dead_from_present' : 'remove_gone_from_present',
         who: c.name,
-        reason: status,
+        reason: status || life,
+        source: life ? 'life_state' : 'status_keyword',
       });
     }
   }

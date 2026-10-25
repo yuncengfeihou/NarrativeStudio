@@ -158,7 +158,8 @@ export function buildSystemLayer(
   const pastTokens = pastText ? estimateTokens(pastText) + 2 : 0;
   const indexCapNow = Math.max(200, indexCap - estimateTokens(fixedText) - reserve - pastTokens);
   // 有包含关系时用树形索引；否则保持平铺。去重后的 codex 不再重复出现。
-  const index = graph
+  const indexMode = graph ? 'tree' : 'flat';
+  let index = graph
     ? renderWorldTree(card, indexCapNow)
     : renderWorldIndex(card, indexCapNow);
 
@@ -166,10 +167,50 @@ export function buildSystemLayer(
   if (estimateTokens(text) > indexCap) {
     const excess = estimateTokens(text) - indexCap;
     const keep = estimateTokens(index) - excess - 8;
-    const trimmedIndex = keep > 8 ? truncateToTokens(index, keep) : '';
-    text = [fixedText, trimmedIndex, pastText, tailText].filter(Boolean).join('\n\n');
+    index = keep > 8 ? truncateToTokens(index, keep) : '';
+    text = [fixedText, index, pastText, tailText].filter(Boolean).join('\n\n');
   }
-  return text;
+  return {
+    text,
+    // 覆盖率跟着「最终送进 system 的那段索引」测量，而不是渲染前的候选。
+    meta: { index_coverage: measureIndexCoverage(card, index, indexCapNow, indexMode) },
+  };
+}
+
+/**
+ * 索引覆盖率：世界索引是「世界里有什么」的唯一自动入口。
+ * 卡变大后它会退化成名字清单、再被截断——被截掉的实体不等于不存在，
+ * 但模型只能从索引知道它们存在。覆盖率只进 meta（不进提示词），
+ * 用来回答「这张卡在系统层里还剩多少实体是可见的」，也是制卡期告警的数据源。
+ *
+ * 注意：这是**事后测量**（在渲染文本里找名字），不是又一次实体匹配注入；
+ * 名字是子串命中，只用于统计，不参与任何注入决策。
+ */
+function measureIndexCoverage(card, indexText, capTokens, mode) {
+  const entities = card.entities || [];
+  const text = String(indexText || '');
+  let rendered = 0;
+  let muted = 0;
+  const droppedNames = [];
+  for (const e of entities) {
+    const name = str(e.name || e.id).trim();
+    if (!name) continue;
+    // 静音只对「自动带出」生效，且只作用于非人物事实（与 scene-sheet 的 factsOf 同口径）。
+    if (e.muted && e.type !== 'person') { muted++; continue; }
+    if (text.includes(name)) { rendered++; continue; }
+    droppedNames.push(name);
+  }
+  return {
+    total: entities.length,
+    rendered,
+    muted,
+    dropped: droppedNames.length,
+    // 只带名字，便于排查；上限防止 meta 自己膨胀（meta 不进提示词，但会进库里 JSON）。
+    dropped_names: droppedNames.slice(0, 20),
+    tokens: estimateTokens(text),
+    cap: capTokens,
+    mode,
+  };
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -581,6 +622,24 @@ export async function assembleContext({
   });
   const present = lint.present;
 
+  /* ---- 已故 / 离场：解释「名单里为什么少了一个人」 ---- */
+  // 来源只认 world_state 的 life_state（史官结构化写入），不认自由文本关键词；
+  // 存活分支用有效投影值，取最近被标记的 ≤3 人，交给场记单渲染成一行。
+  const lifeMarked = new Map();
+  for (const d of deltas) {
+    if (d.path !== 'life_state' || d.op !== 'set') continue;
+    const key = `${d.entity_id}::${d.entity_kind}`;
+    const at = Number(d.valid_from) || 0;
+    if (!lifeMarked.has(key) || lifeMarked.get(key) <= at) lifeMarked.set(key, at);
+  }
+  const absentees = (card.entities || [])
+    .filter((e) => e.type === 'person' && (e.life_state === 'dead' || e.life_state === 'gone'))
+    .filter((e) => lifeMarked.has(`${e.id}::person`) || lifeMarked.has(`${e.name}::person`))
+    .sort((a, b) => (lifeMarked.get(`${b.id}::person`) || lifeMarked.get(`${b.name}::person`) || 0)
+      - (lifeMarked.get(`${a.id}::person`) || lifeMarked.get(`${a.name}::person`) || 0))
+    .slice(0, 3)
+    .map((e) => ({ name: e.name, state: e.life_state, note: str(e.status) }));
+
   /* ---- 设定集（事实实体） ---- */
   const pinnedIds = (card.entities || [])
     .filter((e) => e.type !== 'person' && e.pinned)
@@ -645,6 +704,7 @@ export async function assembleContext({
       status: card.player?.status, situation: card.player?.situation,
     },
     directive: directive || str(session.settings?.scene_directive),
+    absentees,
     capTokens: sceneCap,
   });
   // 候选 ≠ 实际渲染：场记单预算不足时，codex/facts 可能整段被丢。
@@ -658,15 +718,13 @@ export async function assembleContext({
   // 前史块（timeline canon=past）也来自模板快照：它是「开局之前已经成立」的
   // canon，不是本局演出结果。future/branch 永不渲染（红线 3）。
   const timelinePast = renderTimelinePast(templateCard, 240);
-  const systemMsg = {
-    role: 'system',
-    content: buildSystemLayer(session, world, {
-      card: templateCard,
-      indexCap: budget.system,
-      graph: buildWorldGraph(templateCard),
-      pastText: timelinePast.text,
-    }),
-  };
+  const systemLayer = buildSystemLayer(session, world, {
+    card: templateCard,
+    indexCap: budget.system,
+    graph: buildWorldGraph(templateCard),
+    pastText: timelinePast.text,
+  });
+  const systemMsg = { role: 'system', content: systemLayer.text };
 
   /* ---- 场次索引（长程记忆的载体，只追加） ---- */
   // 只取「本轮之前」已经封场的场次；当前这一场还在写，不能进索引。
@@ -922,6 +980,8 @@ export async function assembleContext({
       // 是 canon=past 的唯一入口；future/branch 不在这里计数（它们不进提示词）。
       system_blocks: {
         timeline_past: { ...timelinePast.meta, cap: 240 },
+        // 世界索引的覆盖率：卡越大，被截断的实体越多。只进 meta，不进提示词。
+        index: systemLayer.meta.index_coverage,
       },
       world_state_changes: deltas.length,
       facts: factsRendered,
@@ -939,6 +999,11 @@ export async function assembleContext({
         omens: omens.map((o) => ({ who: o.who, stage: o.stage })),
       },
       dropped_sections: sheet.meta?.dropped || [],
+      // 场记单自身的降级档位：在场段可能被压到紧凑/只留名字，而不是整段丢。
+      scene_sheet: {
+        cast_mode: sheet.meta?.cast_mode || null,
+        absentees: absentees.map((a) => ({ name: a.name, state: a.state })),
+      },
       branch: branchId,
       // 覆盖清单：场次索引边界 + 原文窗口。两者应当首尾相接：
       // recent_from 必须等于 scene_to + 1（场次无缝、无洞）。

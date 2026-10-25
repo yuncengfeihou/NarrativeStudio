@@ -17,6 +17,15 @@
  */
 
 import { buildWorldGraph } from './graph.js';
+import { renderWorldTree } from './scene-sheet.js';
+
+/**
+ * 世界索引的名义容量：与 renderWorldTree 默认 cap 对齐。
+ * 运行时实际预算还要先扣掉契约/宪章/前史/主角（本卡实测 cap≈1023），所以真机的
+ * 可见实体只少不多——这个检查宁可少报，不制造假警报。
+ * 必须用运行期同一个渲染器（tree）：平铺会多算出一批其实能进树的实体。
+ */
+const INDEX_NOMINAL_TOKENS = 1200;
 
 const stripRef = (v) => String(v || '').trim().replace(/^(?:cast|codex|entity):/, '');
 const isPerson = (e) => e?.type === 'person';
@@ -199,6 +208,24 @@ export function lintCard(card) {
         ids: [],
       });
     }
+  }
+
+  /* ---- 世界索引容量（major）：卡大到名字清单都放不下 ----
+   * 小说卡常见 300+ 实体：索引会先丢摘要、再截断名字，被截掉的实体不会自动出现在
+   * 系统层，模型只能从「被点名 / 主动检索」知道它们存在——这是制卡期的容量问题，
+   * 不是运行时 bug。只报告、不拦保存；真实覆盖率还看每轮 meta.system_blocks.index。 */
+  const indexText = renderWorldTree(card, INDEX_NOMINAL_TOKENS);
+  const notInIndex = entities.filter((e) => {
+    const name = String(e.name || '').trim();
+    if (!name) return false;
+    if (e.muted && e.type !== 'person') return false;
+    return !indexText.includes(name);
+  });
+  if (notInIndex.length) {
+    push('major', 'index_overflow',
+      `世界索引在 ${INDEX_NOMINAL_TOKENS} tok 名义容量下放不下 ${notInIndex.length}/${entities.length} 个实体`
+      + `（如 ${notInIndex.slice(0, 5).map((e) => e.name).join('、')}）：它们不会自动出现在系统层，演绎时容易被当成不存在`,
+      { ids: notInIndex.slice(0, 20).map((e) => e.id), dropped: notInIndex.length });
   }
 
   const bySeverity = { blocker: 0, major: 0, minor: 0, info: 0 };

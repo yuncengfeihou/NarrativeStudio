@@ -183,8 +183,10 @@ patches(session_id, branch_id, agent, kind, payload_json, evidence, status, seve
 
 **实体定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有事实实体运行期不可写
 （`FACT_CANON_PATHS`）；运行期只写 `status / condition / access / open_to / owner_id / location_id /
-reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summary / role / mood / goal / location`
-与 `voice / psyche / knowledge / agenda / relations` 的列表路径。新条目第一次 `introduce` 时可以一次写清定义。
+reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summary / role / mood / goal / location / life_state`
+与 `voice / psyche / knowledge / agenda / relations` 的列表路径；`life_state` 只接受
+`LIFE_STATES` 里的四个值，代码据此判定死亡/离场（自由文本只作 `status` 展示）。
+新条目第一次 `introduce` 时可以一次写清定义。
 
 **断言语义**：只有**单值谓词**（位于 / 是 / 曾经是）在「同主同谓、对象不同、有效期重叠」时
 把旧断言 `status='invalidated'` 并记 `valid_to`，**不删除**；多值谓词（知道 / 拥有 / 想要…）
@@ -196,7 +198,8 @@ reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summa
 ```js
 PREDICATES = ['知道','不知道','相信','想要','害怕','拥有','位于','属于',
               '敌对','效忠','隐瞒','承诺','欠','伤害','救下','是','曾经是']
-STATE_FIELDS = ['condition','mood','location','goal']
+STATE_FIELDS = ['condition','mood','location','goal','life_state']
+LIFE_STATES  = ['alive','injured','dead','gone']   // 死亡/离场的受控值，代码据此判定
 VISIBILITIES = ['public','engine','secret']
 ```
 
@@ -236,6 +239,8 @@ lintCard(card)
 // -> {issues:[{severity:'blocker'|'major'|'minor'|'info', code, message, ids?}],
 //     counts:{entities, persons, facts, edges, issues, bySeverity:{blocker,major,minor,info}}}
 // 结构检查：断链/别名冲突/包含环/孤立实体/单值声明冲突；
+// 容量检查（major）：index_overflow —— renderWorldTree(card, 1200) 后仍放不下的实体（不含 muted 事实），
+//                    extra:{ids, dropped}；只是提示，不拦保存。
 // 内容检查（info）：person_incomplete（缺 appearance/summary/rhythm）、person_hollow（wants+hides 全空）、
 //                  fact_incomplete（缺 summary/facets）
 // 阻断项（blocker）：parent_cycle、duplicate_id、future_leak（有 source.canon_cutoff 时 past 事件章号 ≥ cutoff；来源不可解析则不猜）
@@ -252,9 +257,17 @@ renderTimelinePast(card, capTokens)                // 前史（canon='past'）�
 selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlaceId, skipIds })
   // 只在事实实体里选（人物由在场判定带出）；-> [{entry, score, why[]}]
   // 实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20；muted 条目不进入候选（静音 ≠ 删除）
-renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices, echoes, directive, capTokens })
+renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices, echoes,
+                   facts, knowledgeMatrix, omens, worldRuntime, playerNow, directive,
+                   absentees, capTokens })
   // codex = T0 全量事实条目，codexBrief = T1 一句；人物走 present 的 renderCastLine
-  // -> {text, meta}  meta 记录 kept[] / dropped[] / codex_rendered / codex_brief_rendered
+  // absentees = [{name, state:'dead'|'gone', note}] —— 已故/离场者，渲染成「已故／离场：…」一行
+  // 预算：need 段（when/world/player/cast）先占，可选段后占。
+  //   cast 段内部按 完整 → 紧凑(renderCastCompact) → 极简(renderCastMinimal) 降级，
+  //   档位不足时截断极简文本；**cast 永不整段丢弃**（人群场不能没有在场锚点）。
+  // -> {text, meta}  meta:{ present, codex, codex_brief, echoes, facts, kept[], dropped[],
+  //                          codex_rendered, codex_brief_rendered, cast_mode:'full'|'compact'|'minimal',
+  //                          absentees:[{name,state}], tokens }
 lookupCodex(card, queries, { limit })              // 模型主动检索：遍历全部实体（含 person）
 renderCodexHit(entry)                              // 单条渲染；person 额外渲染身份/口吻/性格/知识边界
 ```
@@ -280,7 +293,10 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //            state_fixes, state_warnings,
 //            fates:{total, unlocked, omens},
 //            timeline_past, timeline_future_held,
-//            system_blocks:{timeline_past:{count, rendered, tokens, dropped, cap}},
+//            system_blocks:{timeline_past:{count, rendered, tokens, dropped, cap},
+//                           index:{total, rendered, muted, dropped, dropped_names[<=20],
+//                                  tokens, cap, mode:'tree'|'flat'}},   // 世界索引覆盖率（事后统计，不参与注入）
+//            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}]},
 //            dropped_sections, branch,
 //            coverage:{summary_to /* = 场次覆盖边界，保留旧名 */, recent_from, recent_to, turns,
 //                      scene_count, scene_to, scene_index_rendered,
@@ -320,6 +336,13 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 `owner` ∈ `system / archive / recent / scene_detail / scene_sheet / retrieval / current`。
 只写 `turns.meta_json`，不进提示词；用于回答「这条消息算谁的预算」，也是新增内容必须
 落进某一层配额的可核对证据。
+
+`buildSystemLayer(...)` 返回 `{ text, meta:{ index_coverage } }`（不再是裸字符串）。
+`index_coverage` 是世界索引的覆盖率事后统计：`total` 卡内实体数、`rendered` 名字出现在
+最终索引文本里的实体数、`muted` 被静音的设定集条目数、`dropped` 未出现的数量、
+`dropped_names`（最多 20 个，便于排查）、`tokens` / `cap` / `mode:'tree'|'flat'`。
+它只用于 `meta.system_blocks.index` 审计，**不是第二次实体匹配注入**——系统层内容仍完全由
+`renderWorldTree`/`renderWorldIndex` 的决定性渲染产生。
 
 `meta.system_blocks.timeline_past` 是**前史块**的落位证据 `{count, rendered, tokens, dropped, cap}`。
 前史 = 模板卡里 `canon === 'past'` 的 timeline 事件，由 `renderTimelinePast()` 渲染成
