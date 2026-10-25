@@ -1,10 +1,10 @@
 /**
  * panels/memory.js — 记忆与上下文面板（v4）
  *
- * 分区：概览 / 分支 / 场次索引 / 断言账本 / 人物状态 / 线索 / 原声 / 校勘 / 笔记
+ * 分区：概览 / 分支 / 场次索引 / 事实记录账本 / 人物状态 / 线索 / 台词样本 / 一致性检查 / 笔记
  *
  * 设计取向：这些数字存在的意义是「让作者知道引擎记得什么」。
- * v4 的记忆是「原文 + 场次 + 断言账本 + 原声」，没有摘要金字塔——
+ * v4 的记忆是「原文 + 场次 + 事实记录账本 + 台词样本」，没有摘要金字塔——
  * 所以这里能看到的每一样东西都能点开看到原文出处。
  */
 import { el, clear, fmtNumber, truncate } from '../util.js';
@@ -16,7 +16,7 @@ const VISIBILITY_LABEL = { public: '公开', engine: '引擎', secret: '只你�
 const PATCH_KIND_LABEL = {
   contradiction: '矛盾', knowledge_breach: '知识越界', timeline: '时间线',
   alias: '别名冲突', stale_thread: '线索陈旧', state_jump: '状态跳变',
-  offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '断言',
+  offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '事实记录',
   world_change: '世界变化',
 };
 const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', info: '提示' };
@@ -45,11 +45,11 @@ export async function openMemoryPanel(sessionId, opts = {}) {
     const cards = [
       { label: '回合', value: fmtNumber(data.turn_count), hint: '原文逐字保留，永不修改' },
       { label: '场次', value: fmtNumber(data.scene_count), hint: '每场从完整原文重写，不是摘要的摘要' },
-      { label: '有效断言', value: fmtNumber(assertions.length), hint: '带有效期；冲突时旧的失效，不删除' },
+      { label: '有效事实记录', value: fmtNumber(assertions.length), hint: '带有效期；冲突时旧的作废，不删除' },
       { label: '世界变化', value: fmtNumber(worldChanges.length), hint: '本局世界线相对初始卡片的增量，不写回模板' },
       { label: '未回收线索', value: fmtNumber(threads.filter((t) => t.status === 'open').length), hint: '埋了没收的，和已经收掉的' },
-      { label: '原声样本', value: fmtNumber(voices.length), hint: '从正文里摘的台词，用来锚定声音' },
-      { label: '待处理', value: fmtNumber(patches.filter((p) => p.status !== 'applied' && p.status !== 'dismissed').length), hint: '校勘与幕后推演的提案' },
+      { label: '台词样本', value: fmtNumber(voices.length), hint: '从正文里摘的台词，用来锚定声音' },
+      { label: '待处理', value: fmtNumber(patches.filter((p) => p.status !== 'applied' && p.status !== 'dismissed').length), hint: '一致性检查与幕后推演的提案' },
     ];
     for (const c of cards) {
       overview.appendChild(el('div', { class: 'mem-card' },
@@ -65,12 +65,12 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       body.appendChild(el('div.mem-world', {},
         el('h4', {}, `世界卡 · ${world.title}`),
         el('p.muted', {},
-          `卡司 ${world.cast_count}｜辞书 ${world.codex_count}｜`
-          + `起点前事件 ${world.timeline_past}｜扣留的原著后续 ${world.timeline_future}`),
+          `角色 ${world.cast_count}｜设定集 ${world.codex_count}｜`
+          + `前史 ${world.timeline_past}｜参考走向 ${world.timeline_future}`),
         el('p.mem-world-note', {},
           world.timeline_future > 0
-            ? '原著后续只作校勘参考，不会注入提示词，也不作为演绎目标。'
-            : '这是一张原创世界卡：没有原著路线，故事完全由玩家与角色推动。'),
+            ? '参考走向只作作者对照，不会注入提示词，也不作为演绎目标。'
+            : '没有参考走向：故事完全由玩家与角色推动。'),
       ));
     }
 
@@ -94,23 +94,23 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       type: 'button', style: 'margin-top:8px;',
       onclick: async () => {
         const ok = await confirmDialog({
-          title: '定稿为新的世界卡？',
-          message: '会把本局当前的人物状态、知识、辞书与新出场实体固化到一张新卡，并生成一个当前场景的起点锚点。原世界卡与进行中的会话都不会被改动。',
-          confirmText: '定稿',
+          title: '存为新的世界卡？',
+          message: '会把本局当前的人物状态、知识、设定集与新出场实体固化到一张新卡，并生成一个当前场景的起点。原世界卡与进行中的会话都不会被改动。',
+          confirmText: '保存',
         });
         if (!ok) return;
         try {
           const r = await api.canonizeSession(sessionId);
           toast(`已生成世界卡：${r.world.title}`, { type: 'success' });
         } catch (err) {
-          toast(err.message || '定稿失败', { type: 'error' });
+          toast(err.message || '保存失败', { type: 'error' });
         }
       },
-    }, icon('book', { size: 13 }), '定稿为新世界卡'));
+    }, icon('book', { size: 13 }), '存为新世界卡'));
 
     /* ---------------- 分支 ---------------- */
     body.appendChild(el('h4', {}, '分支'));
-    body.appendChild(el('p.muted', {}, '回滚不是删历史，是从分叉点开一条新线。旧线标为 abandoned，随时可以回去看。'));
+    body.appendChild(el('p.muted', {}, '回滚不是删历史，是从分叉点开一条新线。旧线标为 已废弃，随时可以回去看。'));
     const branchList = el('div.mem-branches');
     for (const b of branches) {
       branchList.appendChild(el('div', { class: 'mem-branch' + (b.branch_id === data.branch ? ' is-current' : '') },
@@ -140,12 +140,12 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       body.appendChild(sceneList);
     }
 
-    /* ---------------- 断言账本 ---------------- */
-    body.appendChild(el('h4', {}, '断言账本'));
-    body.appendChild(el('p.muted', {}, '世界的真相。同主同谓不同对象的旧断言会被标记失效而不是删掉——「她曾经相信过什么」本身就是剧情。'));
+    /* ---------------- 事实记录账本 ---------------- */
+    body.appendChild(el('h4', {}, '事实记录账本'));
+    body.appendChild(el('p.muted', {}, '世界的真相。同主同谓不同对象的旧事实记录会被标记作废而不是删掉——「她曾经相信过什么」本身就是剧情。'));
     const assertionList = el('div.mem-assertions');
     if (!assertions.length) {
-      assertionList.appendChild(el('p.muted', {}, '还没有断言。史官每轮会从正文里抽取。'));
+      assertionList.appendChild(el('p.muted', {}, '还没有事实记录。记忆整理每轮会从正文里抽取。'));
     }
     for (const a of assertions.slice(0, 60)) {
       assertionList.appendChild(el('div', { class: 'mem-assertion' },
@@ -199,23 +199,23 @@ export async function openMemoryPanel(sessionId, opts = {}) {
     }
     body.appendChild(threadList);
 
-    /* ---------------- 原声 ---------------- */
-    body.appendChild(el('h4', {}, '原声'));
+    /* ---------------- 台词样本 ---------------- */
+    body.appendChild(el('h4', {}, '台词样本'));
     body.appendChild(el('p.muted', {}, '从正文里原样摘出来的台词。它比「这个人说话短促」有用得多。'));
     const voiceList = el('div.mem-voices');
-    if (!voices.length) voiceList.appendChild(el('p.muted', {}, '暂无。史官每轮会摘本轮出现的台词。'));
+    if (!voices.length) voiceList.appendChild(el('p.muted', {}, '暂无。记忆整理每轮会摘本轮出现的台词。'));
     for (const v of voices.slice(0, 40)) {
       voiceList.appendChild(el('div', { class: 'mem-voice' },
         el('span.mem-voice-who', {}, v.who),
         el('span.mem-voice-text', {}, v.text),
         el('span.mem-voice-turn', {}, `第 ${v.turn_no} 轮`),
-        v.pinned ? el('span.mem-voice-pin', {}, '钉选') : null,
+        v.pinned ? el('span.mem-voice-pin', {}, '固定带出') : null,
       ));
     }
     body.appendChild(voiceList);
 
-    /* ---------------- 校勘提案 ---------------- */
-    body.appendChild(el('h4', {}, '校勘与幕后推演'));
+    /* ---------------- 一致性检查提案 ---------------- */
+    body.appendChild(el('h4', {}, '一致性检查与幕后推演'));
     body.appendChild(el('p.muted', {}, 'Agent 只提案，代码才落库。这里能看到谁提的、证据是什么。'));
     const patchList = el('div.mem-patches');
     if (!patches.length) patchList.appendChild(el('p.muted', {}, '暂无提案。'));

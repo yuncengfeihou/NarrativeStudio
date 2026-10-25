@@ -394,6 +394,29 @@ export function getDb() {
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+/* Meta（单键值：运行期模型配置等）                                       */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/** 读一个 meta 值；没有该键返回 null（不补默认、不做迁移）。 */
+export function getMeta(key) {
+  const row = getDb().prepare(`SELECT value FROM meta WHERE key=?`).get(String(key));
+  return row ? row.value : null;
+}
+
+/** 写一个 meta 值（覆盖）。运行期配置的明文 apiKey 只存在这里，不进 GET 响应。 */
+export function setMeta(key, value) {
+  getDb().prepare(`
+    INSERT INTO meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `).run(String(key), String(value));
+}
+
+/** 删除一个 meta 值；返回是否真的删掉了。 */
+export function deleteMeta(key) {
+  return getDb().prepare(`DELETE FROM meta WHERE key=?`).run(String(key)).changes > 0;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 /* Worlds                                                                 */
 /* ══════════════════════════════════════════════════════════════════════ */
 

@@ -16,6 +16,7 @@
  */
 import { config } from '../config.js';
 import { chatStream } from '../llm.js';
+import { resolveAgent } from '../model-registry.js';
 import { estimateTokens } from '../tokens.js';
 import { lookupCodex, renderCodexHit } from '../world/scene-sheet.js';
 import { buildNarratorMessages } from './narrator.js';
@@ -304,8 +305,10 @@ export async function runNarratorSegmented({
   // 测试注入点：生产环境永远用 chatStream，测试可传一个假流跑完整循环。
   stream = chatStream,
 } = {}) {
-  const cfg = config.agents.narrator;
   const seg = config.narration;
+  // 单轮输出上限：显式 options.maxTokens（含 runTurn 的 override）> narrator 绑定上限与
+  // 分段轮预算的较小者。推理过程也计入 max_tokens，所以不能只取 roundMaxTokens。
+  const roundMaxTokens = options.maxTokens ?? Math.min(resolveAgent('narrator').maxTokens, seg.roundMaxTokens);
   const maxRounds = Math.max(1, seg.maxRounds);
   const emit = (evt) => { try { onEvent(evt); } catch { /* 监听器错误不影响演绎 */ } };
 
@@ -336,11 +339,12 @@ export async function runNarratorSegmented({
     const calls = new Map();
 
     for await (const ev of stream({
+      agent: 'narrator',
       messages,
-      model: options.model ?? cfg.model ?? undefined,
-      temperature: options.temperature ?? cfg.temperature,
-      maxTokens: options.maxTokens ?? Math.min(cfg.maxTokens, seg.roundMaxTokens),
-      reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
+      model: options.model,
+      temperature: options.temperature,
+      maxTokens: roundMaxTokens,
+      reasoningEffort: options.reasoningEffort,
       tools: SEGMENTED_TOOLS,
       toolChoice: 'auto',
       signal,

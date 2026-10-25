@@ -17,7 +17,7 @@ const ROOT = path.join(__dirname, '..');
 
 try { process.loadEnvFile?.(path.join(ROOT, '.env')); } catch { /* no .env */ }
 
-const ORDER = ['test-world-card.js', 'test-memory.js', 'test-context.js', 'test-fates.js', 'test-api.js'];
+const ORDER = ['test-world-card.js', 'test-memory.js', 'test-context.js', 'test-fates.js', 'test-config.js', 'test-api.js'];
 
 const only = process.argv[2];
 const selected = only ? ORDER.filter((f) => f.includes(only)) : ORDER;

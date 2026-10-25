@@ -18,8 +18,26 @@
  * 这些字段既用于 UI 展示，也用于 sessions.usage_json 的累计统计。
  */
 import { config } from './config.js';
+import { resolveModelTarget } from './model-registry.js';
 
 const REASONING_FIELDS = ['reasoning_content', 'reasoning'];
+
+/**
+ * 有 agent key 时，用模型注册表的生效值补缺省（temperature / maxTokens / reasoningEffort /
+ * model）。调用方显式传入的字段仍然优先——单次覆盖（分段演绎的 roundMaxTokens、
+ * runTurn 的 options.model 等）不能被 DB 绑定压掉。
+ * 没有 agent 的调用（`/v1` 透传、测试假上游）只解析传输目标，不注入任何默认值。
+ */
+function withAgentDefaults(opts, target) {
+  if (!opts.agent) return { ...opts, model: target.model };
+  return {
+    ...opts,
+    model: target.model,
+    temperature: opts.temperature ?? target.temperature ?? undefined,
+    maxTokens: opts.maxTokens ?? target.maxTokens ?? undefined,
+    reasoningEffort: opts.reasoningEffort ?? target.effort ?? undefined,
+  };
+}
 
 export class LlmError extends Error {
   constructor(message, { status, code, retryable = false } = {}) {
@@ -94,10 +112,15 @@ function withTiming(usage, { startedAt, firstTokenAt, endedAt, outputChars = 0 }
  * @returns {Promise<{content, reasoning, usage, model, finishReason, raw}>}
  */
 export async function chat(opts) {
-  const run = async (o) => {
-    const body = buildBody(o, false);
+  const target = resolveModelTarget({ agent: opts.agent || null, model: opts.model || null });
+  const effective = withAgentDefaults(opts, target);
+  const run = async (call) => {
+    const body = buildBody(call, false);
     const startedAt = Date.now();
-    const res = await withRetry(() => fetchJson(`${config.upstream.baseUrl}/chat/completions`, body, o.signal));
+    const res = await withRetry(
+      () => fetchJson(`${target.baseUrl}/chat/completions`, body, call.signal, target),
+      target,
+    );
     const endedAt = Date.now();
     const choice = res.choices?.[0];
     const msg = choice?.message || {};
@@ -115,12 +138,12 @@ export async function chat(opts) {
     };
   };
 
-  const first = await run(opts);
-  if (first.content.trim() || opts.signal?.aborted || opts.noEmptyRetry) return first;
+  const first = await run(effective);
+  if (first.content.trim() || effective.signal?.aborted || effective.noEmptyRetry) return first;
 
   // step-5-preview 的推理过程也计入 max_tokens：预算被推理耗尽时 content 会是空的。
   // 这不能被当成「模型没有内容」——旁路 Agent 会把空 JSON 误读成「本轮无变化」。
-  const budget = Number(opts.maxTokens);
+  const budget = Number(effective.maxTokens);
   const used = Number(first.usage?.completion_tokens) || 0;
   const exhausted = first.finishReason === 'length'
     || (Number.isFinite(budget) && budget > 0 && used >= budget * 0.9);
@@ -128,7 +151,7 @@ export async function chat(opts) {
 
   console.warn(`[llm] 空内容且预算耗尽（${used}/${Number.isFinite(budget) ? budget : '?'}），降推理重试一次`);
   const retry = await run({
-    ...opts,
+    ...effective,
     reasoningEffort: 'low',
     maxTokens: Math.max(8000, Math.min(64000, Number.isFinite(budget) && budget > 0 ? budget * 2 : 12000)),
     noEmptyRetry: true,
@@ -142,15 +165,20 @@ export async function chat(opts) {
  *   {type:'meta', usage, model, finishReason}
  */
 export async function* chatStream(opts) {
-  const body = buildBody(opts, true);
+  const target = resolveModelTarget({ agent: opts.agent || null, model: opts.model || null });
+  const effective = withAgentDefaults(opts, target);
+  const body = buildBody(effective, true);
   const startedAt = Date.now();
   let firstTokenAt = null;
   let usage = null;
-  let model = opts.model || config.upstream.model;
+  let model = target.model;
   let finishReason = null;
   let outputChars = 0;
 
-  const res = await withRetry(() => fetchStream(`${config.upstream.baseUrl}/chat/completions`, body, opts.signal));
+  const res = await withRetry(
+    () => fetchStream(`${target.baseUrl}/chat/completions`, body, effective.signal, target),
+    target,
+  );
   if (!res.ok || !res.body) {
     const text = await safeText(res);
     throw new LlmError(`上游 ${res.status}: ${text.slice(0, 500)}`, {
@@ -239,8 +267,8 @@ function pickReasoning(obj) {
   return '';
 }
 
-async function fetchJson(url, body, signal) {
-  const res = await fetchOnce(url, body, signal);
+async function fetchJson(url, body, signal, target) {
+  const res = await fetchOnce(url, body, signal, target);
   if (!res.ok) {
     const text = await safeText(res);
     throw new LlmError(`上游 ${res.status}: ${text.slice(0, 500)}`, {
@@ -251,18 +279,18 @@ async function fetchJson(url, body, signal) {
   return res.json();
 }
 
-async function fetchStream(url, body, signal) {
-  return fetchOnce(url, body, signal);
+async function fetchStream(url, body, signal, target) {
+  return fetchOnce(url, body, signal, target);
 }
 
-async function fetchOnce(url, body, signal) {
-  const timeout = AbortSignal.timeout(config.upstream.timeoutMs);
+async function fetchOnce(url, body, signal, target) {
+  const timeout = AbortSignal.timeout(target?.timeoutMs || config.upstream.timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   return fetch(url, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${config.upstream.apiKey}`,
+      Authorization: `Bearer ${target?.apiKey || config.upstream.apiKey}`,
     },
     body: JSON.stringify(body),
     signal: combined,
@@ -273,9 +301,10 @@ async function safeText(res) {
   try { return await res.text(); } catch { return '<no body>'; }
 }
 
-async function withRetry(fn) {
+async function withRetry(fn, target) {
+  const maxRetries = Number.isFinite(target?.maxRetries) ? target.maxRetries : config.upstream.maxRetries;
   let lastErr;
-  for (let attempt = 0; attempt <= config.upstream.maxRetries; attempt++) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       return await fn();
     } catch (err) {
@@ -285,7 +314,7 @@ async function withRetry(fn) {
         || err?.name === 'TimeoutError'
         || ['ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'UND_ERR_CONNECT_TIMEOUT'].includes(err?.code)
         || (err?.status >= 500 && err?.status < 600);
-      if (!retryable || attempt === config.upstream.maxRetries) throw err;
+      if (!retryable || attempt === maxRetries) throw err;
       const backoff = Math.min(1000 * 2 ** attempt, 8000);
       await new Promise((r) => setTimeout(r, backoff));
     }

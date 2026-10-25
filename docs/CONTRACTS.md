@@ -229,7 +229,14 @@ buildWorldGraph(card)
 //      codexById:Map, castById:Map, adjacency:Map, resolve(ref) }
 graphNeighbors(graph, ids, { depth })   // -> Set<entityId>（1 跳/多跳邻域）
 graphAncestors(graph, id) / graphChildren(graph, id)
-lintCard(card)                          // -> {issues:[{severity,code,message,ids}], counts}
+lintCard(card)
+// -> {issues:[{severity:'blocker'|'major'|'minor'|'info', code, message, ids?}],
+//     counts:{entities, edges, merged_codex, issues, bySeverity:{blocker,major,minor,info}}}
+// 结构检查：断链/别名冲突/包含环/孤立辞书/单值声明冲突；
+// 内容检查（info）：cast_incomplete（缺 appearance/one_line/rhythm）、cast_hollow（wants+hides 全空）、
+//                  codex_incomplete（缺 summary/facets）、character_codex_orphan（无同名 cast 的 character 条目）
+// 阻断项（blocker）：parent_cycle、duplicate_id（cast/codex 内或跨表 id 冲突）、
+//                  future_leak（有 source.canon_cutoff 时 past 事件章号 ≥ cutoff；来源不可解析则不猜）
 ```
 
 ## Scene Sheet 接口（纯函数）
@@ -269,6 +276,8 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //            facts, facts_candidates, facts_single, facts_many_rendered, facts_many_dropped,
 //            state_fixes, state_warnings,
 //            fates:{total, unlocked, omens},
+//            timeline_past, timeline_future_held,
+//            system_blocks:{timeline_past:{count, rendered, tokens, dropped, cap}},
 //            dropped_sections, branch,
 //            coverage:{summary_to /* = 场次覆盖边界，保留旧名 */, recent_from, recent_to, turns,
 //                      scene_count, scene_to, scene_index_rendered,
@@ -284,7 +293,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 装配顺序（缓存友好）：**冻结前缀 → 只追加历史 → 易变尾部**
 
 ```
-1. system   契约 + 命题 + 宪章 + 世界索引 + 主角 + 作者笔记（**只读模板快照，绝不读运行态**）
+1. system   契约 + 命题 + 宪章 + 世界索引 + 前史（canon=past）+ 主角 + 作者笔记（**只读模板快照，绝不读运行态**）
 2. user     【本局场次索引】一行一场，只追加
 3. …        当前场次逐字原文 = 上一场 turn_to + 1 起，到本轮之前（player/assistant 交替）
 4. user     【刚才这一场怎么收的】最近 1–2 场细节
@@ -308,6 +317,17 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 `owner` ∈ `system / archive / recent / scene_detail / scene_sheet / retrieval / current`。
 只写 `turns.meta_json`，不进提示词；用于回答「这条消息算谁的预算」，也是新增内容必须
 落进某一层配额的可核对证据。
+
+`meta.system_blocks.timeline_past` 是**前史块**的落位证据 `{count, rendered, tokens, dropped, cap}`。
+前史 = 模板卡里 `canon === 'past'` 的 timeline 事件，由 `renderTimelinePast()` 渲染成
+「【前史】开局之前已经发生的事实」一行一条，`buildSystemLayer()` 把它排在世界索引之后、
+主角之前。硬约束：
+
+- 只读 `session.card_snapshot`，**不读 world_state / scenes**：system 必须在连续 10 轮里逐字节不变。
+- `canon === 'future'` / `'branch'` **永不渲染**（红线 3：future 只作改编卡的校勘参考，
+  既不是既定事实，也不是演绎目标）；提示词里不出现 future 事件或「必达节拍」指令。
+- 前史与世界索引**共享 system 预算**：先按上限 240 tok 从最新往前取（塞不下的旧行整条丢弃，
+  不切半句），索引再吃剩余空间；绝不挤掉契约/宪章/主角/常驻作者笔记。
 
 ### 记忆覆盖不变量
 
@@ -335,8 +355,12 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   （`err.meta` 含 total/hard_max/soft_max/mode/narrowed/degraded），SSE 收到 error 事件，
   **绝不把半句话送进模型**。`CONTEXT_OVER_HARD_CAP=truncate` 才回退旧行为（截断 70% +
   `degraded:['over_hard_cap']`），仅调试/应急。
-- system 层先为契约/宪章/主角/常驻作者笔记预留预算；世界索引只吃剩余空间，
-  超了先砍索引，绝不从尾部截断主角或作者笔记。
+- **硬上限取生效模型窗口**：`assembleContext()` 用
+  `min(session.settings.context_max_tokens 或 生效 narrator 模型 contextWindow)`，
+  其中 contextWindow 来自运行期模型配置（见「模型选择」）；新建会话与 `settingsFromWorld()`
+  写入的 `context_max_tokens` 同样按该窗口 clamped。
+- system 层先为契约/宪章/主角/常驻作者笔记预留预算；世界索引与前史只吃剩余空间，
+  超了先砍索引、再丢最旧的前史行，绝不从尾部截断主角或作者笔记。
 - 场记单的可选段落按整条取舍（辞书/回声少一条，不切半句）；`directive` 排在可选设定之前，
   并且逐轮 directive 同时进入尾注，避免被场记单预算丢掉。
 - 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
@@ -429,6 +453,15 @@ runRetrieval({ card, playerText, ledger, lastNarrative, signal })
 // -> {text, queries, entries:[{id,name,why}], usage} | null
 // parseRetrievalQueries(content) -> string[]（宽容解析，失败返回空数组）
 
+// 【规划中，未实现，勿依赖】历史检索（与 codex_lookup 同构的第五个分段工具）
+// recallHistory({ sessionId, branchId, atTurn, query, kinds, limit })
+// -> { text, hits:[{kind:'turn'|'scene', turn_no|scene_id, score, snippet}],
+//      meta:{engine:'fts5'|'like', query, dropped, branch, at_turn} }
+// 只有模型主动发起才查 turns/scenes；按 branch_id + atTurn 过滤，结果只进 retrieval
+// 子层、当拍蒸发。FTS5 trigram 是主路，少于 3 个 Unicode 字符的查询走 LIKE 兜底；
+// 不写 turns/scenes、不改账本，也不做 embedding 自动召回（AGENTS §15.1/§15.4）。
+// 接线计划：narrator-loop 工具表 + orchestrator 回传；HTTP 不新增端点。
+
 // 分支守卫（server/memory/branch-guard.js）
 branchSnapshot(sessionId, branchId?) -> {sessionId, branchId, maxTurnNo, maxTurnId} | null
 isBranchCurrent(snapshot) -> boolean
@@ -445,15 +478,46 @@ runEffectOnce(snapshot, fn, { isStale? }) -> Promise<
 //   status: pending（claim 产生）/ applied / failed / stale；同 effect_id 只落一次
 
 // 制卡（server/agents/card-smith.js）
-smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed, player, onProgress, signal })
-// 内部步骤（不导出）：readChapters / parseChapterExtract / buildCardFromExtracts
+smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed, player,
+            cutoff, extract, cacheDir, cache, onProgress, signal })
+// -> {card, stats:{chapters, cached, entities, events, charter, ...}}
+// card.source = {kind:'novel', title, chapters, canon_cutoff:'chN'}（cutoff 之后的事件写 future）
+// 断点续跑缓存：指纹 = EXTRACT_VERSION + 文件名 + 文本长度/字节数/mtimeMs，按素材绝对路径分桶，
+//   源文件或抽取版本变化即失效；失败章不缓存。cutoff/extract/cacheDir 只供测试注入。
+// 导出（测试用）：readChapters / parseChapterExtract / buildCardFromExtracts / finalizeCard
+// finalizeCard(card, { sourceTexts })：定格 pass（appearance≤60/background≤160/其余≤40、
+//   exemplars 逐字校验、codex.character 归位、同章共现 links）
+
+// 运行期模型配置（server/model-registry.js）
+AGENT_KEYS   // ['narrator','archivist','sceneKeeper','retrieval','continuity','librarian','worldTick','branch','cardSmith']
+EFFORTS      // ['low','medium','high']
+PROTOCOLS    // ['openai']（OpenAI 兼容的 /chat/completions）
+getEffectiveConfig() -> {source:'db'|'env', providers(masked), models, agents, context, env, options}
+// 视图永不含明文 apiKey：provider 只有 {apiKey:'', hasKey, keyHint}（末 4 位）；source='db' 表示有运行期配置
+saveRuntimeConfig(body) -> 同上视图；body = {providers, models, agents}（也接受 {runtime:{...}}）
+// 校验失败抛 Error{status:400, message}，不写库；成功后下一次 Agent 调用即生效
+resetRuntimeConfig() -> 同上视图           // 删除 meta 表 runtime_config_v1，回到 .env 种子
+resolveAgent(agentKey) -> {key, source, modelId, model, providerId, baseUrl, apiKey, protocol,
+                           effort, temperature, maxTokens, contextWindow, supportsReasoning, supportsTemperature}
+// 解析顺序：DB Agent 绑定 > .env（config.agents / config.upstream）> 内置默认；停用的模型/服务商回落 .env
+resolveContextWindow(agentKey = 'narrator') -> number    // 生效模型的上下文窗口
+resolveModelTarget({agent, model}) -> {baseUrl, apiKey, protocol, model, timeoutMs, maxRetries}
+// llm.js / /v1 透传用：显式 model 覆盖名字但保留 agent 绑定的传输目标；未绑定则回落 .env
 ```
 
-模型选择：每个 Agent 调 `chat()` 时传 `model: cfg.model || undefined`，`cfg.model` 来自
-`<AGENT>_MODEL`。Agent 函数层还接受 `options.model`
-单次覆盖（narrator 由 `runTurn` 的 `options` 直接透传，archivist / branch 走各自的
-`options.<agent>.model`）；留空时由 `llm.js` 回落到 `config.upstream.model`。
-`/v1` 非流式透传沿用客户端 `model`，流式透传原样转发请求体。
+模型选择：Agent 调 `chat()` / `chatStream()` 时必须传 `agent: '<AGENT_KEY>'`，由 `llm.js` 调
+`resolveModelTarget()` 解析服务商、密钥、模型与传输参数，并用 `resolveAgent()` 补齐未显式传入的
+`temperature` / `maxTokens` / `reasoningEffort`。解析优先级为
+**显式单次覆盖 > 运行期配置里的 Agent 绑定 > `.env` 种子 > 内置默认**：
+Agent 函数层的 `options.model` / `options.temperature` / `options.maxTokens` / `options.reasoningEffort`
+（narrator 由 `runTurn` 的 `options` 直接透传，archivist / branch 走各自的 `options.<agent>`）永远压过绑定；
+未传时用 DB 绑定值，仍未保存运行期配置时逐项等于 `config.agents`（即 `<AGENT>_EFFORT` /
+`<AGENT>_TEMPERATURE` / `<AGENT>_MAX_TOKENS` / `<AGENT>_MODEL`，`<AGENT>_MODEL` 留空跟随
+`STEPFUN_MODEL`）。分段演绎的 `maxTokens` 取 `min(该 Agent 生效 maxTokens, SEGMENTED_ROUND_MAX_TOKENS)`。
+`/v1` 透传路径没有 `agent`，`llm.js` 只解析 `model` / `baseUrl` / `apiKey` / `timeoutMs` / `maxRetries`，
+不注入任何采样默认值；非流式沿用客户端 `model`（未登记的名字原样转发），流式透传原样转发请求体。
+`GET /api/config` 的旧字段（`models` / `defaults` / `limits` / `budget` / `narration`）按生效配置计算，
+`runtime` 字段给设置页用。
 
 ## Orchestrator 接口
 
@@ -502,14 +566,26 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 
 ```
 GET    /api/config
+       // -> {models:{default, reasoning_efforts}, defaults, limits, budget, narration,   ← 旧字段，按生效配置计算
+       //     runtime:{source:'db'|'env', providers(masked), models, agents, context, env, options}}
+       // runtime 给设置页：providers 只有 {apiKey:'', hasKey, keyHint}，永不含明文密钥
+PUT    /api/config                        body:{providers, models, agents}（或 {runtime:{...}}）
+       // -> {ok:true, runtime}；全量替换运行期配置（meta 表 runtime_config_v1），下一次调用即生效
+       // apiKey：省略或 '***' 保留同 id 旧值、'' 清除、其他字符串为新值；校验失败 400
+       // -> {error:{message}}，不写库（空 providers/models、坏 baseUrl、未知 Agent、非法 effort 等）
+DELETE /api/config                        -> {ok:true, runtime}   // 删除运行期配置，回到 .env 种子
 GET    /api/fonts                         -> {fonts, source}（服务端本机字体）
 GET    /api/worlds                        -> 摘要列表
 GET    /api/worlds/:id                    -> {world, card, codex, sessions}
                                           // codex[] 带 muted（投影表无该列，读出时从 card 合并）
 GET    /api/worlds/:id/export             -> 纯文本
-GET    /api/worlds/:id/lint               -> {issues, counts}（断链/别名/环/声明冲突）
+GET    /api/worlds/:id/lint               -> {issues, counts}（结构检查 + 内容充分性 +
+                                             blocker：parent_cycle / duplicate_id / future_leak；
+                                             counts 含 bySeverity）
 POST   /api/worlds                        body:{id?, title?, card, source?}
-PATCH  /api/worlds/:id
+                                             // 保存前跑 lintCard；有 blocker -> 422
+                                             // {error:{message, issues:[...]}}
+PATCH  /api/worlds/:id                     // 同上，blocker 拒绝保存（422）
 DELETE /api/worlds/:id
 POST   /api/worlds/:id/codex/:codexId/pin body:{pinned}   // 只改 pinned；muted 随整卡保存
 POST   /api/worlds/:id/sessions           body:{anchor_id?}

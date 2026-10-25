@@ -76,13 +76,13 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
   const sceneNo = (prev ? Number(String(prev.scene_id).replace(/\D/g, '')) || 0 : 0) + 1;
   const sceneId = `S${String(sceneNo).padStart(3, '0')}`;
 
-  const cfg = config.agents.sceneKeeper;
   let record = {
     question: '', outcome: '', threads: [], key_detail: '', causal: '', hooks: [],
   };
   let usage = null;
   try {
     const res = await chat({
+      agent: 'sceneKeeper',
       messages: [
         { role: 'system', content: sceneKeeperSystemPrompt() },
         {
@@ -96,10 +96,9 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
           }),
         },
       ],
-      temperature: cfg.temperature,
-      maxTokens: cfg.maxTokens,
-      reasoningEffort: cfg.reasoningEffort,
-      model: cfg.model || undefined,
+      temperature: null,
+      maxTokens: null,
+      reasoningEffort: null,
       responseFormat: { type: 'json_object' },
     });
     usage = res.usage || null;
@@ -204,7 +203,6 @@ export function detectSceneChange(session, update, turnNo) {
  */
 export async function runContinuity({ session, world, turnNo, signal, guard }) {
   const { sessionId, branchId, forkTurn } = branchCtx(session);
-  const cfg = config.agents.continuity;
   const card = normalizeCard(world?.card || {});
   const aliasIndex = buildAliasIndex(card);
   const playerName = card.player?.name || '';
@@ -220,6 +218,7 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
   let usage = null;
   try {
     const res = await chat({
+      agent: 'continuity',
       messages: [
         { role: 'system', content: continuitySystemPrompt() },
         {
@@ -230,10 +229,9 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
           }),
         },
       ],
-      temperature: cfg.temperature,
-      maxTokens: cfg.maxTokens,
-      reasoningEffort: cfg.reasoningEffort,
-      model: cfg.model || undefined,
+      temperature: null,
+      maxTokens: null,
+      reasoningEffort: null,
       responseFormat: { type: 'json_object' },
       signal,
     });
@@ -375,7 +373,6 @@ const TOOLS = {
  */
 export async function runLibrarian({ session, question, signal }) {
   const { sessionId, branchId } = branchCtx(session);
-  const cfg = config.agents.librarian;
   const scene = getState(sessionId, { branchId })?.state || {};
   const sceneSummary = [scene.time, scene.place].filter(Boolean).join(' · ');
 
@@ -387,11 +384,11 @@ export async function runLibrarian({ session, question, signal }) {
   let calls = 0;
   for (let round = 0; round < 4; round++) {
     const res = await chat({
+      agent: 'librarian',
       messages,
-      temperature: cfg.temperature,
-      maxTokens: cfg.maxTokens,
-      reasoningEffort: cfg.reasoningEffort,
-      model: cfg.model || undefined,
+      temperature: null,
+      maxTokens: null,
+      reasoningEffort: null,
       responseFormat: { type: 'json_object' },
       signal,
     });
@@ -437,7 +434,6 @@ export async function runLibrarian({ session, question, signal }) {
 export async function runWorldTick({ session, world, turnNo, signal, guard }) {
   const { sessionId, branchId } = branchCtx(session);
   const card = normalizeCard(world?.card || {});
-  const cfg = config.agents.worldTick;
 
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const presentIds = new Set(Object.keys(ledger.characters || {}));
@@ -453,6 +449,7 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
   let usage = null;
   try {
     const res = await chat({
+      agent: 'worldTick',
       messages: [
         {
           role: 'system',
@@ -471,10 +468,9 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
           }),
         },
       ],
-      temperature: cfg.temperature,
-      maxTokens: cfg.maxTokens,
-      reasoningEffort: cfg.reasoningEffort,
-      model: cfg.model || undefined,
+      temperature: null,
+      maxTokens: null,
+      reasoningEffort: null,
       responseFormat: { type: 'json_object' },
       signal,
     });

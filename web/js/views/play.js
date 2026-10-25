@@ -67,7 +67,7 @@ export default {
     }, icon('more', { size: 16 }));
 
     const timelineBtn = el('button.icon-btn', {
-      type: 'button', title: '时间轴', 'aria-label': '时间轴',
+      type: 'button', title: '时间线', 'aria-label': '时间线',
       onclick: () => openTimeline(),
     }, icon('history', { size: 16 }));
 
@@ -95,7 +95,7 @@ export default {
     /* ---------------- 输入区 ---------------- */
     input = el('textarea.composer-input', {
       rows: 1,
-      placeholder: '讲述你的行动，或选一个走向…',
+      placeholder: '讲述你的行动，或选一个选项…',
       enterkeyhint: 'send',
       'aria-label': '输入行动',
     });
@@ -359,7 +359,7 @@ export default {
       if (branchChoice) {
         bubble.appendChild(el('span.branch-tag', {},
           TONE_MARK[branchChoice.tone] || '·',
-          branchChoice.title || '走向',
+          branchChoice.title || '选项',
         ));
       }
       const text = String(content || '').trim();
@@ -486,7 +486,7 @@ export default {
           }
           case 'scene': {
             appendSceneCard(evt);
-            // 时间轴面板开着时跟着刷新：新场次是它唯一的数据增长来源。
+            // 时间线面板开着时跟着刷新：新场次是它唯一的数据增长来源。
             refreshTimelinePanels();
             break;
           }
@@ -498,7 +498,7 @@ export default {
             const issues = evt.report?.issues || [];
             if (issues.length) {
               const hasBlocker = issues.some((i) => i.severity === 'blocker');
-              toast(`校勘发现 ${issues.length} 处问题${hasBlocker ? '（含阻断级）' : ''}`, { type: 'warn' });
+              toast(`一致性检查发现 ${issues.length} 处问题${hasBlocker ? '（含阻断级）' : ''}`, { type: 'warn' });
             }
             break;
           }
@@ -733,12 +733,12 @@ export default {
       clear(selStrip);
       selStrip.style.display = '';
       selStrip.appendChild(icon('compass', { size: 12 }));
-      selStrip.appendChild(el('span.sel-strip-title', {}, b.title || '走向'));
+      selStrip.appendChild(el('span.sel-strip-title', {}, b.title || '选项'));
       selStrip.appendChild(el('span.spacer'));
       selStrip.appendChild(el('button.mini-btn', {
         type: 'button', onclick: () => clearSelection(),
       }, '取消'));
-      input.placeholder = '按 ↑ 确认这个走向，或先说点什么…';
+      input.placeholder = '按 ↑ 确认这个选项，或先说点什么…';
       input.focus();
       paintSend();
     }
@@ -749,7 +749,7 @@ export default {
       quickRow.querySelectorAll('.qb.is-selected').forEach((n) => n.classList.remove('is-selected'));
       selStrip.style.display = 'none';
       clear(selStrip);
-      input.placeholder = '讲述你的行动，或选一个走向…';
+      input.placeholder = '讲述你的行动，或选一个选项…';
       paintSend();
     }
 
@@ -769,7 +769,7 @@ export default {
         el('button.btn.btn-secondary', { type: 'button', onclick: () => { removeContinue(); send({ silent: true, generateBranches: true }); } },
           icon('sparkles', { size: 13 }), '接着往下演绎'),
         el('button.btn.btn-ghost', { type: 'button', onclick: () => { removeContinue(); regenerateBranches(); } },
-          icon('compass', { size: 13 }), '看看走向'),
+          icon('compass', { size: 13 }), '看看选项'),
       ));
       scrollToBottom(true);
     }
@@ -780,14 +780,14 @@ export default {
 
     async function regenerateBranches() {
       if (streaming) return toast('正在演绎中');
-      showLoading('正在设计走向…');
+      showLoading('正在设计选项…');
       try {
         const set = await api.generateBranches(sessionId);
         if (set?.branches?.length) {
           renderBranches(set);
           toast('已换一批', { type: 'success' });
         } else {
-          toast('没能生成走向', { type: 'error' });
+          toast('没能生成选项', { type: 'error' });
         }
       } catch (err) {
         toast(err.message, { type: 'error' });
@@ -818,7 +818,7 @@ export default {
         sendBtn.classList.remove('is-stop');
         clear(sendBtn);
         sendBtn.appendChild(icon('arrowUp', { size: 15, stroke: 2.2 }));
-        sendBtn.title = selectedBranch && !input.value.trim() ? '确认这个走向' : '发送';
+        sendBtn.title = selectedBranch && !input.value.trim() ? '确认这个选项' : '发送';
         sendBtn.disabled = !has;
       }
     }
@@ -840,7 +840,7 @@ export default {
         return;
       }
       if (!text && !imgs.length) {
-        toast('说点什么，或选一个走向');
+        toast('说点什么，或选一个选项');
         return;
       }
       resetInput();
@@ -924,7 +924,7 @@ export default {
           const guidance = ta.value.trim();
           const ok = await confirmDialog({
             title: '确认重写',
-            message: `会从第 ${turnNo} 轮之前开一条新分支，当前分支标为 abandoned（历史不删）。`,
+            message: `会从第 ${turnNo} 轮之前开一条新分支，当前分支标为 已废弃（历史不删）。`,
             confirmText: '重写', destructive: true,
           });
           if (!ok) return false;
@@ -1019,7 +1019,7 @@ export default {
       if (streaming) return toast('正在演绎中');
       const ok = await confirmDialog({
         title: `回到第 ${turnNo} 轮`,
-        message: `会从第 ${turnNo} 轮开一条新分支。当前这条线标为 abandoned，历史不删，随时可以回去看。`,
+        message: `会从第 ${turnNo} 轮开一条新分支。当前这条线标为 已废弃，历史不删，随时可以回去看。`,
         confirmText: '回滚', destructive: true,
       });
       if (!ok) return;
@@ -1076,12 +1076,12 @@ export default {
             icon: 'sparkles',
           },
           { label: statusBarLabel(), value: 'statusbar', icon: 'layers' },
-          { label: '换一批走向', value: 'branches', icon: 'compass' },
+          { label: '换一批选项', value: 'branches', icon: 'compass' },
           { label: '搜索本段剧情', value: 'search', icon: 'search' },
           { label: '回忆旧事', value: 'recall', icon: 'rewind' },
-          { label: '时间轴', value: 'timeline', icon: 'history' },
+          { label: '时间线', value: 'timeline', icon: 'history' },
           { label: '记忆与上下文', value: 'memory', icon: 'memory' },
-          { label: '跑一次校勘', value: 'audit', icon: 'check' },
+          { label: '跑一次一致性检查', value: 'audit', icon: 'check' },
           { label: '导出', value: 'export', icon: 'download' },
           { label: '世界卡', value: 'world', icon: 'book' },
           { label: '删除这段剧情', value: 'delete', icon: 'trash', destructive: true },
@@ -1099,7 +1099,7 @@ export default {
         try {
           const report = await api.audit(sessionId);
           const issues = report.issues || [];
-          if (!issues.length) toast('校勘通过：没有发现矛盾');
+          if (!issues.length) toast('一致性检查通过：没有发现矛盾');
           else {
             toast(`发现 ${issues.length} 处问题，详见记忆面板`);
             openMemory();
@@ -1299,16 +1299,16 @@ export default {
     }
 
     /* =====================================================================
-     * 场记单 / 切场 / 世界呼吸 / 回忆
+     * 本场状态 / 切场 / 后台推演 / 回忆
      *
      * 这四个东西是 v4 的「世界在呼吸」的可视化：
-     *   - 场记单：这一刻世界的既定事实（引擎据此接续）
+     *   - 本场状态：这一刻世界的既定事实（引擎据此接续）
      *   - 切场卡片：一场戏结束时发生了什么变化
-     *   - 世界呼吸：玩家看不见的地方，人物按自己的私心动了
+     *   - 后台推演：玩家看不见的地方，人物按自己的私心动了
      *   - 回忆：按需去原文里找旧事，带出处
      * ===================================================================== */
 
-    /** 在场记单位置展示本轮的场记单（可折叠）。 */
+    /** 在本场状态位置展示本轮的本场状态（可折叠）。 */
     function showSceneSheet(text) {
       let host = scroll.querySelector('.scene-sheet-slot');
       if (!host) {
@@ -1318,7 +1318,7 @@ export default {
       }
       clear(host);
       const box = el('details.scene-sheet', {},
-        el('summary', {}, '本场场记单'),
+        el('summary', {}, '本场本场状态'),
         el('pre.scene-sheet-text', {}, text),
       );
       host.appendChild(box);
@@ -1345,7 +1345,7 @@ export default {
       body.appendChild(card);
     }
 
-    /** 世界呼吸：幕后事件以流言形式出现，不直接告诉玩家「发生了什么」。 */
+    /** 后台推演：幕后事件以流言形式出现，不直接告诉玩家「发生了什么」。 */
     function appendWorldTick(events) {
       const body = scroll.querySelector('.play-body');
       if (!body) return;

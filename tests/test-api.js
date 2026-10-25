@@ -2,12 +2,12 @@
 /**
  * tests/test-api.js — HTTP 集成测试（需要服务端已启动，不调用 LLM）
  *
- *   node tests/test-api.js [baseUrl]
+ *   node tests/test-api.js [baseUrl]     # baseUrl 缺省读 TEST_BASE_URL，再缺省 localhost:3210
  *
  * 覆盖：配置、世界卡 CRUD 与导出、辞书钉选、会话生命周期（含锚点）、
  *       记忆六表读取、断言手增、分支/回滚、404 处理。
  */
-const BASE = process.argv[2] || 'http://localhost:3210';
+const BASE = process.argv[2] || process.env.TEST_BASE_URL || 'http://localhost:3210';
 
 let pass = 0;
 let fail = 0;
@@ -50,6 +50,79 @@ console.log('\n=== 配置 ===');
   ok(!('director' in (data.budget || {})), '预算里没有 director 层');
   ok(data.defaults?.continuity_every === 10, '校勘节奏可配置');
   ok(data.defaults?.continuity_max_applied === 20, '校勘写入上限可配置');
+  ok(data.runtime?.options?.agent_keys?.length === 9, '配置暴露 9 个 Agent 的绑定槽位');
+  ok(data.models?.default === data.runtime?.agents?.narrator?.model, '旧字段 models.default 与生效配置一致');
+  ok(data.limits?.context_max_tokens === data.runtime?.context?.hard_max_tokens, '旧字段硬上限与生效配置一致');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 运行期模型配置（DB 覆盖层） ===');
+{
+  const initial = (await req('GET', '/api/config')).data;
+  const rt = initial.runtime;
+  ok(rt && typeof rt === 'object', 'GET /api/config 暴露 runtime');
+  ok(['env', 'db'].includes(rt.source), 'runtime.source 合法');
+  ok(Array.isArray(rt.providers) && rt.providers.length >= 1, 'runtime.providers 是数组');
+  ok(Array.isArray(rt.models) && rt.models.length >= 1, 'runtime.models 是数组');
+  ok(rt.providers.every((p) => p.apiKey === ''), 'runtime 不回显明文 apiKey');
+  ok(rt.providers.every((p) => typeof p.hasKey === 'boolean'), 'runtime 用 hasKey 表示是否已配置');
+  ok(typeof rt.context?.hard_max_tokens === 'number', 'runtime 暴露上下文硬上限');
+  ok(typeof rt.context?.soft_target_tokens === 'number', 'runtime 暴露上下文软目标');
+
+  if (rt.source === 'db') {
+    // 用户已经在界面上保存过配置：不做破坏性 PUT，避免测试清掉真实设置。
+    console.log('  （检测到已保存的 DB 配置，跳过写入用例）');
+    ok(rt.agents && typeof rt.agents === 'object', '已保存配置包含 Agent 绑定表');
+  } else {
+    const KEY = 'sk-api-test-key-1234';
+    let wrote = false;
+    try {
+      wrote = true;
+      const put = await req('PUT', '/api/config', {
+        providers: [{ id: 'test-provider', name: '接口测试服务商', baseUrl: 'https://api.example.com/v1', apiKey: KEY, protocol: 'openai' }],
+        models: [{ id: 'test-model', providerId: 'test-provider', model: 'api-test-model', contextWindow: 48000, maxOutput: 6000 }],
+        agents: { narrator: { modelId: 'test-model', effort: 'low', temperature: 0.5, maxTokens: 3000 } },
+      });
+      ok(put.status === 200 && put.data.runtime.source === 'db', 'PUT 保存后 source=db');
+      ok(!JSON.stringify(put.data).includes(KEY), '保存响应不含明文密钥');
+      ok(put.data.runtime.providers[0].hasKey === true && put.data.runtime.providers[0].keyHint === '1234', '密钥以掩码形式返回');
+
+      const after = (await req('GET', '/api/config')).data;
+      ok(after.runtime.source === 'db', '无需重启：GET 立即读到 DB 配置');
+      ok(after.models.default === 'api-test-model', '旧字段 models.default 跟随生效模型');
+      ok(after.defaults.narrator_effort === 'low', '旧字段 narrator 档位跟随 DB 绑定');
+      ok(after.limits.context_max_tokens === 48000, '旧字段硬上限跟随绑定模型 contextWindow');
+      ok(after.budget.system === 3200, '预算字段不受模型配置影响');
+
+      const keep = await req('PUT', '/api/config', {
+        providers: [{ id: 'test-provider', name: '接口测试服务商', baseUrl: 'https://api.example.com/v1', apiKey: '***', protocol: 'openai' }],
+        models: [{ id: 'test-model', providerId: 'test-provider', model: 'api-test-model', contextWindow: 48000, maxOutput: 6000 }],
+      });
+      ok(keep.data.runtime.providers[0].keyHint === '1234', "'***' 表示保留已保存的密钥");
+
+      const badEmpty = await req('PUT', '/api/config', { providers: [], models: [] });
+      ok(badEmpty.status === 400 && !!badEmpty.data.error?.message, '空服务商列表被 400 拒绝');
+      const badUrl = await req('PUT', '/api/config', {
+        providers: [{ id: 'x', name: 'x', baseUrl: 'not-a-url', protocol: 'openai' }],
+        models: [{ id: 'm', providerId: 'x', model: 'm' }],
+      });
+      ok(badUrl.status === 400, '坏 baseUrl 被 400 拒绝');
+      const badAgent = await req('PUT', '/api/config', { ...keep.data.runtime, agents: { seniorArchivist: { effort: 'low' } } });
+      ok(badAgent.status === 400, '未知 Agent 被 400 拒绝');
+      ok((await req('GET', '/api/config')).data.runtime.source === 'db', '校验失败不破坏已保存配置');
+
+      const del = await req('DELETE', '/api/config');
+      ok(del.status === 200 && del.data.runtime.source === 'env', 'DELETE 恢复 .env 默认');
+      const restored = (await req('GET', '/api/config')).data;
+      ok(restored.runtime.source === 'env', 'GET 立刻回到 .env');
+      ok(restored.models.default === initial.models.default, '恢复后旧字段 models.default 与原值一致');
+      ok(restored.defaults.narrator_effort === initial.defaults.narrator_effort, '恢复后旧字段档位与原值一致');
+      ok(restored.limits.context_max_tokens === initial.limits.context_max_tokens, '恢复后旧字段硬上限与原值一致');
+      ok(restored.budget.system === initial.budget.system, '恢复后预算字段与原值一致');
+    } finally {
+      if (wrote) await req('DELETE', '/api/config');
+    }
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -116,7 +189,7 @@ const CARD = {
 
   const text = await fetch(`${BASE}/api/worlds/${WORLD_ID}/export`).then((r) => r.text());
   ok(text.includes('# 接口测试世界'), '导出纯文本');
-  ok(text.includes('[future]'), '导出标出 future 供人看');
+  ok(text.includes('[参考走向]'), '导出标出 future 供人看');
   ok(text.includes('其中一人走出去'), '导出含 future 事件内容');
 
   const patch = await req('PATCH', `/api/worlds/${WORLD_ID}`, { card: { prompt: { premise: '改过的命题' } } });

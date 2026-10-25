@@ -7,7 +7,6 @@
  *   - 注入本轮的改稿要求（guidance）
  *   - 流式调用并透传增量
  */
-import { config } from '../config.js';
 import { chatStream } from '../llm.js';
 import { buildContract } from '../memory/context-engine.js';
 
@@ -63,7 +62,6 @@ export function buildNarratorMessages({
 export async function runNarrator({
   session, world, context, turnNo, options = {}, onDelta, signal,
 } = {}) {
-  const cfg = config.agents.narrator;
   const messages = buildNarratorMessages({ session, world, context, guidance: options.guidance });
 
   let content = '';
@@ -72,12 +70,15 @@ export async function runNarrator({
   let model = options.model;
   let finishReason = null;
 
+  // 参数默认值由 llm.js 按 model-registry 的 narrator 绑定补齐（temperature / maxTokens /
+  // reasoningEffort / model）；这里只透传单次覆盖。
   for await (const ev of chatStream({
+    agent: 'narrator',
     messages,
-    model: options.model ?? cfg.model ?? undefined,
-    temperature: options.temperature ?? cfg.temperature,
-    maxTokens: options.maxTokens ?? cfg.maxTokens,
-    reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
+    model: options.model,
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    reasoningEffort: options.reasoningEffort,
     signal,
   })) {
     if (ev.type === 'reasoning' && ev.delta) {

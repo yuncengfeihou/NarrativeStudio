@@ -23,10 +23,11 @@
  * 在场者与随身物，不回答「该注入哪段设定」。
  */
 import { config } from '../config.js';
+import { resolveContextWindow } from '../model-registry.js';
 import { estimateMessageTokens, estimateTokens, truncateToTokens } from '../tokens.js';
 import { normalizeCard, buildAliasIndex, linkEntities, sceneThemeTags } from '../world/schema.js';
 import { buildEffectiveWorld, emptyCastEntry } from '../world/effective.js';
-import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet, renderSceneIndex, renderRecentScenes } from '../world/scene-sheet.js';
+import { renderWorldIndex, renderWorldTree, renderTimelinePast, selectCodex, renderSceneSheet, renderSceneIndex, renderRecentScenes } from '../world/scene-sheet.js';
 import { buildWorldGraph, graphNeighbors } from '../world/graph.js';
 import { isFunctionalPredicate } from './predicates.js';
 import { lintState } from './lint-state.js';
@@ -116,6 +117,7 @@ export function buildSystemLayer(
     card = normalizeCard(world?.card || {}),
     indexCap = config.context.layerBudget.system,
     graph = null,
+    pastText = '',
   } = {},
 ) {
   /* ---- 必需单元：契约 + 宪章 + 主角 + 常驻作者笔记。它们先占预算，永不参与尾部截断。 ---- */
@@ -149,19 +151,23 @@ export function buildSystemLayer(
   const tailText = tail.join('\n\n');
 
   /* ---- 索引是可选单元：只吃剩余预算；超了先砍索引，不砍主角/作者笔记。 ---- */
+  // 前史块（canon=past）排在索引之后、主角之前：它不是选择项，是与世界索引
+  // 同级的 canon；先给它留出空间，索引再吃剩下的（前史自己按行丢最旧，见
+  // renderTimelinePast）。future/branch 永不在这里出现（红线 3）。
   const reserve = estimateTokens(tailText) + 32;
-  const indexCapNow = Math.max(200, indexCap - estimateTokens(fixedText) - reserve);
+  const pastTokens = pastText ? estimateTokens(pastText) + 2 : 0;
+  const indexCapNow = Math.max(200, indexCap - estimateTokens(fixedText) - reserve - pastTokens);
   // 有包含关系时用树形索引；否则保持平铺。去重后的 codex 不再重复出现。
   const index = graph
     ? renderWorldTree(card, indexCapNow, { skipIds: graph.mergedCodexIds })
     : renderWorldIndex(card, indexCapNow);
 
-  let text = [fixedText, index, tailText].filter(Boolean).join('\n\n');
+  let text = [fixedText, index, pastText, tailText].filter(Boolean).join('\n\n');
   if (estimateTokens(text) > indexCap) {
     const excess = estimateTokens(text) - indexCap;
     const keep = estimateTokens(index) - excess - 8;
     const trimmedIndex = keep > 8 ? truncateToTokens(index, keep) : '';
-    text = [fixedText, trimmedIndex, tailText].filter(Boolean).join('\n\n');
+    text = [fixedText, trimmedIndex, pastText, tailText].filter(Boolean).join('\n\n');
   }
   return text;
 }
@@ -505,7 +511,13 @@ export async function assembleContext({
   retrieval = null, previousMessages = null,
 }) {
   const budget = config.context.layerBudget;
-  const hardMax = session?.settings?.context_max_tokens ?? config.context.maxTokens;
+  // 硬上限由 narrator 绑定模型的 contextWindow 决定（未保存运行期配置时 = CONTEXT_MAX_TOKENS）。
+  // 会话可以请求更小的上限，但不能超过模型窗口。
+  const modelCap = resolveContextWindow('narrator');
+  const requestedMax = Number(session?.settings?.context_max_tokens);
+  const hardMax = Number.isFinite(requestedMax) && requestedMax > 0
+    ? Math.min(requestedMax, modelCap)
+    : modelCap;
   const softMax = Math.min(config.context.softTokens, hardMax);
   // 超硬上限策略：fail（默认，拒绝本轮并报错）| truncate（旧行为，调试/应急）。
   const hardCapMode = config.context.overHardCap === 'truncate' ? 'truncate' : 'fail';
@@ -635,12 +647,16 @@ export async function assembleContext({
   /* ---- 系统层（稳定前缀，只读 canon） ---- */
   // 关键：传的是**模板快照** templateCard，不是投影后的 card。
   // system 一旦读运行态，前缀每轮都失效（实测 1000 轮里 system 变 251 次）。
+  // 前史块（timeline canon=past）也来自模板快照：它是「开局之前已经成立」的
+  // canon，不是本局演出结果。future/branch 永不渲染（红线 3）。
+  const timelinePast = renderTimelinePast(templateCard, 240);
   const systemMsg = {
     role: 'system',
     content: buildSystemLayer(session, world, {
       card: templateCard,
       indexCap: budget.system,
       graph: buildWorldGraph(templateCard),
+      pastText: timelinePast.text,
     }),
   };
 
@@ -895,6 +911,11 @@ export async function assembleContext({
       },
       timeline_past: (card.timeline || []).filter((t) => t.canon === 'past').length,
       timeline_future_held: (card.timeline || []).filter((t) => t.canon === 'future').length,
+      // 前史块落位：只进 system 世界索引（与世界索引共享 system 预算），
+      // 是 canon=past 的唯一入口；future/branch 不在这里计数（它们不进提示词）。
+      system_blocks: {
+        timeline_past: { ...timelinePast.meta, cap: 240 },
+      },
       world_state_changes: deltas.length,
       facts: factsRendered,
       facts_candidates: facts.length,

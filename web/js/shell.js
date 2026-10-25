@@ -144,9 +144,9 @@ function buildWorldSubbar(worldId) {
   if (world) {
     subbarEl.appendChild(el('div.subbar-world-info', {},
       el('div.subbar-world-meta', {},
-        el('span.chip.is-plain', {}, `${world.card?.charter_count || 0} 条宪章`),
+        el('span.chip.is-plain', {}, `${world.card?.charter_count || 0} 条世界规则`),
         el('span.chip.is-plain', {}, `${world.card?.cast?.length || 0} 人`),
-        el('span.chip.is-plain', {}, `${world.card?.codex_count || 0} 条辞书`),
+        el('span.chip.is-plain', {}, `${world.card?.codex_count || 0} 条设定集`),
       ),
     ));
   }
@@ -197,7 +197,7 @@ function paintWorlds() {
         el('div.sb-item-meta', {},
           el('span', {}, `${w.session_count || 0} 段`),
           w.card?.codex_count ? el('span.dot') : null,
-          w.card?.codex_count ? el('span', {}, `${w.card.codex_count} 条辞书`) : null,
+          w.card?.codex_count ? el('span', {}, `${w.card.codex_count} 条设定集`) : null,
         ),
       ),
     ));

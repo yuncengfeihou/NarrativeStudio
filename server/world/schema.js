@@ -110,6 +110,9 @@ function normalizeCast(raw) {
           exemplars: asStringArray(voice.exemplars).slice(0, 6),
         },
         psyche: {
+          // 性格是「稳定的行为倾向」，与想要/害怕/藏着/在意分开：
+          // 前四者是动机，traits 是外显的脾气与处事方式，场记单会渲染它。
+          traits: asStringArray(psyche.traits),
           wants: asStringArray(psyche.wants),
           fears: asStringArray(psyche.fears),
           hides: asStringArray(psyche.hides),
@@ -664,18 +667,25 @@ export function sceneThemeTags(card, presentIds, extra = []) {
 export function renderCardText(card) {
   const c = normalizeCard(card);
   const lines = [`# ${c.title}${c.subtitle ? ` · ${c.subtitle}` : ''}`, ''];
-  if (c.prompt.premise) lines.push('## 命题', c.prompt.premise, '');
+  if (c.prompt.premise) lines.push('## 故事方向', c.prompt.premise, '');
   if (c.charter.length) {
-    lines.push('## 宪章');
+    lines.push('## 世界规则');
     for (const r of c.charter) lines.push(`- ${r.rule}`);
     lines.push('');
   }
   if (c.cast.length) {
-    lines.push('## 卡司');
+    lines.push('## 角色');
     for (const p of c.cast) {
       lines.push(`### ${p.name}${p.role ? `（${p.role}）` : ''}`);
       if (p.one_line) lines.push(p.one_line);
+      if (p.identity.age) lines.push(`年龄：${p.identity.age}`);
+      if (p.identity.appearance) lines.push(`外貌：${p.identity.appearance}`);
+      if (p.identity.station) lines.push(`身份：${p.identity.station}`);
+      if (p.identity.background) lines.push(`背景：${p.identity.background}`);
+      if (p.psyche.traits.length) lines.push(`性格：${p.psyche.traits.join('、')}`);
       if (p.voice.rhythm) lines.push(`口吻：${p.voice.rhythm}`);
+      const addr = Object.entries(p.voice.address || {}).map(([to, how]) => `${to}→${how}`).join('；');
+      if (addr) lines.push(`称呼：${addr}`);
       if (p.psyche.wants.length) lines.push(`想要：${p.psyche.wants.join('、')}`);
       if (p.psyche.hides.length) lines.push(`藏着：${p.psyche.hides.join('、')}`);
       if (p.agenda.length) {
@@ -686,7 +696,7 @@ export function renderCardText(card) {
     }
   }
   if (c.codex.length) {
-    lines.push('## 辞书');
+    lines.push('## 设定集');
     for (const e of c.codex) {
       lines.push(`### ${e.name}${e.summary ? `｜${e.summary}` : ''}`);
       if (e.facets.rules.length) lines.push(`规则：${e.facets.rules.join('；')}`);
@@ -697,12 +707,12 @@ export function renderCardText(card) {
   if (c.timeline.length) {
     lines.push('## 时间线');
     for (const e of c.timeline) {
-      lines.push(`- [${e.canon}] ${e.when ? `${e.when} · ` : ''}${e.what}`);
+      lines.push(`- [${e.canon === 'past' ? '前史' : '参考走向'}] ${e.when ? `${e.when} · ` : ''}${e.what}`);
     }
     lines.push('');
   }
   if (c.anchors.length) {
-    lines.push('## 可玩时间点');
+    lines.push('## 开局点');
     for (const a of c.anchors) lines.push(`- ${a.label}${a.note ? `｜${a.note}` : ''}`);
     lines.push('');
   }

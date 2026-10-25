@@ -7,6 +7,9 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import {
+  EFFORTS, getEffectiveConfig, resetRuntimeConfig, resolveAgent, resolveContextWindow, saveRuntimeConfig,
+} from '../model-registry.js';
+import {
   auditSession, canonizeSession, createSessionWithSettings, forkSessionSafe, getMemoryStats,
   getSessionSnapshot, recallSession, runTurn,
 } from '../agents/orchestrator.js';
@@ -27,16 +30,26 @@ function intOr(v, fallback) {
 
 /* ------------------------------ 配置 ------------------------------ */
 
+/**
+ * GET /api/config
+ * 旧字段（models/defaults/limits/budget/narration）保持原形状与含义，值改为「生效值」：
+ * 未保存运行期配置时与 .env 逐项一致；保存后无需重启即反映 DB 绑定。
+ * `runtime` 是模型配置层的完整视图（服务商 / 模型 / Agent 绑定，apiKey 只给掩码）。
+ */
 sessionsRouter.get('/config', (req, res) => {
+  const narrator = resolveAgent('narrator');
+  const archivist = resolveAgent('archivist');
+  const branch = resolveAgent('branch');
+  const contextMax = resolveContextWindow('narrator');
   res.json({
     models: {
-      default: config.upstream.model,
-      reasoning_efforts: ['low', 'medium', 'high'],
+      default: narrator.model,
+      reasoning_efforts: [...EFFORTS],
     },
     defaults: {
-      narrator_effort: config.agents.narrator.reasoningEffort,
-      archivist_effort: config.agents.archivist.reasoningEffort,
-      branch_effort: config.agents.branch.reasoningEffort,
+      narrator_effort: narrator.effort ?? config.agents.narrator.reasoningEffort,
+      archivist_effort: archivist.effort ?? config.agents.archivist.reasoningEffort,
+      branch_effort: branch.effort ?? config.agents.branch.reasoningEffort,
       archive_budget: config.context.layerBudget.archive,
       archive_detail_budget: config.context.layerBudget.archiveDetail,
       scene_every: config.context.sceneEvery,
@@ -46,9 +59,9 @@ sessionsRouter.get('/config', (req, res) => {
       world_tick_every: config.context.worldTickEvery,
     },
     limits: {
-      context_max_tokens: config.context.maxTokens,
-      context_soft_tokens: config.context.softTokens,
-      narrator_max_tokens: config.agents.narrator.maxTokens,
+      context_max_tokens: contextMax,
+      context_soft_tokens: Math.min(config.context.softTokens, contextMax),
+      narrator_max_tokens: narrator.maxTokens,
     },
     budget: config.context.layerBudget,
     narration: {
@@ -58,7 +71,29 @@ sessionsRouter.get('/config', (req, res) => {
       tool_history_tokens: config.narration.toolHistoryTokens,
       tool_result_max_tokens: config.narration.toolResultMaxTokens,
     },
+    runtime: getEffectiveConfig(),
   });
+});
+
+/** PUT /api/config —— 全量保存运行期模型配置（立即生效，不需要重启）。 */
+sessionsRouter.put('/config', (req, res) => {
+  try {
+    res.json({ ok: true, runtime: saveRuntimeConfig(req.body || {}) });
+  } catch (err) {
+    const status = err?.status === 400 ? 400 : 500;
+    if (status === 500) console.warn(`[config] 保存失败：${err?.message || err}`);
+    res.status(status).json({ error: { message: err?.message || String(err) } });
+  }
+});
+
+/** DELETE /api/config —— 删除运行期配置，回到 .env 默认（立即生效）。 */
+sessionsRouter.delete('/config', (req, res) => {
+  try {
+    res.json({ ok: true, runtime: resetRuntimeConfig() });
+  } catch (err) {
+    console.warn(`[config] 重置失败：${err?.message || err}`);
+    res.status(500).json({ error: { message: err?.message || String(err) } });
+  }
 });
 
 /* ------------------------------ 会话 ------------------------------ */
@@ -74,17 +109,24 @@ sessionsRouter.post('/sessions', (req, res) => {
   const world = wid ? getWorld(wid) : null;
   if (wid && !world) return res.status(404).json({ error: { message: 'world not found' } });
   const card = world?.card || {};
+  const cap = resolveContextWindow('narrator');
+  const sessionSettings = {
+    title: title || card.title || '未命名剧情',
+    narrator_effort: 'high',
+    context_max_tokens: cap,
+    style_tags: card.genre || [],
+    ...(settings || {}),
+  };
+  // 会话级上限只能是模型窗口内的一次收窄，不能超过 narrator 绑定模型的 contextWindow。
+  const requestedMax = Number(sessionSettings.context_max_tokens);
+  sessionSettings.context_max_tokens = Number.isFinite(requestedMax) && requestedMax > 0
+    ? Math.min(requestedMax, cap)
+    : cap;
   const session = createSessionWithSettings({
     title: title || card.title || '未命名剧情',
     worldId: wid,
     anchorId: anchor_id || null,
-    settings: {
-      title: title || card.title || '未命名剧情',
-      narrator_effort: 'high',
-      context_max_tokens: config.context.maxTokens,
-      style_tags: card.genre || [],
-      ...(settings || {}),
-    },
+    settings: sessionSettings,
   });
   res.status(201).json(session);
 });

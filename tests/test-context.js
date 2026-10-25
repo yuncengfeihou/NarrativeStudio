@@ -23,6 +23,7 @@ const schema = await import('../server/world/schema.js');
 const { config } = await import('../server/config.js');
 const { shouldPrecheckRetrieval } = await import('../server/agents/retrieval.js');
 const { comparePromptMessages } = await import('../server/memory/prompt-drift.js');
+const sceneSheet = await import('../server/world/scene-sheet.js');
 
 let pass = 0;
 let fail = 0;
@@ -51,8 +52,9 @@ const card = schema.normalizeCard({
     {
       id: 'ling-yue', name: '凌玥', aliases: ['玥姐姐', '凌家主'],
       role: '帝都凌家家主 · 伍卿的「妻主」', one_line: '对天下是棋手，对少年是流氓。',
+      identity: { appearance: '玄色窄袖长衫，左腕一串旧玉珠', station: '帝都凌家家主', background: '七岁那年被母亲丢在雨街' },
       voice: { rhythm: '陈述句、短句、笑着说的狠话', exemplars: ['「卿儿，过来。」'] },
-      psyche: { wants: ['把他带走'], hides: ['七年前是她母亲丢的人'] },
+      psyche: { traits: ['笑里藏刀', '护短'], wants: ['把他带走'], hides: ['七年前是她母亲丢的人'] },
       knowledge: { knows: ['七年前的真相'], does_not_know: ['伍卿见过南荣兰冰'] },
       agenda: [{ goal: '今天必须把他带走', method: '不能用施舍的方式', pressure: 0.9 }],
       weight: 1,
@@ -152,15 +154,79 @@ console.log('\n=== 删干净的证据 ===');
 
   // 未来剧情不注入
   ok(!all.includes('黎婆确诊癌症'), 'timeline 的 future 事件不进提示词');
-  // 过去的 canon 也不直接进（它活在状态与场记单里，不当成待复述的剧本）
-  ok(!all.includes('凌玥的母亲把伍卿丢在街上'), 'timeline 的 past 事件也不当剧本注入');
-  ok(ctx.meta.timeline_future_held === 1, '但元数据记录住「有 1 条未来参考被扣留」');
+  // 前史（canon=past）是 canon：进 system 世界索引，以陈述句出现，
+  // 不带「必达/原著后续」等指令化措辞（红线 3）。
+  // 它来自模板卡 timeline，不是 anchors[].snapshot——后者只是初始账本。
+  const sys = ctx.messages[0].content;
+  ok(sys.includes('【前史】'), '前史块进 system');
+  ok(sys.includes('凌玥的母亲把伍卿丢在街上'), 'canon=past 的前史进 system');
+  ok(/【前史】[\s\S]*· 七年前 · 雨夜 · 凌玥的母亲把伍卿丢在街上/.test(sys), '前史一行一条，带时间');
+  ok(!sys.includes('黎婆确诊癌症'), 'future 不进 system');
+  ok(!all.includes('必达') && !all.includes('原著后续'), '前史不是必达节拍/原著指令');
+  eq(ctx.meta.system_blocks.timeline_past.count, 1, 'meta：前史条数');
+  eq(ctx.meta.system_blocks.timeline_past.rendered, 1, 'meta：前史渲染条数');
+  ok(ctx.meta.system_blocks.timeline_past.tokens > 0, 'meta：前史块 token');
+  eq(ctx.meta.system_blocks.timeline_past.cap, 240, 'meta：前史块预算上限');
 
   // 系统层包含宪章与索引
   ok(all.includes('【世界宪章】'), '宪章在场');
   ok(all.includes('【世界索引】'), '世界索引在场');
   ok(all.includes('女子主外'), '宪章内容在场');
   ok(all.includes('凌玥（'), '索引里有人物');
+  ok(sys.indexOf('【前史】') > sys.indexOf('【世界索引】'), '前史排在世界索引之后');
+  ok(sys.indexOf('【前史】') < sys.indexOf('【主角】'), '前史排在主角之前（canon 区）');
+}
+
+console.log('\n=== 前史不依赖 anchor.snapshot ===');
+{
+  // 前史来源是模板卡的 timeline；没有锚点快照的原创卡也应生效，
+  // 且文案里不出现「原著/后文」这类改编卡专属措辞。
+  const bareCard = schema.normalizeCard({
+    title: '原创世界', premise: '一座旧城。',
+    cast: [{ id: 'a-he', name: '阿禾', role: '守夜人', one_line: '沉默' }],
+    timeline: [{ id: 'p1', when: '二十年前', what: '旧城毁于大火', canon: 'past' }],
+    player: { mode: 'original', name: '旅人' },
+  });
+  const bareWorld = { id: `w-bare-${Date.now()}`, title: '原创', card: bareCard };
+  store.saveWorld(bareWorld);
+  const bareSession = store.createSession({ id: `s-bare-${Date.now()}`, title: 'b', worldId: bareWorld.id });
+  store.createBranch(bareSession.id, { branchId: 'main' });
+  const bctx = await engine.assembleContext({
+    session: { ...bareSession, branch_id: 'main' }, world: bareWorld, turnNo: 1,
+  });
+  const bsys = bctx.messages[0].content;
+  ok(bsys.includes('【前史】'), '无锚点：前史块仍进 system');
+  ok(bsys.includes('旧城毁于大火'), '无锚点：前史内容来自 timeline 模板');
+  ok(!bsys.includes('原著'), '无锚点：不含「原著」字样');
+  eq(bctx.meta.system_blocks.timeline_past.count, 1, '无锚点：meta 记录前史条数');
+}
+
+console.log('\n=== 前史渲染：预算与降级 ===');
+{
+  const many = schema.normalizeCard({
+    title: '前史预算', anchors: [],
+    player: { mode: 'original', name: '甲' },
+    timeline: Array.from({ length: 12 }, (_, i) => ({
+      id: `e${i}`, when: `第${i}年`, what: `事件${i}`, canon: 'past',
+    })),
+  });
+  const out = sceneSheet.renderTimelinePast(many, 60);
+  ok(out.meta.count === 12, 'cap：统计全部前史条目');
+  ok(out.meta.rendered > 0 && out.meta.rendered < 12, 'cap：超预算只渲染最新的若干条');
+  ok(out.meta.dropped > 0, 'cap：记录被丢弃的旧行数');
+  ok(!out.text.includes('事件0'), 'cap：最旧的行整条丢弃（不切半句）');
+  ok(out.text.includes('事件11'), 'cap：最新的行保留');
+  ok(out.meta.tokens <= 60 + 20, 'cap：渲染后不超预算上浮范围');
+
+  const fut = sceneSheet.renderTimelinePast(schema.normalizeCard({
+    title: '未来', anchors: [], player: { mode: 'original', name: '甲' },
+    timeline: [
+      { id: 'f', when: '以后', what: '未来的事', canon: 'future' },
+      { id: 'b', when: '支线', what: '另一条线', canon: 'branch' },
+    ],
+  }));
+  eq(fut.text, '', 'future / branch 不渲染');
+  eq(fut.meta.count, 0, 'future / branch 不计入前史');
 }
 
 console.log('\n=== 实体链接只改在场者 ===');
@@ -288,6 +354,10 @@ console.log('\n=== 场记单内容 ===');
   const sheet = ctx.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
   ok(sheet.includes('时间 初冬 · 黄昏'), '时空来自锚点快照');
   ok(sheet.includes('私心：今天必须把他带走'), '私心来自 cast.agenda');
+  ok(sheet.includes('外形：玄色窄袖长衫'), '外形来自 cast.identity.appearance');
+  ok(sheet.includes('身份：帝都凌家家主'), '身份来自 cast.identity.station');
+  ok(sheet.includes('性格：笑里藏刀'), '性格来自 cast.psyche.traits');
+  ok(!sheet.includes('七岁那年被母亲丢在雨街'), '背景故事不进场记单（只在卡与世界索引里）');
   ok(sheet.includes('边界：'), '知识边界在场');
   ok(sheet.includes('未回收的线索') || sheet.includes('压力'), '线索/压力段至少有一段');
   ok(!sheet.includes('玉佩'), 'reveal=secret 的条目不被链接带出时不出现在单子里');

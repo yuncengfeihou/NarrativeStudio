@@ -87,7 +87,7 @@ export default {
           el('div.empty-icon', {}, icon('book', { size: 20 })),
           el('div.empty-title', {}, '还没有世界卡'),
           el('div.empty-sub', {},
-            '世界卡承载这个世界的一切：宪章、人物、辞书、时间线。有了它，每一次开局都不必重写一遍。'),
+            '世界卡承载这个世界的一切：世界规则、人物、设定集、时间线。有了它，每一次开局都不必重写一遍。'),
           el('button.btn.btn-primary', { type: 'button', onclick: () => navigate('#/new') },
             icon('plus', { size: 13 }), '创建第一张卡'),
         ));
@@ -105,7 +105,7 @@ export default {
       page.appendChild(list);
 
       page.appendChild(el('div.group-note', { style: 'padding:12px 2px 0;' },
-        '提示：世界卡的「辞书」靠实体在场、主题匹配或你手动钉选进入上下文，不靠关键词触发——所以卡可以写得很细，却不会撑爆提示词。'));
+        '提示：世界卡的「设定集」靠实体在场、主题匹配或你手动固定带出进入上下文，不靠关键词触发——所以卡可以写得很细，却不会撑爆提示词。'));
     }
 
     load();
@@ -135,7 +135,7 @@ function worldRow(w, reload, index = 0) {
     ),
     el('div.world-facts', {},
       fact(w.session_count || 0, '剧情'),
-      fact(card.codex_count || (card.codex || []).length, '辞书'),
+      fact(card.codex_count || (card.codex || []).length, '设定集'),
       fact((card.cast || []).length, '人物'),
     ),
     el('span.icon-btn', {

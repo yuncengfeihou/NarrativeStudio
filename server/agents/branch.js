@@ -7,7 +7,6 @@
  * 解析容错链：整体 JSON → 正则提取 {...} → 打捞 branches 数组 → 3 条通用兜底。
  * LLM 调用失败同样降级，绝不阻断回合。
  */
-import { config } from '../config.js';
 import { chat } from '../llm.js';
 import { branchSystemPrompt, branchUserPrompt, BRANCH_TONES } from '../prompts/branch.js';
 
@@ -159,7 +158,6 @@ function parseBranchPayload(content) {
 export async function runBranchAgent({
   world, state, recentNarrative, present, sceneSheet, options = {}, signal,
 } = {}) {
-  const cfg = config.agents.branch;
   const sceneSummary = summarizeScene(state);
 
   const messages = [
@@ -176,11 +174,12 @@ export async function runBranchAgent({
   let usage = null;
   try {
     const res = await chat({
+      agent: 'branch',
       messages,
-      temperature: options.temperature ?? cfg.temperature,
-      maxTokens: options.maxTokens ?? cfg.maxTokens,
-      reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
-      model: options.model ?? cfg.model ?? undefined,
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      reasoningEffort: options.reasoningEffort,
+      model: options.model,
       responseFormat: { type: 'json_object' },
       signal,
     });

@@ -1,12 +1,12 @@
 /**
- * panels/timeline.js — 时间轴面板
+ * panels/timeline.js — 时间线面板
  *
- * 时间轴有两条来源，过去从来没有被合到一张图上：
- *   1. `card.timeline` —— 作者写死的既定事实（canon='past'）与原著后续（canon='future'）。
+ * 时间线有两条来源，过去从来没有被合到一张图上：
+ *   1. `card.timeline` —— 作者写定的前史（canon='past'）与参考走向（canon='future'）。
  *   2. `scenes`       —— 这一局真实发生的每一场，从完整原文重写，带 when_label / place / importance。
  *
- * 这里把它们排成一条连续的轴：既定事实在上游，这一局在中间，原著后续在末端并明确标注
- * 「不会注入提示词」（红线 §1.1.3：future 是校勘参考，不是演绎目标）。
+ * 这里把它们排成一条连续的轴：前史在上游，这一局在中间，参考走向在末端并明确标注
+ * 「不会注入提示词」（红线 §1.1.3：future 是一致性检查参考，不是演绎目标）。
  *
  * 粒度由 importance 决定，而 importance 是确定性规则算出来的（memory-pipeline.js:123-125），
  * 不靠模型自评：有 key_detail / hooks / threads → major；有 question / outcome → normal；
@@ -115,14 +115,14 @@ function sceneNode(scene, prev, { onJump } = {}) {
   return node;
 }
 
-/** 作者写死的既定事实：没有 importance，统一按「既定」渲染。 */
+/** 作者写定的历史事件：没有 importance，统一按「前史」渲染。 */
 function authoredNode(evt, { isFuture }) {
   return el('div', { class: `tlx-item tlx-authored${isFuture ? ' is-future' : ''}` },
     el('div.tlx-rail', {}, el('span.tlx-dot')),
     el('div.tlx-body', {},
       el('div.tlx-meta', {},
         el('span.tlx-when', {}, evt.when || '—'),
-        el('span.tlx-badge', {}, isFuture ? '原著后续' : '既定事实'),
+        el('span.tlx-badge', {}, isFuture ? '参考走向' : '前史'),
       ),
       el('div.tlx-what', {}, evt.what),
       evt.source ? el('div.tlx-src', {}, evt.source) : null,
@@ -221,22 +221,24 @@ export async function openTimelinePanel(sessionId, opts = {}) {
 
   function authoredSection() {
     const events = card?.timeline || [];
-    const past = events.filter((e) => e.canon === 'past');
+    const past = events.filter((e) => e.canon !== 'future');
     const future = events.filter((e) => e.canon === 'future');
+    const adapted = card?.kind === 'adapted';
     if (!past.length && !future.length) return el('div', {});
 
     const wrap = el('div.tlx-sect', {});
 
     if (past.length) {
-      wrap.appendChild(el('div.tlx-sect-head', {}, '起点之前 · 既定事实'));
-      wrap.appendChild(el('p.tlx-sect-note', {}, '开局时这些事已经发生过，剧情必须与之自洽。'));
+      wrap.appendChild(el('div.tlx-sect-head', {}, '前史 · 开局之前'));
+      wrap.appendChild(el('p.tlx-sect-note', {}, '开局时这些事已经发生过，会作为世界背景进入上下文，剧情需与之自洽。'));
       wrap.appendChild(el('div.tlx-axis', {}, ...past.map((e) => authoredNode(e, { isFuture: false }))));
     }
 
     if (future.length) {
-      wrap.appendChild(el('div.tlx-sect-head.is-muted', {}, '原著后续 · 参考'));
-      wrap.appendChild(el('p.tlx-sect-note', {},
-        '原著里后来发生的事。只作校勘参考，不会注入提示词，也不作为演绎目标——玩家把剧情带偏是正常玩法。'));
+      wrap.appendChild(el('div.tlx-sect-head.is-muted', {}, '参考走向 · 开局之后'));
+      wrap.appendChild(el('p.tlx-sect-note', {}, adapted
+        ? '原作在开局之后的后续。只作一致性检查参考，不会注入提示词，也不作为演绎目标——玩家把剧情带偏是正常玩法。'
+        : '你为这个世界预想的后续（可选）。只作作者对照，不会注入提示词，也不作为演绎目标。'));
       wrap.appendChild(el('div.tlx-axis.is-future', {}, ...future.map((e) => authoredNode(e, { isFuture: true }))));
     }
 
@@ -255,7 +257,7 @@ export async function openTimelinePanel(sessionId, opts = {}) {
     }
 
     body.appendChild(summaryBar());
-    body.appendChild(el('div.tlx-sect-head', {}, '这一局 · 场次时间轴'));
+    body.appendChild(el('div.tlx-sect-head', {}, '这一局 · 场次时间线'));
     body.appendChild(el('p.tlx-sect-note', {},
       '每场从这一场的完整原文重写，不是摘要的摘要。点任意一场可以跳到对应轮次。'));
     body.appendChild(filterBar());
@@ -265,7 +267,7 @@ export async function openTimelinePanel(sessionId, opts = {}) {
   }
 
   const sheetApi = openSheet({
-    title: '时间轴',
+    title: '时间线',
     width: 780,
     render(body) {
       clear(body);

@@ -17,6 +17,7 @@ import { config } from '../config.js';
 import { estimateTokens } from '../tokens.js';
 import { normalizeCard } from '../world/schema.js';
 import { buildEffectiveWorld } from '../world/effective.js';
+import { resolveAgent } from '../model-registry.js';
 import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId, runEffectOnce } from '../memory/branch-guard.js';
 import { buildPlayerView } from '../memory/player-view.js';
 import {
@@ -233,7 +234,7 @@ async function runTurnInner({
         options: {
           ...options,
           reasoningEffort: 'low',
-          maxTokens: Math.max(config.agents.narrator.maxTokens, 8000),
+          maxTokens: Math.max(resolveAgent('narrator').maxTokens, 8000),
           guidance: [
             options.narrator?.guidance,
             '上一轮只输出了思考而没有任何正文。这次请直接输出剧情正文，不要输出思考过程。',
@@ -469,6 +470,8 @@ async function runTurnInner({
 function buildAssemblyMeta(context, narrator) {
   const meta = context?.meta || {};
   const budget = context?.budget || {};
+  // 生效的 narrator 参数（DB 绑定优先于 .env）；这里记录的是配置来源，不是单次覆盖。
+  const narratorAgent = resolveAgent('narrator');
   return {
     budget: { ...budget },
     present: meta.present || [],
@@ -490,8 +493,8 @@ function buildAssemblyMeta(context, narrator) {
     hard_cap: meta.hard_cap || null,
     coverage: meta.coverage || null,
     model: narrator?.model || null,
-    effort: config.agents.narrator.reasoningEffort,
-    temperature: config.agents.narrator.temperature,
+    effort: narratorAgent.effort,
+    temperature: narratorAgent.temperature,
     // 分段演绎的可观测信息：轮数、工具次数、是否定稿、是否回退。
     narration: narrator?.narration || { mode: 'single', rounds: 1, tools: 0, sealed: true },
   };

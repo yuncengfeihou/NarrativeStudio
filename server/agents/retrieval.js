@@ -72,8 +72,8 @@ export async function runRetrieval({
 
   // 名字/别名的紧凑清单；给模型判断「有什么可查」。
   const names = [...new Set(codex.flatMap((e) => [e.name, ...(e.aliases || [])]).filter(Boolean))];
-  const cfg = config.agents.retrieval;
   const res = await chat({
+    agent: 'retrieval',
     messages: [
       {
         role: 'system',
@@ -87,10 +87,9 @@ export async function runRetrieval({
         content: retrievalUserPrompt({ playerText, ledger, lastNarrative }),
       },
     ],
-    temperature: cfg.temperature,
-    maxTokens: cfg.maxTokens,
-    reasoningEffort: cfg.reasoningEffort,
-    model: cfg.model || undefined,
+    temperature: null,
+    maxTokens: null,
+    reasoningEffort: null,
     signal,
   });
 

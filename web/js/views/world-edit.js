@@ -1,11 +1,11 @@
 /**
  * views/world-edit.js — 世界卡编辑器
  *
- * 七个分段：基本 / 宪章 / 主角 / 卡司 / 辞书 / 时间线 / 开场
+ * 六个分段：基本 / 世界规则 / 主角 / 角色 / 设定集 / 时间线
  * 编辑的是「世界卡」，不是某一段剧情——改一次，以后每次开局都用新的。
  */
 
-import { el, clear, charCount } from '../util.js';
+import { el, clear } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
 import { navigate, toast, showLoading, hideLoading, openSheet, openActionSheet } from '../app.js';
@@ -142,7 +142,6 @@ export default {
       box.appendChild(pane('cast', castPane()));
       box.appendChild(pane('codex', codexPane()));
       box.appendChild(pane('timeline', timelinePane()));
-      box.appendChild(pane('opening', openingPane()));
       scroll.appendChild(box);
       if (keepTop != null) scroll.scrollTop = keepTop;
     }
@@ -219,12 +218,11 @@ export default {
     function tabs() {
       const items = [
         ['basic', '基本', 'list'],
-        ['charter', '宪章', 'scroll'],
+        ['charter', '世界规则', 'scroll'],
         ['player', '主角', 'user'],
-        ['cast', '卡司', 'users'],
-        ['codex', '辞书', 'book'],
+        ['cast', '角色', 'users'],
+        ['codex', '设定集', 'book'],
         ['timeline', '时间线', 'layers'],
-        ['opening', '开场', 'play'],
       ];
 
       if (resizeHandler) window.removeEventListener('resize', resizeHandler);
@@ -281,7 +279,6 @@ export default {
       if (key === 'cast') return c.cast.length;
       if (key === 'codex') return c.codex.length;
       if (key === 'timeline') return c.timeline.length;
-      if (key === 'opening') return charCount(c.anchors?.[0]?.opening_seed || '') ? '•' : '';
       return '';
     }
 
@@ -391,15 +388,15 @@ export default {
         }
         styleCard.appendChild(editorRow(label, inp));
       }
-      wrap.appendChild(fgroup('演出范式', styleCard, '这四项会直接写进每一轮的演绎契约。'));
+      wrap.appendChild(fgroup('叙事风格', styleCard, '这四项会直接写进每一轮的演绎契约。'));
 
-      // 命题
+      // 故事方向
       const premiseInput = el('textarea.field', {
         rows: 4, placeholder: '三到五句话：这个世界的核心矛盾、主角的处境、故事大致要往哪去。',
         value: prompt.premise || '',
       });
       premiseInput.addEventListener('input', () => { prompt.premise = premiseInput.value; });
-      wrap.appendChild(fgroup('命题', premiseInput,
+      wrap.appendChild(fgroup('故事方向', premiseInput,
         '这是故事要往哪去。它是方向，不是剧本——剧情具体怎么走由玩家和角色决定。'));
 
       // 演绎附注
@@ -413,17 +410,17 @@ export default {
       return wrap;
     }
 
-    /* ---- 宪章 ---- */
+    /* ---- 世界规则 ---- */
     function charterPane() {
       const wrap = el('div');
-      wrap.appendChild(paneHead('宪章', '任何场景下都成立的硬设定：世界的物理、制度、礼法与尺度。'));
+      wrap.appendChild(paneHead('世界规则', '任何场景下都成立的硬设定：世界的物理、制度、礼法与尺度。'));
       const list = el('div', { style: 'display:flex;flex-direction:column;gap:7px;' });
       paintCharter();
 
       function paintCharter() {
         clear(list);
         if (!model.card.charter.length) {
-          list.appendChild(el('div.charter-empty', {}, '还没有宪章。先写一条这个世界绝不妥协的规则。'));
+          list.appendChild(el('div.charter-empty', {}, '还没有世界规则。先写一条这个世界绝不妥协的规则。'));
         }
         model.card.charter.forEach((c, i) => {
           const ta = growTextarea(el('textarea.field', { rows: 2, placeholder: '例如：任何人在「司楼」内都不得直呼对方真名。' }), 140);
@@ -433,7 +430,7 @@ export default {
             el('span.charter-edit-idx', {}, String(i + 1).padStart(2, '0')),
             ta,
             el('button.btn-icon', {
-              type: 'button', title: '删除这条宪章',
+              type: 'button', title: '删除这条世界规则',
               onclick: () => { model.card.charter.splice(i, 1); markDirty(); paintCharter(); },
             }, icon('trash', { size: 13 })),
           ));
@@ -441,13 +438,13 @@ export default {
         list.appendChild(el('button.cast-add', {
           type: 'button',
           onclick: () => { model.card.charter.push({ rule: '' }); markDirty(); paintCharter(); },
-        }, icon('plus', { size: 13 }), '添加一条宪章'));
+        }, icon('plus', { size: 13 }), '添加一条世界规则'));
         paintTabBadges();
       }
 
       wrap.appendChild(list);
       wrap.appendChild(el('div.group-note', { style: 'padding-top:10px;' },
-        '只写规则，不写具体事件。宪章每轮都会进入上下文（约占 1.5K tok）。'));
+        '只写规则，不写具体事件。世界规则每轮都会进入上下文（约占 1.5K tok）。'));
       return wrap;
     }
 
@@ -482,10 +479,10 @@ export default {
       return wrap;
     }
 
-    /* ---- 卡司 ---- */
+    /* ---- 角色 ---- */
     function castPane() {
       const wrap = el('div');
-      wrap.appendChild(paneHead('卡司', '只有本轮在场的角色会进入上下文；「常驻」的人物每轮都在。'));
+      wrap.appendChild(paneHead('角色', '只有本轮在场的角色会进入上下文；「常驻」的人物每轮都在。'));
       const list = el('div.cast-list');
       paintCast();
 
@@ -512,7 +509,7 @@ export default {
           id: '', name: '', aliases: [], role: '', one_line: '',
           identity: { age: '', appearance: '', background: '', station: '' },
           voice: { address: {}, rhythm: '', lexicon: [], never: [], exemplars: [] },
-          psyche: { wants: [], fears: [], hides: [], values: [] },
+          psyche: { traits: [], wants: [], fears: [], hides: [], values: [] },
           knowledge: { knows: [], does_not_know: [], believes_falsely: [] },
           agenda: [], relations: [],
           always_present: false, weight: 0.5,
@@ -611,16 +608,18 @@ export default {
             ),
           ),
           el('div.cast-body', {},
-            row('一句话', '一句话能概括这个人（显示在卡司网格里）', c.one_line, (v) => { c.one_line = v; }, true),
+            row('一句话', '一句话能概括这个人（显示在角色网格里）', c.one_line, (v) => { c.one_line = v; }, true),
             row('别名', '顿号分隔，如：玥姐姐、凌家主', c.aliases, (v) => { c.aliases = v; }, false, true),
             row('年龄', '十七岁 / 二十出头…', c.identity.age, (v) => { c.identity.age = v; }),
             row('外貌', '体态、穿着、显眼的特征', c.identity.appearance, (v) => { c.identity.appearance = v; }, true),
+            row('性格', '脾气、处事方式；一行一条，如：笑里藏刀', c.psyche.traits, (v) => { c.psyche.traits = v; }, true, false, true),
             row('身份', '家世、职业、社会位置', c.identity.station, (v) => { c.identity.station = v; }),
             row('背景', '过往经历、立场、与主角的渊源', c.identity.background, (v) => { c.identity.background = v; }, true),
             row('口吻', '台词风格、自称、对主角的称呼', c.voice.rhythm, (v) => { c.voice.rhythm = v; }, true),
+            addressRow(c.voice.address || (c.voice.address = {})),
             row('常用词', '顿号分隔，如：卿儿、姐姐、放肆', c.voice.lexicon, (v) => { c.voice.lexicon = v; }, false, true),
             row('绝不说', '顿号分隔：这个角色不会用的词或句式', c.voice.never, (v) => { c.voice.never = v; }, false, true),
-            row('原声', '每行一句原文台词，用来锚定声音', c.voice.exemplars, (v) => { c.voice.exemplars = v; }, true, false, true),
+            row('台词样本', '每行一句原文台词，用来锚定声音', c.voice.exemplars, (v) => { c.voice.exemplars = v; }, true, false, true),
             row('想要', '顿号分隔', c.psyche.wants, (v) => { c.psyche.wants = v; }, false, true),
             row('害怕', '顿号分隔', c.psyche.fears, (v) => { c.psyche.fears = v; }, false, true),
             row('藏着', '不为人知的动机——引擎会遵守，但不会说破', c.psyche.hides, (v) => { c.psyche.hides = v; }, true, true),
@@ -691,19 +690,36 @@ export default {
         return el('div.cast-row', {}, el('span.cast-key', {}, '关系'), ta);
       }
 
+      /** 称呼：每行「对象｜称呼」，决定这个角色怎么称呼谁。 */
+      function addressRow(address) {
+        const ta = growTextarea(el('textarea', {
+          rows: 1,
+          placeholder: '伍卿｜卿儿\n（每行一条：对象｜称呼；公开场合与私下不同时写清）',
+        }), 120);
+        ta.value = Object.entries(address).map(([to, how]) => [to, how].join('｜')).join('\n');
+        ta.addEventListener('input', () => {
+          for (const key of Object.keys(address)) delete address[key];
+          for (const line of splitLines(ta.value)) {
+            const [to, how] = line.split('｜').map((s) => s.trim());
+            if (to && how) address[to] = how;
+          }
+        });
+        return el('div.cast-row', {}, el('span.cast-key', {}, '称呼'), ta);
+      }
+
       wrap.appendChild(list);
       wrap.appendChild(el('div.group-note', { style: 'padding-top:10px;' },
-        '所以卡司可以写得很细，而上下文只装这一轮真正需要的那几张。'));
+        '所以角色可以写得很细，而上下文只装这一轮真正需要的那几张。'));
       return wrap;
     }
 
-    /* ---- 辞书（codex）---- */
+    /* ---- 设定集（codex）---- */
     function codexPane() {
       const list = model.card.codex;
       const wrap = el('div', {});
-      wrap.appendChild(paneHead('辞书', '类型化的世界实体，按实体链接、主题与钉选进场。'));
+      wrap.appendChild(paneHead('设定集', '类型化的世界实体，按实体链接、主题与固定带出进场。'));
       wrap.appendChild(el('p.field-hint', {},
-        '类型化的世界实体。它们不靠关键词触发：进场靠「实体在场 / 主题匹配 / 你钉选」，由引擎按当前场景渲染。',
+        '类型化的世界实体。它们不靠关键词触发：进场靠「实体在场 / 主题匹配 / 你固定带出」，由引擎按当前场景渲染。',
         '所以这里没有「触发词」——你只需要把它挂到相关的角色、地点或线索上。'));
 
       wrap.appendChild(el('div.sect-head', {},
@@ -717,31 +733,71 @@ export default {
       if (!list.length) {
         wrap.appendChild(el('div.empty', {},
           el('div.empty-icon', {}, icon('book', { size: 20 })),
-          el('div.empty-title', {}, '还没有辞书条目'),
+          el('div.empty-title', {}, '还没有设定集条目'),
           el('div.empty-sub', {}, '地点、机构、物品、概念——凡是「提到时才需要知道细节」的东西。'),
         ));
         return wrap;
       }
 
       const items = el('div.codex-edit-list');
-      list.forEach((e) => {
+      const search = el('input.field.sect-search', {
+        type: 'search', placeholder: '搜索名称、别名或摘要',
+      });
+      search.addEventListener('input', paintItems);
+
+      function typeLabel(type) {
+        return (CODEX_TYPES.find((t) => t[0] === type) || ['custom', '其他'])[1];
+      }
+
+      function itemNode(e) {
         const head = el('button.codex-edit-head', {
           type: 'button',
           onclick: () => openCodexEditor(e),
         },
-          el('span.codex-edit-type', {}, (CODEX_TYPES.find((t) => t[0] === e.type) || ['custom', '其他'])[1]),
+          el('span.codex-edit-type', {}, typeLabel(e.type)),
           el('span.codex-edit-name', {}, e.name || '（未命名）'),
-          e.pinned ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '钉选') : null,
-          e.muted ? el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, '静音') : null,
-          e.reveal === 'secret' ? el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, '未解') : null,
+          e.pinned ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '固定带出') : null,
+          e.muted ? el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, '不自动带出') : null,
+          e.reveal === 'secret' ? el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, '秘密') : null,
           el('span.codex-edit-chev', {}, icon('chevronRight', { size: 12 })),
         );
         const body = el('div.codex-edit-body', {},
           e.summary ? el('div.codex-edit-summary', {}, e.summary) : null,
           e.links?.length ? el('div.codex-edit-links', {}, `关联：${e.links.join('、')}`) : null,
         );
-        items.appendChild(el('div.codex-edit-item', {}, head, body));
-      });
+        return el('div.codex-edit-item', {}, head, body);
+      }
+
+      // 平铺列表在不同类型混在一起时很难管；按类型分组，组内按名称排序。
+      // 搜索是纯前端过滤（名称/别名/摘要），不改任何卡片数据。
+      function paintItems() {
+        clear(items);
+        const q = search.value.trim().toLowerCase();
+        const matched = list.filter((e) => {
+          if (!q) return true;
+          return [e.name, e.summary, ...(e.aliases || [])]
+            .some((s) => String(s || '').toLowerCase().includes(q));
+        });
+        if (!matched.length) {
+          items.appendChild(el('div.codex-edit-empty', {}, '没有匹配的条目。'));
+          return;
+        }
+        const groups = CODEX_TYPES
+          .map(([type, label]) => ({ label, rows: matched.filter((e) => (e.type || 'custom') === type) }))
+          .filter((g) => g.rows.length);
+        for (const g of groups) {
+          items.appendChild(el('div.codex-edit-group', {},
+            el('div.codex-edit-group-head', {}, g.label, el('span', {}, `· ${g.rows.length} 条`)),
+            g.rows
+              .slice()
+              .sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'zh'))
+              .map(itemNode),
+          ));
+        }
+      }
+
+      wrap.appendChild(search);
+      paintItems();
       wrap.appendChild(items);
       return wrap;
     }
@@ -793,13 +849,13 @@ export default {
       const revealSelect = el('select.field', {},
         el('option', { value: 'public', selected: draft.reveal !== 'secret' && draft.reveal !== 'rumor' }, '公开'),
         el('option', { value: 'rumor', selected: draft.reveal === 'rumor' }, '流言'),
-        el('option', { value: 'secret', selected: draft.reveal === 'secret' }, '未解（只引擎知道，不得说破）'),
+        el('option', { value: 'secret', selected: draft.reveal === 'secret' }, '秘密（只有引擎知道，不得说破）'),
       );
 
-      // 静音：作者显式关掉自动进场。它不是「删除」——条目仍在卡里，模型仍可主动检索到。
+      // 不自动带出：作者显式关掉自动进场。它不是「删除」——条目仍在卡里，模型仍可主动检索到。
       const mutedSw = el('div.switch.is-sm', {
         role: 'switch', 'aria-checked': String(!!draft.muted), tabindex: '0',
-        title: '静音：不进世界索引与场记单候选',
+        title: '不自动带出：不进世界索引与本场状态候选',
       }, el('div.switch-knob'));
       mutedSw.addEventListener('click', () => {
         draft.muted = !draft.muted;
@@ -808,7 +864,7 @@ export default {
       });
 
       openSheet({
-        title: entry ? '编辑辞书条目' : '添加辞书条目',
+        title: entry ? '编辑设定集条目' : '添加设定集条目',
         confirmText: entry ? '保存' : '添加',
         cancelText: '取消',
         render(b) {
@@ -818,7 +874,7 @@ export default {
           b.appendChild(el('div',
             { style: 'display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-3);margin:2px 0 8px;' },
             mutedSw,
-            el('span', {}, '静音：不进自动注入（世界索引与场记单不自动列出；仍可被模型主动检索）')));
+            el('span', {}, '不自动带出：不进自动注入（世界索引与本场状态不自动列出；仍可被模型主动检索）')));
           b.appendChild(field('一句话摘要', summaryInput));
           b.appendChild(field('规则', rulesInput));
           b.appendChild(field('后果', consInput));
@@ -828,7 +884,7 @@ export default {
           b.appendChild(field('主题标签', tagsInput));
           b.appendChild(field('上级地点/机构', parentInput));
           b.appendChild(el('p.field-hint', {},
-            '「未解」条目会被标注为「只你可知，不得说破」——引擎会遵守，但不会让角色说出来。'));
+            '「秘密」条目会被标注为「只你可知，不得说破」——引擎会遵守，但不会让角色说出来。'));
         },
         onConfirm: () => {
           const name = nameInput.value.trim();
@@ -867,12 +923,16 @@ export default {
     function timelinePane() {
       const events = model.card.timeline;
       const anchors = model.card.anchors;
+      const adapted = model.card.kind === 'adapted';
+      const pastEvents = events.filter((e) => e.canon !== 'future');
+      const futureEvents = events.filter((e) => e.canon === 'future');
       const wrap = el('div', {});
-      wrap.appendChild(paneHead('时间线', '起点之前是既定事实，起点之后只是原著参考。'));
+      wrap.appendChild(paneHead('时间线',
+        '先定从哪里开局，再写开局前的「前史」与开局后的「参考走向」。前史会作为世界背景进入上下文；参考走向只给作者对照，不注入提示词。'));
 
-      wrap.appendChild(sectionHead('可玩时间点', `${anchors.length} 个`, '添加时间点', addAnchor));
+      wrap.appendChild(sectionHead('开局点', `${anchors.length} 个`, '添加开局点', addAnchor));
       wrap.appendChild(el('p.timeline-hint', {},
-        '从哪个时间点开局；第一个是默认起点，每个时间点各有一份开场种子。'));
+        '从哪一刻起笔。第一个开局点是新建会话的默认起点，每个开局点各有一份开局种子；种子也可以留空，让引擎依据世界规则起笔。'));
 
       const anchorList = el('div.anchor-edit-list');
       anchors.forEach((a, i) => {
@@ -881,7 +941,7 @@ export default {
           oninput: (e) => { a.label = e.target.value; },
         });
         const seedInput = growTextarea(el('textarea.field', {
-          rows: 3, placeholder: '这个时间点的开场种子（新写，不抄原文）',
+          rows: 3, placeholder: '这个开局点的开局种子（新写，不抄原文）',
           oninput: (e) => { a.opening_seed = e.target.value; },
         }), 220);
         seedInput.value = a.opening_seed || '';
@@ -895,7 +955,7 @@ export default {
             labelInput,
             anchors.length > 1
               ? el('button.btn-icon', {
-                type: 'button', title: '删除这个时间点',
+                type: 'button', title: '删除这个开局点',
                 onclick: () => { anchors.splice(i, 1); markDirty(); render(true); },
               }, icon('trash', { size: 14 }))
               : null,
@@ -905,19 +965,17 @@ export default {
       });
       wrap.appendChild(anchorList);
 
-      wrap.appendChild(sectionHead('事件记录', `${events.length} 条`, '添加事件', addEvent));
+      wrap.appendChild(sectionHead('前史（开局之前）', `${pastEvents.length} 条`, '添加前史', () => addEvent('past')));
       wrap.appendChild(el('p.timeline-hint', {},
-        '每条只写「何时、发生了什么」。既定事实会约束剧情；原著后续只作校勘参考。'));
+        '开局时已经发生的事，会作为既定背景进入上下文，剧情需与之自洽。改编卡写到改编切点为止；原创卡写自己的世界观前史。'));
+      wrap.appendChild(eventSection(pastEvents, 'past'));
 
-      if (!events.length) {
-        wrap.appendChild(el('div.timeline-empty', {},
-          el('div.timeline-empty-icon', {}, icon('clock', { size: 18 })),
-          el('div.timeline-empty-title', {}, '还没有事件'),
-          el('div.timeline-empty-sub', {}, '原创世界可以留空——一切从开局开始长。'),
-        ));
-      } else {
-        wrap.appendChild(buildEventList());
-      }
+      wrap.appendChild(sectionHead('参考走向（开局之后）', `${futureEvents.length} 条`, '添加参考走向', () => addEvent('future')));
+      wrap.appendChild(el('p.timeline-hint', {},
+        adapted
+          ? '原作在开局之后的后续，只作对照：不注入提示词，也不作为演绎目标——玩家把剧情带偏是正常玩法。'
+          : '你为这个世界预想的后续（可选），只作作者对照：不注入提示词，也不作为演绎目标。原创世界可以留空，让故事自己长。'));
+      wrap.appendChild(eventSection(futureEvents, 'future'));
 
       return wrap;
 
@@ -935,107 +993,72 @@ export default {
       function addAnchor() {
         anchors.push({
           id: 'anchor-' + Date.now().toString(36),
-          label: '新时间点', after_event: '', snapshot: {}, opening_seed: '', note: '',
+          label: '新开局点', after_event: '', snapshot: {}, opening_seed: '', note: '',
         });
         markDirty();
         render(true);
       }
 
-      function addEvent() {
+      function addEvent(canon) {
         events.push({
           id: 'evt-' + Date.now().toString(36),
-          when: '', what: '', who: [], canon: 'past', source: '',
+          when: '', what: '', who: [], canon, source: '',
         });
         markDirty();
         render(true);
       }
 
-      function buildEventList() {
-        const list = el('div.tl-edit-list');
-
-        events.forEach((e, i) => {
+      function eventSection(list, canon) {
+        const isFuture = canon === 'future';
+        if (!list.length) {
+          return el('div.timeline-empty', {},
+            el('div.timeline-empty-icon', {}, icon(isFuture ? 'compass' : 'clock', { size: 18 })),
+            el('div.timeline-empty-title', {}, isFuture ? '还没有参考走向' : '还没有前史'),
+            el('div.timeline-empty-sub', {},
+              isFuture ? '留空即可，故事由玩家与角色推动。' : '可以留空——世界从开局那一刻开始长。'),
+          );
+        }
+        const box = el('div.tl-edit-list');
+        list.forEach((e) => {
           const whenInput = el('input.field.tl-when', {
             value: e.when || '', placeholder: '何时',
             oninput: (ev) => { e.when = ev.target.value; },
           });
-
           const whatInput = growTextarea(el('textarea.field.tl-what', {
             rows: 2, placeholder: '发生了什么',
             oninput: (ev) => { e.what = ev.target.value; },
           }), 220);
           whatInput.value = e.what || '';
-
-          const card = el('div.tl-event');
-          const setCanon = (value) => {
-            e.canon = value;
-            card.classList.toggle('is-future', value === 'future');
-            card.classList.toggle('is-past', value !== 'future');
-            pastBtn.classList.toggle('is-active', value !== 'future');
-            futureBtn.classList.toggle('is-active', value === 'future');
-            markDirty();
-          };
-          const pastBtn = el('button.segmented-item', {
-            type: 'button',
-            class: e.canon === 'future' ? '' : 'is-active',
-            onclick: () => setCanon('past'),
-          }, '既定');
-          const futureBtn = el('button.segmented-item', {
-            type: 'button',
-            class: e.canon === 'future' ? 'is-active' : '',
-            onclick: () => setCanon('future'),
-          }, '原著');
-          card.classList.add(e.canon === 'future' ? 'is-future' : 'is-past');
-
-          card.append(
+          box.appendChild(el('div', { class: 'tl-event ' + (isFuture ? 'is-future' : 'is-past') },
             el('div.tl-event-rail', {}, el('span.tl-event-dot')),
             el('div.tl-event-body', {},
               el('div.tl-event-head', {},
                 whenInput,
-                el('div.segmented.tl-canon', {}, pastBtn, futureBtn),
+                el('button.segmented-item', {
+                  type: 'button', class: 'is-active',
+                  title: isFuture ? '移到前史（会进入上下文）' : '移到参考走向（不进入上下文）',
+                  onclick: () => {
+                    e.canon = isFuture ? 'past' : 'future';
+                    markDirty();
+                    render(true);
+                  },
+                }, isFuture ? '参考' : '前史'),
                 el('button.btn-icon', {
                   type: 'button', title: '删除这条事件',
-                  onclick: () => { events.splice(i, 1); markDirty(); render(true); },
+                  onclick: () => {
+                    const at = events.indexOf(e);
+                    if (at >= 0) events.splice(at, 1);
+                    markDirty();
+                    render(true);
+                  },
                 }, icon('trash', { size: 14 })),
               ),
               whatInput,
             ),
-          );
-          list.appendChild(card);
+          ));
         });
-
-        return list;
+        return box;
       }
-    }
-
-    function openingPane() {
-      const wrap = el('div');
-      wrap.appendChild(paneHead('开场', '给第一幕一个具体的落点；留空也可以，引擎会依据宪章起笔。'));
-      const anchor = model.card.anchors[0];
-      const ta = el('textarea.field', {
-        rows: 10,
-        placeholder: '开场种子：交代场景、人物、第一个悬念。引擎会把它扩写成完整的开场。',
-      });
-      ta.value = anchor.opening_seed || '';
-      growTextarea(ta, 420);
-      ta.addEventListener('input', () => {
-        anchor.opening_seed = ta.value;
-        updateCount();
-      });
-
-      const count = el('span.fgroup-count');
-      function updateCount() {
-        count.textContent = `${charCount(anchor.opening_seed)} 字`;
-        paintTabBadges();
-      }
-      updateCount();
-
-      wrap.appendChild(el('div.fgroup', {},
-        el('div.fgroup-head', {}, el('div.fgroup-label', {}, '开场种子'), count),
-        ta,
-        el('div.fgroup-hint', {}, '留空也可以——引擎会依据宪章自行起笔。'),
-      ));
-
-      return wrap;
     }
 
     /* =====================================================================
@@ -1079,7 +1102,13 @@ export default {
         window.dispatchEvent(new CustomEvent('worlds:changed'));
         navigate(`#/world/${world.id}`);
       } catch (err) {
-        toast(err.message || '保存失败', { type: 'error' });
+        const blockers = Array.isArray(err.issues) ? err.issues : [];
+        if (blockers.length) {
+          const first = blockers[0] && blockers[0].message ? `：${blockers[0].message}` : '';
+          toast(`保存失败（${blockers.length} 个阻断问题）${first}`, { type: 'error' });
+        } else {
+          toast(err.message || '保存失败', { type: 'error' });
+        }
         saveBtn.disabled = false;
         clear(saveBtn);
         saveBtn.appendChild(document.createTextNode(isEdit ? '保存' : '创建'));
@@ -1127,7 +1156,11 @@ function normalizeCard(card) {
       inner_voice: '', wants: '', afraid: '',
       ...(card.player || {}),
     },
+    // 角色是运行态与作者态共用的形状：status/condition/mood/location/goal 由
+    // 记忆 Agent 在会话里写入，编辑器不单独编辑，但保存时必须原样带回去，
+    // 否则每点一次保存就会把这些运行态字段清空。
     cast: (card.cast || []).map((c) => ({
+      ...c,
       id: c.id || c.name || '',
       name: c.name || '',
       aliases: c.aliases || [],

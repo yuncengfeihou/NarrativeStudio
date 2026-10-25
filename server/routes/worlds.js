@@ -21,19 +21,25 @@ import {
 import { normalizeCard, renderCardText } from '../world/schema.js';
 import { lintCard } from '../world/lint.js';
 import { createSessionWithSettings } from '../agents/orchestrator.js';
+import { resolveContextWindow } from '../model-registry.js';
 
 export const worldsRouter = Router();
 
 /** 从卡片生成会话的初始 settings。 */
-function settingsFromWorld(world, overrides = {}) {  const card = normalizeCard(world.card || {});
-  return {
+function settingsFromWorld(world, overrides = {}) {
+  const card = normalizeCard(world.card || {});
+  const cap = resolveContextWindow('narrator');
+  const settings = {
     world_id: world.id,
     title: overrides.title || card.title || world.title,
     narrator_effort: overrides.narrator_effort || 'high',
-    context_max_tokens: overrides.context_max_tokens || 200000,
     style_tags: card.genre,
     ...overrides,
   };
+  // 会话级上限只能是模型窗口内的一次收窄；超过窗口按窗口处理（装配层还会再 clamp）。
+  const requested = Number(settings.context_max_tokens);
+  settings.context_max_tokens = Number.isFinite(requested) && requested > 0 ? Math.min(requested, cap) : cap;
+  return settings;
 }
 
 /**
@@ -100,6 +106,11 @@ worldsRouter.get('/worlds/:id/export', (req, res) => {
   res.type('text/plain; charset=utf-8').send(renderCardText(world.card || {}));
 });
 
+/** 保存前的内容体检：blocker 拒绝保存（422），其余只报告。 */
+function blockingIssues(card) {
+  return lintCard(card).issues.filter((issue) => issue.severity === 'blocker');
+}
+
 worldsRouter.post('/worlds', (req, res) => {
   const body = req.body || {};
   const rawCard = body.card || {};
@@ -107,6 +118,12 @@ worldsRouter.post('/worlds', (req, res) => {
     return res.status(400).json({ error: { message: 'card.title is required' } });
   }
   const card = normalizeCard({ ...rawCard, title: rawCard.title || body.title });
+  const blockers = blockingIssues(card);
+  if (blockers.length) {
+    return res.status(422).json({
+      error: { message: `卡片存在 ${blockers.length} 个阻断性问题，无法保存`, issues: blockers },
+    });
+  }
   const id = body.id || slugify(card.title);
   const world = saveWorld({
     id,
@@ -126,6 +143,12 @@ worldsRouter.patch('/worlds/:id', (req, res) => {
   const body = req.body || {};
   const merged = body.card ? { ...normalizeCard(existing.card || {}), ...body.card } : (existing.card || {});
   const card = normalizeCard(merged);
+  const blockers = blockingIssues(card);
+  if (blockers.length) {
+    return res.status(422).json({
+      error: { message: `卡片存在 ${blockers.length} 个阻断性问题，无法保存`, issues: blockers },
+    });
+  }
   const world = saveWorld({
     id: existing.id,
     title: body.title ?? existing.title,

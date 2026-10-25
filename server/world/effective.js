@@ -29,6 +29,7 @@ function cloneCast(c) {
       exemplars: [...(c.voice?.exemplars || [])],
     },
     psyche: {
+      traits: [...(c.psyche?.traits || [])],
       wants: [...(c.psyche?.wants || [])],
       fears: [...(c.psyche?.fears || [])],
       hides: [...(c.psyche?.hides || [])],
@@ -72,7 +73,7 @@ export function emptyCastEntry(id, name = id) {
     goal: '',
     identity: { age: '', appearance: '', background: '', station: '' },
     voice: { address: {}, rhythm: '', lexicon: [], never: [], exemplars: [] },
-    psyche: { wants: [], fears: [], hides: [], values: [] },
+    psyche: { traits: [], wants: [], fears: [], hides: [], values: [] },
     knowledge: { knows: [], does_not_know: [], believes_falsely: [] },
     agenda: [],
     relations: [],

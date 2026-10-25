@@ -8,7 +8,6 @@
  * 落库的表：assertions / character_states / relations / threads / voices / states(账本)
  * 审计的表：patches（谁提的、证据是什么、被接受了哪几条）
  */
-import { config } from '../config.js';
 import { chat } from '../llm.js';
 import {
   CODEX_TYPES, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
@@ -480,7 +479,6 @@ export async function runArchivist({
   session, world, turnNo, playerText, narrative, branchChoice, options = {}, declaredTargets = null,
   signal, guard,
 }) {
-  const cfg = config.agents.archivist;
   const sessionId = session?.id;
   if (!sessionId) throw new Error('runArchivist: session.id 不能为空');
   const no = Number.isFinite(Number(turnNo)) ? Number(turnNo) : 0;
@@ -508,10 +506,11 @@ export async function runArchivist({
     },
   ];
   const callOpts = {
-    temperature: options.temperature ?? cfg.temperature,
-    maxTokens: options.maxTokens ?? cfg.maxTokens,
-    reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
-    model: options.model ?? cfg.model ?? undefined,
+    agent: 'archivist',
+    temperature: options.temperature,
+    maxTokens: options.maxTokens,
+    reasoningEffort: options.reasoningEffort,
+    model: options.model,
     responseFormat: { type: 'json_object' },
     signal,
   };

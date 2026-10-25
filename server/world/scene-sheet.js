@@ -162,6 +162,49 @@ export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {})
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+/* 1.5 前史（开局之前已经发生的事实）                                      */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 前史 = 模板卡 timeline 里 canon === 'past' 的事件，作为 canon 进 system。
+ *
+ * 只读模板快照，不读账本：system 必须逐字节冻结（AGENTS §6.2），
+ * 运行期新增的事件是演出结果，不是「开局前就该成立的事实」。
+ * canon === 'future'（原著后续）与 'branch' 永不渲染——红线 3：它们既不是
+ * 既定事实，也不是演绎目标，只给作者看。
+ *
+ * 预算：从最新往前取。离开局越近的前史越影响人物此刻的处境；远到塞不下的
+ * 旧事整条丢弃，不把一句话切半（半句话进提示词比没有更坏）。
+ */
+export function renderTimelinePast(card, capTokens = 240) {
+  const events = (card.timeline || []).filter((e) => e.canon === 'past' && str(e.what));
+  if (!events.length) return { text: '', meta: { count: 0, rendered: 0, tokens: 0, dropped: 0 } };
+
+  const header = '【前史】开局之前已经发生的事实（既定设定）。据此理解人物处境，不必在对话里复述。';
+  const line = (e) => {
+    const when = str(e.when);
+    const where = str(e.where);
+    return `· ${when ? `${when} · ` : ''}${str(e.what)}${where ? `（${where}）` : ''}`;
+  };
+
+  const picked = [];
+  let used = estimateTokens(header) + 2;
+  let dropped = 0;
+  for (let i = events.length - 1; i >= 0; i--) {
+    const l = line(events[i]);
+    const cost = estimateTokens(l) + 1;
+    if (used + cost > capTokens) { dropped = i + 1; break; }
+    picked.unshift(l);
+    used += cost;
+  }
+  if (!picked.length) {
+    return { text: '', meta: { count: events.length, rendered: 0, tokens: 0, dropped: events.length } };
+  }
+  const text = `${header}\n${picked.join('\n')}`;
+  return { text, meta: { count: events.length, rendered: picked.length, tokens: estimateTokens(text), dropped } };
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 /* 2. 辞书挑选（无关键词）                                                 */
 /* ══════════════════════════════════════════════════════════════════════ */
 
@@ -222,6 +265,19 @@ function renderCastLine(c, ledgerChar, voices) {
   ].filter(Boolean);
   if (state.length) lines.push(`  状态：${join(state, '｜')}`);
   if (c.voice.rhythm) lines.push(`  口吻：${c.voice.rhythm}`);
+  // 外形与性格：作者写在卡里的稳定形象锚点，每场随在场者带出。
+  // 只给「这一场要记住的长相、身份与脾气」；背景故事留在世界索引与检索里，
+  // 不在这里展开——场记单是当拍事实，不是人物小传。
+  const look = str(c.identity?.appearance);
+  const station = str(c.identity?.station);
+  const shape = [
+    look ? `外形：${truncateToTokens(look, 36)}` : '',
+    station ? `身份：${truncateToTokens(station, 12)}` : '',
+  ].filter(Boolean);
+  if (shape.length) lines.push(`  ${join(shape, '；')}`);
+  if (c.psyche?.traits?.length) {
+    lines.push(`  性格：${truncateToTokens(join(c.psyche.traits.slice(0, 4), '、'), 24)}`);
+  }
   // 称呼 + 绝不说：这是抗 OOC 最便宜的两条确定性约束。
   // 「他绝不会叫她『夫人』」比一整段性格描写更能防止人物崩坏。
   if (c.voice.address && Object.keys(c.voice.address).length) {

@@ -436,6 +436,12 @@
   -webkit-line-clamp: 2;
   overflow: hidden;
 }
+.cast-traits {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 6px;
+}
 
 /* 幕结构 */
 .arc-list {
@@ -1063,6 +1069,21 @@
   overflow: hidden;
 }
 .codex-edit-links { margin-top: 4px; font-size: 10px; color: var(--ink-4); line-height: 1.6; }
+/* 设定集编辑器：按类型分组 */
+.codex-edit-group { margin-bottom: 16px; }
+.codex-edit-group:last-child { margin-bottom: 0; }
+.codex-edit-group-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  font-weight: 650;
+  color: var(--ink-3);
+  margin-bottom: 7px;
+  letter-spacing: 0.04em;
+}
+.codex-edit-group-head span { color: var(--ink-4); font-weight: 500; }
+.codex-edit-empty { padding: 18px 4px; font-size: var(--fs-caption); color: var(--ink-4); }
 
 /* 时间点 / 时间线编辑 */
 .anchor-edit-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }

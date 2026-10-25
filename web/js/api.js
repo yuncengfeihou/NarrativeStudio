@@ -111,19 +111,22 @@ class SSEDecoder {
 // 底层请求封装
 // ============================================================
 
-/** 构造一个携带 status 的 Error */
+/** 构造一个携带 status 的 Error；服务端 422 的阻断项挂在 err.issues 上供表单展示 */
 async function makeError(res) {
   let message = `HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}`;
+  let issues = null;
   try {
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
       const data = await res.json();
       if (data && data.error && data.error.message) message = data.error.message;
       else if (data && typeof data.message === 'string') message = data.message;
+      if (data && data.error && Array.isArray(data.error.issues)) issues = data.error.issues;
     }
   } catch { /* 非 JSON 响应，保留默认消息 */ }
   const err = new Error(message);
   err.status = res.status;
+  if (issues) err.issues = issues;
   return err;
 }
 
@@ -203,6 +206,19 @@ export const api = {
     return request('/api/config', { signal });
   },
 
+  /**
+   * PUT /api/config -> { ok, runtime }
+   * 体：{ providers, models, agents }；apiKey 省略或 '***' 表示保留已保存的密钥，'' 表示清除。
+   */
+  saveConfig(body, signal) {
+    return request('/api/config', { method: 'PUT', body, signal });
+  },
+
+  /** DELETE /api/config -> { ok, runtime }（删除运行期配置，回到 .env 默认） */
+  resetConfig(signal) {
+    return request('/api/config', { method: 'DELETE', signal });
+  },
+
   /** GET /api/fonts -> { fonts: string[], source }（服务端本机字体，浏览器 API 的兜底） */
   getFonts(signal) {
     return request('/api/fonts', { signal });
@@ -218,6 +234,11 @@ export const api = {
   /** GET /api/worlds/:id -> {…world, codex, sessions} */
   getWorld(id, signal) {
     return request(`/api/worlds/${encodeURIComponent(id)}`, { signal });
+  },
+
+  /** GET /api/worlds/:id/lint -> {issues, counts}（只读内容体检，blocker 会拦保存） */
+  getWorldLint(id, signal) {
+    return request(`/api/worlds/${encodeURIComponent(id)}/lint`, { signal });
   },
 
   /** POST /api/worlds  body:{id?, title?, card, tags?, cover_hue?} */
@@ -302,7 +323,7 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/world-state`, { signal });
   },
 
-  /** 把当前世界线定稿为一张新世界卡（显式操作） */
+  /** 把当前世界线存为一张新世界卡（显式操作） */
   canonizeSession(id, body = {}, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/canonize`, { method: 'POST', body, signal });
   },
@@ -372,12 +393,12 @@ export const api = {
       { method: 'POST', body: { status }, signal });
   },
 
-  /* ---------------- 分支 / 校勘 / 回忆 ---------------- */
+  /* ---------------- 分支 / 一致性检查 / 回忆 ---------------- */
 
   getBranches(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/branches`, { signal });
   },
-  /** POST /api/sessions/:id/audit -> 立即跑一次校勘 */
+  /** POST /api/sessions/:id/audit -> 立即跑一次一致性检查 */
   audit(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/audit`, { method: 'POST', signal });
   },
