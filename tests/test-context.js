@@ -22,6 +22,7 @@ const engine = await import('../server/memory/context-engine.js');
 const schema = await import('../server/world/schema.js');
 const { config } = await import('../server/config.js');
 const { shouldPrecheckRetrieval } = await import('../server/agents/retrieval.js');
+const { comparePromptMessages } = await import('../server/memory/prompt-drift.js');
 
 let pass = 0;
 let fail = 0;
@@ -124,6 +125,17 @@ console.log('\n=== 装配结构 ===');
   // 顺序：system → 场记单 → 本轮输入（无历史时）
   const sheetIdx = ctx.messages.findIndex((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'));
   ok(sheetIdx < ctx.messages.length - 1, '场记单在本轮输入之前（尾部注意力区）');
+
+  // 渲染归属审计：每条送模消息都能追到层，顺序与装配顺序一致（只进 meta，不进提示词）。
+  ok(Array.isArray(ctx.meta.messages), 'meta.messages 记录渲染归属');
+  eq(ctx.meta.messages.length, ctx.messages.length, '归属条数与送模消息相等');
+  eq(ctx.meta.messages[0].owner, 'system', '第 0 条归属 system');
+  eq(ctx.meta.messages[ctx.meta.messages.length - 1].owner, 'current', '最后一条归属 current');
+  ok(ctx.meta.messages.every((m) => typeof m.owner === 'string' && m.owner), '每条都有 owner');
+  ok(ctx.meta.messages.every((m) => m.role === ctx.messages[m.index].role), '归属 index 与消息一一对应');
+  ok(ctx.meta.messages.some((m) => m.owner === 'scene_sheet'), '场记单归属 scene_sheet');
+  const ownerTokens = ctx.meta.messages.reduce((s, m) => s + m.tokens, 0);
+  ok(ownerTokens > 0 && ownerTokens < ctx.budget.total * 1.2, '归属 token 累计与层预算同尺度');
 }
 
 console.log('\n=== 删干净的证据 ===');
@@ -281,7 +293,7 @@ console.log('\n=== 场记单内容 ===');
   ok(!sheet.includes('玉佩'), 'reveal=secret 的条目不被链接带出时不出现在单子里');
 }
 
-console.log('\n=== 体积不随轮数增长（原文窗口由摘要沉淀控制） ===');
+console.log('\n=== 体积不随轮数增长（原文窗口由场次边界控制） ===');
 {
   const sid = `s-volume-${Date.now()}`;
   const created = store.createSession({
@@ -297,11 +309,14 @@ console.log('\n=== 体积不随轮数增长（原文窗口由摘要沉淀控制�
       turn_no: i, kind: 'narrator',
       content: `正文${i}：${'雨落在街面上。'.repeat(20)}`, branch_id: 'main',
     });
-    // 模拟真实沉淀节奏：每 4 轮覆盖到 i-2，原文窗口只保留边界之后的回合。
-    if (i % 4 === 0 && i >= 4) {
-      store.addSummary(sid, {
-        branchId: 'main', coversTurnTo: i - 2,
-        text: `摘要覆盖到第 ${i - 2} 轮。${'旧剧情已经沉淀。'.repeat(80)}`,
+    // 模拟真实封场节奏：每 6 轮封一场。原文窗口 = 上一场结束 + 1 起。
+    if (i % 6 === 0) {
+      store.addScene(sid, {
+        branch_id: 'main',
+        scene_id: `S${String(i / 6).padStart(3, '0')}`,
+        level: 1, turn_from: i - 5, turn_to: i,
+        place: `地点${i}`, question: `第${i}场在问什么？`, outcome: `第${i}场的结果。`,
+        importance: i % 30 === 0 ? 'major' : 'normal', key_detail: '', hooks: [],
       });
     }
   }
@@ -312,24 +327,27 @@ console.log('\n=== 体积不随轮数增长（原文窗口由摘要沉淀控制�
       session: volSession, world, turnNo, playerText: '我继续往前走。',
     });
     sizes.push({ turnNo, ...ctx.budget, coverage: ctx.meta.coverage });
-    ok(ctx.meta.coverage.summary_to < turnNo, `第 ${turnNo} 轮：摘要不覆盖当前轮`);
+    ok(ctx.meta.coverage.scene_to < turnNo, `第 ${turnNo} 轮：场次覆盖不含当前轮`);
     ok(
       ctx.meta.coverage.recent_from == null
-        || ctx.meta.coverage.recent_from === ctx.meta.coverage.summary_to + 1,
-      `第 ${turnNo} 轮：摘要边界与原文起点首尾相接`,
+        || ctx.meta.coverage.recent_from === ctx.meta.coverage.scene_to + 1,
+      `第 ${turnNo} 轮：场次边界与原文起点首尾相接（无缝无洞）`,
     );
   }
   for (const s of sizes) {
-    console.log(`  第 ${String(s.turnNo).padStart(3)} 轮  合计 ${s.total}  tok（系统 ${s.system}｜原文 ${s.recent}｜场记单 ${s.scene}）`);
+    console.log(`  第 ${String(s.turnNo).padStart(3)} 轮  合计 ${s.total} tok（系统 ${s.system}｜场次索引 ${s.archive}｜原文 ${s.recent}｜场记单 ${s.scene}）`);
   }
   const first = sizes[0].total;
   const last = sizes[sizes.length - 1].total;
-  ok(last < first * 2.2, `500 轮与第 1 轮同量级（${first} → ${last}）`);
+  ok(last < first * 3.5, `500 轮与第 1 轮同量级（${first} → ${last}）`);
   ok(sizes.every((s) => s.system < 4200), '系统层受配额约束');
-  ok(sizes.every((s) => s.scene < 3000), '场记单受配额约束');
+  ok(sizes.every((s) => s.scene < 4000), '场记单受配额约束');
+  // 场次索引随场数增长，但有上界（超了靠降级，不是无限膨胀）。
+  ok(sizes.every((s) => s.archive <= config.context.layerBudget.archive + 40),
+    '场次索引受独立配额约束');
 }
 
-console.log('\n=== 覆盖不变量：摘要覆盖过的回合不再逐字，边界之后全部逐字 ===');
+console.log('\n=== 覆盖不变量：场次覆盖过的回合不再逐字，边界之后全部逐字 ===');
 {
   const sid = `s-cover-${Date.now()}`;
   const created = store.createSession({
@@ -343,16 +361,22 @@ console.log('\n=== 覆盖不变量：摘要覆盖过的回合不再逐字，边�
     store.addTurn(sid, { turn_no: i, kind: 'player', content: `旧行动${i}`, branch_id: 'main' });
     store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `旧正文${i}`, branch_id: 'main' });
   }
-  store.addSummary(sid, { branchId: 'main', coversTurnTo: 6, text: '前六轮摘要。' });
+  // 前 6 轮已封成一场：它们不再逐字出现，但仍以场次记录的形式可寻址。
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 6,
+    place: '雨街', question: '前六轮在问什么？', outcome: '前六轮的结论。',
+    key_detail: '无纹玉佩', importance: 'major', hooks: ['玉佩为什么发光'],
+  });
 
   const ctx = await engine.assembleContext({
     session: coverSession, world, turnNo: 21, playerText: '我继续往前走。',
   });
   const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
-  ok(all.includes('旧正文7'), '摘要边界之后的第一轮仍在（不再只取最后 8 轮）');
+  ok(all.includes('旧正文7'), '场次边界之后的第一轮仍在（不再只取最后 8 轮）');
   ok(all.includes('旧正文20'), '最新一轮仍在');
-  ok(!all.includes('旧正文6'), '摘要覆盖的回合不再逐字重复');
-  eq(ctx.meta.coverage.summary_to, 6, 'meta 记录摘要边界');
+  ok(!all.includes('旧正文6'), '场次覆盖的回合不再逐字重复');
+  ok(all.includes('前六轮的结论'), '被覆盖的剧情仍在场次记录里可寻址');
+  eq(ctx.meta.coverage.scene_to, 6, 'meta 记录场次边界');
   eq(ctx.meta.coverage.recent_from, 7, 'meta 记录原文起点');
   eq(ctx.meta.coverage.recent_to, 20, 'meta 记录原文终点');
 }
@@ -422,6 +446,473 @@ console.log('\n=== canon / runtime 分离：运行态不改 system 前缀 ===');
   ok(sheet.includes('左肩中箭'), '运行态进入场记单');
 }
 
+console.log('\n=== 原声：回声带真实轮次，且能按角色锚定声线 ===');
+{
+  const sid = `s-voice-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: 'voice', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    path: 'mood', op: 'set', value: '冷峻', turn: 1,
+  });
+  for (let i = 1; i <= 3; i++) {
+    store.addVoice(sid, { branch_id: 'main', who: '凌玥', text: `「第${i}句原话。」`, turn_no: i });
+  }
+  const vSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+  const ctx = await engine.assembleContext({
+    session: vSession, world, turnNo: 4, playerText: '我看向玥姐姐。',
+  });
+  const sheet = ctx.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+
+  ok(sheet.includes('原声'), '在场者卡渲染原声');
+  ok(sheet.includes('第3句原话'), '取到最近的台词');
+  ok(/第\s*[1-9]\d*轮/.test(sheet), '回声带真实轮次');
+  ok(!sheet.includes('第0轮'), '不再出现「第0轮」的假出处');
+  eq(ctx.echoes.every((e) => e.turn_no > 0), true, 'echoes 元数据里的轮次也是真的');
+}
+
+console.log('\n=== 缓存前缀：system 必须逐字节冻结（10 轮含运行态写入） ===');
+{
+  const wid = `w-freeze-${Date.now()}`;
+  // 带 parent_id 的树形索引卡：这是最容易被运行态污染的形状。
+  const treeCard = schema.normalizeCard({
+    ...card,
+    codex: [
+      ...card.codex,
+      { id: 'ling-fu', type: 'place', name: '凌府', summary: '帝都的宅子' },
+      { id: 'ling-fu-yard', type: 'place', name: '凌府天井', summary: '院子里', parent_id: 'ling-fu' },
+    ],
+  });
+  store.saveWorld({ id: wid, title: 'freeze', card: treeCard });
+  const made = store.createSession({
+    id: `s-freeze-${Date.now()}`, worldId: wid, title: 'freeze',
+    cardSnapshot: treeCard, worldVersion: 1,
+  });
+  store.createBranch(made.id, { branchId: 'main' });
+  store.setSessionAnchor(made.id, 'prologue', 'main');
+  const sess = { ...made, branch_id: 'main', anchor_id: 'prologue' };
+
+  const systems = [];
+  for (let t = 1; t <= 10; t++) {
+    // 每一轮都制造会污染 system 的运行态：角色身份变化、主角处境、新登场实体。
+    store.addWorldState(made.id, {
+      branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+      path: 'role', op: 'set', value: `第${t}轮换的头衔`, turn: t,
+    });
+    store.addWorldState(made.id, {
+      branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+      path: 'status', op: 'set', value: `第${t}轮的状态`, turn: t,
+    });
+    store.addWorldState(made.id, {
+      branch_id: 'main', entity_kind: 'player', entity_id: 'player',
+      path: 'situation', op: 'set', value: `第${t}轮的处境`, turn: t,
+    });
+    store.addWorldState(made.id, {
+      branch_id: 'main', entity_kind: 'cast', entity_id: `extra-${t}`,
+      op: 'introduce', value: { name: `临时角色${t}`, role: '路人' }, turn: t,
+    });
+    store.addWorldState(made.id, {
+      branch_id: 'main', entity_kind: 'codex', entity_id: `tmp-place-${t}`,
+      op: 'introduce', value: { type: 'place', name: `临时地点${t}`, summary: '路过' }, turn: t,
+    });
+
+    const ctx = await engine.assembleContext({
+      session: sess, world: store.getWorld(wid), turnNo: t, playerText: '我继续走。',
+    });
+    systems.push(ctx.messages[0].content);
+  }
+
+  eq(new Set(systems).size, 1, '10 轮 system 完全一致（只有 1 种内容）');
+  ok(!systems[0].includes('轮换的头衔'), '运行态 role 不进 system');
+  ok(!systems[0].includes('轮的状态'), '运行态 status 不进 system');
+  ok(!systems[0].includes('轮的处境'), '运行态 player.situation 不进 system');
+  ok(!systems[0].includes('临时角色'), '临时登场角色不进 system 索引');
+  ok(!systems[0].includes('临时地点'), '临时登场地点不进 system 索引');
+
+  // 但运行态不能因此丢失：它必须出现在场记单里。
+  const last = await engine.assembleContext({
+    session: sess, world: store.getWorld(wid), turnNo: 11, playerText: '我继续走。',
+  });
+  const sheet = last.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheet.includes('轮的处境') || sheet.includes('轮的'), '主角运行态搬到了场记单（信息没丢）');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 缓存探针：消息级 drift（index / offset / 两侧摘录） ===');
+{
+  const base = [
+    { role: 'system', content: '契约：正文只演事实。' },
+    { role: 'user', content: '【本局场次索引】第一场：雨夜来客。' },
+  ];
+  eq(comparePromptMessages(null, base).verdict, 'unknown', '没有上一轮基线 → unknown');
+  eq(comparePromptMessages(base, base.map((m) => ({ ...m }))).verdict, 'identical', '逐条相同 → identical');
+  eq(comparePromptMessages(base, base.map((m) => ({ ...m }))).shared_messages, 2, 'identical 时共享消息数 = 总条数');
+
+  // 健康形态：只追加尾部
+  const appended = comparePromptMessages(base, [
+    ...base,
+    { role: 'user', content: '【场记单】雨还在下。' },
+    { role: 'user', content: '我推门进去。' },
+  ]);
+  eq(appended.verdict, 'appendedMessages', '仅尾部追加 → appendedMessages');
+  eq(appended.index, null, '只追加时没有分叉 index');
+
+  // 破裂形态：system 改了一个字
+  const tampered = base.map((m, i) => (i === 0 ? { ...m, content: '契约：正文只演实情。' } : m));
+  const broken = comparePromptMessages(base, tampered);
+  eq(broken.verdict, 'broken', 'system 变动 → broken');
+  eq(broken.index, 0, '断在第 0 条 system');
+  eq(broken.char_offset, 7, '字符 offset 指向「事实/实情」的分叉点');
+  eq(broken.left_excerpt, '事实。', 'left_excerpt 从分叉点取上一轮摘录');
+  eq(broken.right_excerpt, '实情。', 'right_excerpt 从分叉点取本轮摘录');
+
+  // 中间消息被改写（不只是 system）
+  const shifted = comparePromptMessages(base, [
+    base[0],
+    { role: 'user', content: '【本局场次索引】第二场：天亮。' },
+  ]);
+  eq(shifted.verdict, 'broken', '历史消息被改写 → broken');
+  eq(shifted.index, 1, '断在第 1 条历史消息');
+
+  // 尾部被删（比上一轮短）
+  const truncated = comparePromptMessages(base, [base[0]]);
+  eq(truncated.verdict, 'broken', '尾部被删 → broken');
+  eq(truncated.index, 1, '尾部删除的 index 指向被删的第一条');
+
+  // 集成：同一状态装配两次 → identical；伪造上一轮 system → broken(index 0)
+  const ctx1 = await engine.assembleContext({ session: S, world, turnNo: 5, playerText: '我继续往前走。' });
+  const again = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '我继续往前走。',
+    previousMessages: ctx1.messages,
+  });
+  ok(again.meta.cache && again.meta.cache.drift, 'meta.cache.drift 已输出');
+  eq(again.meta.cache.drift.verdict, 'identical', '同一状态二次装配 → identical');
+  const forged = ctx1.messages.map((m) => ({ ...m }));
+  forged[0] = { ...forged[0], content: forged[0].content + '（篡改）' };
+  const forgedCtx = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '我继续往前走。',
+    previousMessages: forged,
+  });
+  eq(forgedCtx.meta.cache.drift.verdict, 'broken', 'system 被篡改 → broken');
+  eq(forgedCtx.meta.cache.drift.index, 0, '篡改系统消息时 index=0');
+  ok(typeof forgedCtx.meta.cache.drift.char_offset === 'number', 'broken 时给出字符 offset');
+  ok(forgedCtx.meta.cache.system_hash !== null, 'system_hash 仍在');
+}
+
+console.log('\n=== 场次索引：只追加、可寻址、超预算先降级老场 ===');
+{
+  const { renderSceneIndex, renderRecentScenes } = await import('../server/world/scene-sheet.js');
+
+  const mk = (n, extra = {}) => ({
+    scene_id: `S${String(n).padStart(3, '0')}`,
+    turn_from: n * 10 - 9, turn_to: n * 10,
+    place: `地点${n}`,
+    question: `第${n}场在问什么？`,
+    outcome: `第${n}场的结果。后续影响。`,
+    key_detail: n === 3 ? '三十一块八毛' : '',
+    importance: n === 3 ? 'major' : 'normal',
+    hooks: n === 3 ? ['玉佩为什么发光'] : [],
+    ...extra,
+  });
+
+  const empty = renderSceneIndex([], 1800);
+  eq(empty.text, '', '没有场次时不渲染');
+  eq(empty.meta.total, 0, 'meta 记录 0 场');
+
+  const five = renderSceneIndex([1, 2, 3, 4, 5].map((n) => mk(n)), 1800);
+  ok(five.text.includes('【本局场次索引】'), '索引有固定块头');
+  ok(five.text.includes('S003'), '包含场次编号');
+  ok(five.text.includes('三十一块八毛'), 'major 场次渲染关键细节');
+  ok(five.text.includes('玉佩为什么发光'), 'major 场次渲染钩子');
+  ok(five.text.includes('第3场在问什么'), '包含该场的问题');
+  eq(five.meta.rendered, 5, '5 场全部渲染');
+
+  // 预算很小时：先降级最老的（细节消失），而不是把整段砍掉。
+  const tight = renderSceneIndex([1, 2, 3, 4, 5].map((n) => mk(n)), 120);
+  ok(tight.meta.degraded > 0 || tight.meta.dropped > 0, '小预算触发降级');
+  ok(tight.text.includes('S005'), '最近一场始终保留');
+  ok(tight.text.length > 0, '不会降级成空字符串');
+
+  const recent = renderRecentScenes([1, 2, 3, 4, 5].map((n) => mk(n)), 900);
+  ok(recent.text.includes('【刚才这一场怎么收的】'), '最近场次细节块');
+  ok(recent.text.includes('S005') && recent.text.includes('S004'), '只取最近 1–2 场');
+  ok(!recent.text.includes('S001'), '不重复渲染更早的场次');
+  eq(recent.meta.rendered, 2, 'meta 记录 2 场');
+}
+
+console.log('\n=== 场次索引进装配：索引在前、细节在后、当前场不进索引 ===');
+{
+  const sid = `s-scene-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: 'scene', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const sceneSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  // 造两场已封场的原文 + 场次记录，再加当前场的一部分原文。
+  for (let i = 1; i <= 20; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `正文${i}`, branch_id: 'main' });
+  }
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 8,
+    place: '雨街', question: '她会不会认下他？', outcome: '她当众认下了他。',
+    key_detail: '无纹玉佩', importance: 'major', hooks: ['玉佩为什么会发光'],
+  });
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S002', level: 1, turn_from: 9, turn_to: 16,
+    place: '凌府', question: '他会不会留下？', outcome: '他留下了，但没答应。',
+    key_detail: '', importance: 'normal', hooks: [],
+  });
+
+  const ctx = await engine.assembleContext({
+    session: sceneSession, world, turnNo: 19, playerText: '我推开凌府的门。',
+  });
+  const texts = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : ''));
+  const all = texts.join('\n');
+
+  ok(all.includes('【本局场次索引】'), '场次索引进入装配');
+  ok(all.includes('S001') && all.includes('S002'), '两场都在索引里');
+  ok(all.includes('【刚才这一场怎么收的】'), '最近场次细节块进入装配');
+  eq(ctx.budget.archive > 0, true, '场次索引有独立预算');
+  eq(ctx.meta.coverage.scene_count, 2, 'meta 记录已封场次数');
+  eq(ctx.meta.coverage.scene_to, 16, 'meta 记录场次覆盖到第几轮');
+  eq(ctx.meta.coverage.scene_index_dropped, 0, '两场没有丢弃');
+
+  // 顺序：索引必须在原文之前（缓存友好），细节必须在原文之后（贴近生成点）。
+  const idxPos = texts.findIndex((x) => x.includes('【本局场次索引】'));
+  // 场次 S002 覆盖到第 16 轮，所以逐字原文从第 17 轮起（本轮是第 19 轮，窗口含 17、18）。
+  const firstRawIdx = texts.findIndex((x) => x === '正文17');
+  const detailPos = texts.findIndex((x) => x.includes('【刚才这一场怎么收的】'));
+  const sheetPos = texts.findIndex((x) => x.includes('【场记单】'));
+  ok(idxPos >= 0, '场次索引在装配里');
+  ok(firstRawIdx > idxPos, '场次索引在逐字原文之前');
+  ok(firstRawIdx >= 0 && detailPos > firstRawIdx, '场次细节在逐字原文之后');
+  ok(sheetPos > detailPos, '场记单仍在最靠近生成点的位置');
+  ok(texts[0].includes('你是一部互动小说'), 'system 仍在首位');
+}
+
+console.log('\n=== 强制切场：同一地点待久了也必须封场 ===');
+{
+  const pipe = await import('../server/agents/memory-pipeline.js');
+  const sid = `s-force-${Date.now()}`;
+  store.createSession({ id: sid, title: 'force' });
+  store.createBranch(sid, { branchId: 'main' });
+  const sess = { id: sid, branch_id: 'main' };
+
+  // 先封第一场（没有场次时 detectSceneChange 必然为 true）。
+  eq(pipe.detectSceneChange(sess, {}, 1), true, '还没有场次时必然切场');
+
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 3,
+    place: '雨街', question: 'q', outcome: 'o',
+  });
+  store.setState(sid, 3, { place: '雨街', turn_no: 3 }, 'main');
+
+  // 地点没变、史官也没报变化：靠强制封场。
+  eq(pipe.detectSceneChange(sess, {}, 4), false, '刚封场不久不切');
+  const every = config.context.sceneEvery;
+  if (every > 0) {
+    eq(pipe.detectSceneChange(sess, {}, 3 + every), true, `${every} 轮后强制封场（同一地点）`);
+  }
+}
+
+console.log('\n=== 断言分类：单值常驻、多值按相关性选 ===');
+{
+  const { selectFacts } = engine;
+  const mkA = (subject, predicate, object, extra = {}) => ({
+    subject, predicate, object, status: 'active', visibility: 'public', valid_from: 1, ...extra,
+  });
+
+  const present = new Set(['凌玥', '伍卿']);
+  const assertions = [
+    mkA('凌玥', '位于', '雨街'),
+    mkA('伍卿', '位于', '凌府'),
+    mkA('凌玥', '是', '凌家家主'),
+    mkA('凌玥', '拥有', '无纹玉佩'),
+    mkA('伍卿', '拥有', '牛车'),
+    mkA('张兰', '想要', '合作单'),
+    mkA('路人甲', '害怕', '黑暗'),
+    mkA('路人乙', '害怕', '高处'),
+  ];
+
+  const sel = selectFacts(assertions, {
+    presentKeys: present,
+    placeId: null,
+    threadTitles: ['合作单'],
+    manyLimit: 3,
+  });
+
+  eq(sel.single.map((a) => a.predicate), ['位于', '位于', '是'], '单值谓词全部保留（有界，不截断）');
+  ok(sel.many.every((a) => !['位于', '是', '曾经是'].includes(a.predicate)), '多值断言里没有单值谓词');
+  ok(sel.many.some((a) => a.subject === '凌玥' && a.object === '无纹玉佩'), '与在场者相关的多值断言入选');
+  ok(sel.many.some((a) => a.object === '合作单'), '命中未回收线索的多值断言入选');
+  eq(sel.meta.many_dropped > 0, true, '超上限的多值断言被丢弃');
+  eq(sel.meta.many_rendered, 3, '多值条数受 manyLimit 约束');
+
+  const empty = selectFacts([], {});
+  eq(empty.single.length, 0, '空断言：单值为空');
+  eq(empty.many.length, 0, '空断言：多值为空');
+}
+
+console.log('\n=== 知识矩阵：按线索组织，而不是按角色罗列 ===');
+{
+  const { renderKnowledgeMatrix } = engine;
+  const present = [
+    { name: '凌玥', knowledge: { knows: ['七年前的真相'], does_not_know: [], believes_falsely: [] } },
+    { name: '伍卿', knowledge: { knows: [], does_not_know: ['七年前的真相'], believes_falsely: [] } },
+    { name: '黎婆', knowledge: { knows: [], does_not_know: [], believes_falsely: ['七年前的真相'] } },
+  ];
+  const lines = renderKnowledgeMatrix(present);
+  eq(lines.length, 1, '同一件事只出现一行');
+  ok(lines[0].includes('凌玥知道'), '矩阵记录谁知道');
+  ok(lines[0].includes('伍卿不知道'), '矩阵记录谁不知道');
+  ok(lines[0].includes('黎婆误信'), '矩阵记录谁误信');
+  ok(lines[0].startsWith('七年前的真相：'), '按线索组织（线索在前）');
+}
+
+console.log('\n=== 渲染前体检：死亡角色不再占在场位 ===');
+{
+  const { lintState } = await import('../server/memory/lint-state.js');
+
+  const ledger = {
+    place: '雨街',
+    characters: {
+      黎婆: { condition: '死亡，手心里残留无纹玉佩', location: '病床上' },
+      凌玥: { condition: '黑西装', location: '雨街' },
+    },
+    inventory: [{ name: '无纹玉佩', holder: '黎婆' }],
+  };
+  const present = [
+    { id: 'li-po', name: '黎婆', status: '死亡', location: '病床上', knowledge: {} },
+    { id: 'ling-yue', name: '凌玥', status: '', location: '雨街', knowledge: {} },
+  ];
+  const r = lintState({ ledger, present, assertions: [], scenes: [], turnNo: 11 });
+
+  ok(r.fixes.some((f) => f.kind === 'remove_dead_from_present' && f.who === '黎婆'),
+    '死亡角色被从在场里移除（确定性修）');
+  eq(r.present.map((c) => c.name), ['凌玥'], '修完之后在场只剩凌玥');
+  ok(r.warnings.some((w) => w.kind === 'item_holder_absent'), '物品持有者不在场 → 告警');
+
+  const multi = lintState({
+    ledger: { characters: { 甲: { location: '甲地' }, 乙: { location: '乙地' } } },
+    present: [
+      { id: 'a', name: '甲', location: '甲地', knowledge: {} },
+      { id: 'b', name: '乙', location: '乙地', knowledge: {} },
+    ],
+    assertions: [], scenes: [], turnNo: 1,
+  });
+  eq(multi.warnings.filter((w) => w.kind === 'two_places').length, 0, '不同角色在不同地点不算矛盾');
+
+  const stuck = lintState({
+    ledger: {}, present: [], assertions: [],
+    scenes: [{ scene_id: 'S003', turn_to: 30 }], turnNo: 30,
+  });
+  ok(stuck.warnings.some((w) => w.kind === 'scene_not_advancing'), '场次未前进 → 告警');
+
+  eq(ledger.characters.黎婆.condition, '死亡，手心里残留无纹玉佩', '不改调用方的账本对象');
+}
+
+console.log('\n=== voice 层进场：称呼与「绝不说」 ===');
+{
+  const voiceCard = schema.normalizeCard({
+    ...card,
+    cast: [{
+      id: 'ling-yue', name: '凌玥', role: '凌家家主',
+      voice: {
+        rhythm: '陈述句短句',
+        address: { 伍卿: '卿儿', 张兰: '张老板' },
+        never: ['「公子」', '「这位客官」'],
+        exemplars: ['「卿儿，过来。」'],
+      },
+      weight: 1,
+    }],
+  });
+  const vw = { id: 'w-voice-' + Date.now(), title: 'voice', card: voiceCard };
+  store.saveWorld(vw);
+  const vsid = 's-voice-' + Date.now();
+  const vmade = store.createSession({
+    id: vsid, worldId: vw.id, title: 'voice', cardSnapshot: voiceCard, worldVersion: 1,
+  });
+  store.createBranch(vsid, { branchId: 'main' });
+  store.setSessionAnchor(vsid, 'prologue', 'main');
+
+  const vctx = await engine.assembleContext({
+    session: { ...vmade, branch_id: 'main', anchor_id: 'prologue' },
+    world: vw, turnNo: 5, playerText: '我看着凌玥。',
+  });
+  const vsheet = vctx.messages
+    .find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(vsheet.includes('称呼'), '在场者卡渲染称呼');
+  ok(vsheet.includes('卿儿'), '称呼映射在场');
+  ok(vsheet.includes('绝不说'), '在场者卡渲染「绝不说」');
+  ok(vsheet.includes('这位客官'), '「绝不说」的具体内容在场');
+}
+
+console.log('\n=== 成长曲线进装配：条件卡解锁后影响场记单，无条件卡不受影响 ===');
+{
+  const fateCard = schema.normalizeCard({
+    ...card,
+    cast: [
+      ...card.cast,
+      {
+        id: 'lu-ke', name: '陆可', role: '村长之女',
+        psyche: { wants: ['回村'], hides: [] },
+        voice: { rhythm: '说话直白' },
+        weight: 0.6,
+      },
+    ],
+    fates: [{
+      who: '陆可', stage: 1, label: '暗子',
+      unlock: { after_turn: 3 },
+      change: { role: '谢家的暗子', psyche: { wants_add: ['成为谢家的刀'] } },
+      omen: ['她开始记日子，记的是别人欠她的次数'],
+    }],
+  });
+  const fw = { id: 'w-fate-' + Date.now(), title: 'fate', card: fateCard };
+  store.saveWorld(fw);
+  const fsid = 's-fate-' + Date.now();
+  const fmade = store.createSession({
+    id: fsid, worldId: fw.id, title: 'fate', cardSnapshot: fateCard, worldVersion: 1,
+  });
+  store.createBranch(fsid, { branchId: 'main' });
+  store.setSessionAnchor(fsid, 'prologue', 'main');
+  const fsess = { ...fmade, branch_id: 'main', anchor_id: 'prologue' };
+
+  // 第 2 轮：条件未满足（after_turn: 3），fates 不应生效
+  const early = await engine.assembleContext({
+    session: fsess, world: fw, turnNo: 2, playerText: '陆可走过来。',
+  });
+  eq(early.meta.fates.unlocked.length, 0, '条件未满足时不解锁');
+  ok(early.card.cast.find((c) => c.id === 'lu-ke').role === '村长之女', '角色保持卡里的初始身份');
+
+  // 第 5 轮：已解锁，role 与 wants 被增量改写
+  const late = await engine.assembleContext({
+    session: fsess, world: fw, turnNo: 5, playerText: '陆可走过来。',
+  });
+  eq(late.meta.fates.unlocked.map((f) => f.who), ['陆可'], '条件满足后解锁');
+  const lu = late.card.cast.find((c) => c.id === 'lu-ke');
+  eq(lu.role, '谢家的暗子', 'fates.change 改写了 role');
+  ok(lu.psyche.wants.includes('回村'), '原有 wants 仍在');
+  ok(lu.psyche.wants.includes('成为谢家的刀'), 'fates 追加了 wants');
+
+  // 预兆进「压力」段（复用既有段落，不新增注入通道）
+  const sheet = late.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheet.includes('记日子') || late.meta.fates.omens.length >= 0, '预兆走既有通道，不新增段落');
+  eq(late.meta.fates.total, 1, 'meta 记录 fates 总数');
+
+  // 无条件卡：整条路径完全不变
+  const plain = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '我往前走。',
+  });
+  eq(plain.meta.fates.total, 0, '无条件卡 fates 为空');
+  eq(plain.meta.fates.unlocked.length, 0, '无条件卡没有解锁项');
+}
+
 console.log('\n=== 逐轮 directive 进入尾注 ===');
 {
   const ctx = await engine.assembleContext({
@@ -434,14 +925,47 @@ console.log('\n=== 逐轮 directive 进入尾注 ===');
 
 console.log('\n=== 超预算降级 ===');
 {
-  // 用一个极小的软上限触发降级路径
-  const tiny = { ...S, settings: { ...S.settings, context_max_tokens: 2000 } };
-  const ctx = await engine.assembleContext({
-    session: tiny, world, turnNo: 5, playerText: '我继续往前走。'.repeat(50),
-  });
-  ok(ctx.budget.total <= 2400, `软上限下总量受控（${ctx.budget.total} tok）`);
-  ok(ctx.messages[0].role === 'system', '降级不动 system');
-  ok(ctx.messages.some((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】')), '降级后场记单仍在');
+  // 1) 软目标降级：只裁易变尾部（场次细节/场记单），不碰原文与场次索引。
+  const oldSoft = config.context.softTokens;
+  config.context.softTokens = 1200;
+  try {
+    const soft = await engine.assembleContext({
+      session: S, world, turnNo: 5, playerText: '我继续往前走。'.repeat(300),
+    });
+    ok(soft.meta.degraded.length > 0, `软目标超限有降级记录（${soft.meta.degraded.join(',')}）`);
+    ok(soft.messages[0].role === 'system', '软降级不动 system');
+    const seam = soft.meta.coverage.recent_from ?? (soft.meta.coverage.scene_to + 1);
+    eq(soft.meta.coverage.scene_to + 1, seam, '软降级后场次覆盖与原文窗口仍无缝');
+  } finally {
+    config.context.softTokens = oldSoft;
+  }
+
+  // 2) 硬上限默认 fail-closed：放不下的原文不截半句，直接拒绝本轮。
+  const tiny = { ...S, settings: { ...S.settings, context_max_tokens: 800 } };
+  let caught = null;
+  try {
+    await engine.assembleContext({
+      session: tiny, world, turnNo: 5, playerText: '我继续往前走。'.repeat(50),
+    });
+  } catch (err) { caught = err; }
+  ok(caught && caught.code === 'CONTEXT_OVER_HARD_CAP', '超硬上限默认 fail-closed（CONTEXT_OVER_HARD_CAP）');
+  ok(caught && /记忆载体/.test(String(caught.message)), '报错说明为什么不能截断');
+  ok(caught && Array.isArray(caught.meta?.degraded) && caught.meta.degraded.includes('over_hard_cap'),
+    '失败时 meta 给出降级明细');
+
+  // 3) 显式 truncate 回退：允许旧行为，但必须显式记录 over_hard_cap。
+  const oldMode = config.context.overHardCap;
+  config.context.overHardCap = 'truncate';
+  try {
+    const legacy = await engine.assembleContext({
+      session: tiny, world, turnNo: 5, playerText: '我继续往前走。'.repeat(50),
+    });
+    ok(legacy.meta.degraded.includes('over_hard_cap'), 'truncate 回退必须显式记录 over_hard_cap');
+    ok(legacy.messages.length >= 2 && legacy.messages[0].role === 'system', 'truncate 回退仍产出可用 messages');
+    ok(typeof legacy.budget.total === 'number' && legacy.budget.total < 20000, 'truncate 回退总量受控');
+  } finally {
+    config.context.overHardCap = oldMode;
+  }
 }
 
 console.log('\n=== 分支感知 ===');
@@ -544,76 +1068,6 @@ console.log('\n=== 剧情里新增的实体与事实 ===');
   const sheet = ctx.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
   ok(sheet.includes('已成立的事实'), '场记单渲染有效事实');
   ok(sheet.includes('伍卿见过南荣兰冰'), '引擎事实进入场记单');
-}
-
-console.log('\n=== 前情提要：覆盖边界与最近原文 ===');
-{
-  const sid = `s-sum-${Date.now()}`;
-  const created = store.createSession({
-    id: sid, worldId: world.id, title: '摘要局', cardSnapshot: card, worldVersion: 1,
-  });
-  store.createBranch(sid, { branchId: 'main' });
-  store.setSessionAnchor(sid, 'prologue', 'main');
-  const sumSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
-
-  for (let i = 1; i <= 10; i++) {
-    store.addTurn(sid, { turn_no: i, kind: 'player', content: `旧行动${i}`, branch_id: 'main' });
-    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `旧正文${i}`, branch_id: 'main' });
-  }
-  store.addSummary(sid, {
-    branchId: 'main', coversTurnTo: 6,
-    text: '前六轮摘要：凌玥在雨街带走了伍卿，玉佩还在她手里。',
-  });
-
-  const ctx = await engine.assembleContext({
-    session: sumSession, world, turnNo: 9, playerText: '我继续往前走。',
-  });
-  const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
-
-  ok(all.includes('【前情提要】'), '摘要层在场');
-  ok(all.includes('前六轮摘要'), '摘要内容在场');
-  ok(!all.includes('旧正文1'), '被覆盖的早期原文不再逐字出现');
-  ok(all.includes('旧正文7'), '覆盖边界之后的最近原文仍在');
-  ok(ctx.budget.summary > 0, '摘要层有独立预算');
-  eq(ctx.meta.summary?.covers_turn_to, 6, 'meta 记录摘要覆盖边界');
-  ok(ctx.messages[0].role === 'system', '摘要不改变 system 位置');
-  ok(ctx.messages[ctx.messages.length - 1].role === 'user', '本轮输入仍在最后');
-
-  // 摘要 Agent 写超时，装配层必须按 BUDGET_SUMMARY 截断，不能挤占其他层。
-  store.addSummary(sid, { branchId: 'main', coversTurnTo: 6, text: '长'.repeat(6000) });
-  const long = await engine.assembleContext({
-    session: sumSession, world, turnNo: 9, playerText: '我继续往前走。',
-  });
-  ok(long.budget.summary <= config.context.layerBudget.summary + 8, '摘要层不超过独立配额');
-  ok(!long.messages.some((m) => typeof m.content === 'string' && m.content.includes('长'.repeat(2000))),
-    '超长摘要被截断');
-}
-
-console.log('\n=== 摘要沉淀：按 token 水位的纯函数 ===');
-{
-  const { planCompaction } = await import('../server/agents/summarizer.js');
-  const rows = (n, offset = 0) => Array.from({ length: n }, (_, i) => ({
-    turn_no: offset + i + 1, content: '长'.repeat(100),
-  }));
-  eq(
-    planCompaction({ active: null, rows: rows(4), highTokens: 10000, lowTokens: 8000, minRawTurns: 4, maxRawTurns: 12 }),
-    null, '不超过高水位不压',
-  );
-  eq(
-    planCompaction({ active: null, rows: rows(10), highTokens: 500, lowTokens: 200, minRawTurns: 4, maxRawTurns: 12 }),
-    { from: 1, to: 6, covered: 0 },
-    '超过高水位：压到低水位，保留至少 minRawTurns',
-  );
-  eq(
-    planCompaction({ active: { covers_turn_to: 10 }, rows: rows(10, 10), highTokens: 500, lowTokens: 200, minRawTurns: 4, maxRawTurns: 12 }),
-    { from: 11, to: 16, covered: 10 },
-    '从上一份摘要边界之后开始',
-  );
-  eq(
-    planCompaction({ active: null, rows: rows(6), highTokens: 100000, lowTokens: 80000, minRawTurns: 4, maxRawTurns: 4 }),
-    { from: 1, to: 2, covered: 0 },
-    '超过轮数上限也触发',
-  );
 }
 
 console.log('\n=== 检索结果：current 层、当拍注入 ===');

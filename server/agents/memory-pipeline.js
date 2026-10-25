@@ -54,6 +54,15 @@ function branchCtx(session) {
  * 一场戏结束时调用：读这一场的完整原文，写一行场次记录。
  * 记录是检索入口，不是摘要——它必须能让人判断「这场里有什么」。
  */
+/**
+ * 一场戏结束时调用：读这一场的完整原文，写一行场次记录。
+ * 记录是长程记忆的载体，不是摘要——它必须能让人（和模型）判断「这场里有什么」。
+ *
+ * 三条不变量：
+ * - 输入是本场**完整原文**，不是摘要，也不是上一个场次记录；
+ * - 关闭后不可变（同一 scene_id 只会在追加轮次时扩展 turn_to）；
+ * - 字段要够具体：「八万」而不是「一大笔钱」。
+ */
 export async function closeScene({ session, world, turnNo, reason = '', guard }) {
   const { sessionId, branchId, forkTurn } = branchCtx(session);
   const prev = latestScene(sessionId, branchId);
@@ -68,7 +77,10 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
   const sceneId = `S${String(sceneNo).padStart(3, '0')}`;
 
   const cfg = config.agents.sceneKeeper;
-  let record = { question: '', outcome: '', threads: [], key_detail: '' };
+  let record = {
+    question: '', outcome: '', threads: [], key_detail: '', causal: '', hooks: [],
+  };
+  let usage = null;
   try {
     const res = await chat({
       messages: [
@@ -79,6 +91,7 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
             sceneId, turnFrom: from, turnTo: turnNo,
             when: ledger.time, place: ledger.place,
             cast: Object.keys(ledger.characters || {}),
+            previous: prev ? { scene_id: prev.scene_id, outcome: prev.outcome, hooks: prev.hooks } : null,
             turns: rows.map((r) => ({ turn_no: r.turn_no, kind: r.kind, content: r.content })),
           }),
         },
@@ -89,12 +102,15 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
       model: cfg.model || undefined,
       responseFormat: { type: 'json_object' },
     });
+    usage = res.usage || null;
     const parsed = obj(tryParseJson(res.content));
     record = {
       question: str(parsed.question).slice(0, 60),
       outcome: str(parsed.outcome).slice(0, 120),
       threads: arr(parsed.threads).map(str).filter(Boolean).slice(0, 8),
       key_detail: str(parsed.key_detail).slice(0, 120),
+      causal: str(parsed.causal).slice(0, 120),
+      hooks: arr(parsed.hooks).map(str).filter(Boolean).slice(0, 6),
     };
   } catch (err) {
     console.warn(`[scene-keeper] LLM 失败，降级为纯结构记录：${err?.message || err}`);
@@ -102,7 +118,13 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
 
   if (typeof guard === 'function' && !guard()) return null;
 
-  addScene(sessionId, {
+  // 重要度由确定性规则判定，不靠模型自评：
+  // 有具体细节 / 有钩子 / 有线索变化 / 有剧本级转折（question 非空）→ major。
+  const importance = (record.key_detail || record.hooks.length || record.threads.length)
+    ? 'major'
+    : (record.question || record.outcome ? 'normal' : 'minor');
+
+  const sceneRow = {
     branch_id: branchId,
     scene_id: sceneId,
     level: 1,
@@ -113,29 +135,61 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
     place_id: str(ledger.place_id),
     cast: Object.keys(ledger.characters || {}),
     question: record.question,
-    outcome: [record.outcome, record.key_detail].filter(Boolean).join('｜'),
+    outcome: record.outcome,
+    key_detail: record.key_detail,
+    causal: record.causal,
+    importance,
     threads: record.threads,
+    hooks: record.hooks,
     state: ledger,
-  });
+  };
+  addScene(sessionId, sceneRow);
 
   addPatch(sessionId, {
-    branchId, agent: 'scene-keeper', kind: 'scene', turn_no: turnNo, status: 'applied',
-    payload: { scene_id: sceneId, ...record }, evidence: reason,
+    branch_id: branchId, agent: 'scene-keeper', kind: 'scene', turn_no: turnNo, status: 'applied',
+    payload: { scene_id: sceneId, importance, ...record }, evidence: reason,
   });
-  return { scene_id: sceneId, turn_from: from, turn_to: turnNo, ...record };
+  // 返回给调用方的字段里必须带 place / when_label：切场事件是「时间轴」实时刷新的唯一信源，
+  // 只回 question/outcome 会让前端拿到一张没有时间地点的场次卡。
+  return {
+    scene_id: sceneId, turn_from: from, turn_to: turnNo, importance,
+    when_label: sceneRow.when_label, place: sceneRow.place, place_id: sceneRow.place_id,
+    cast: sceneRow.cast,
+    ...record, usage,
+  };
 }
 
-/** 是否需要切场：账本的地点/时间/在场者变了，或到了固定轮数。 */
+/**
+ * 是否需要切场。
+ *
+ * 三种触发：史官报告场景变化 / 地点变了 / **到了强制封场上限**。
+ *
+ * 强制封场是关键补充：`SCENE_EVERY=0` 时只有地点变化才切，于是角色在同一个地点
+ * 待 100 轮就一场都不关，「最近一场」永远未归档，场次索引根本建不起来。
+ * token 上限同理：单场原文无限增长会把场记 Agent 的输入撑爆。
+ */
 export function detectSceneChange(session, update, turnNo) {
-  const { sessionId, branchId } = branchCtx(session);
+  const { sessionId, branchId, forkTurn } = branchCtx(session);
   const prev = latestScene(sessionId, branchId);
   if (!prev) return true;
   const sc = update?.scene_change || {};
   if (sc.changed) return true;
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   if (str(ledger.place) && str(prev.place) && str(ledger.place) !== str(prev.place)) return true;
+
+  // 强制封场：按轮数
   const every = config.context.sceneEvery;
-  if (every > 0 && turnNo > 0 && turnNo % every === 0) return true;
+  if (every > 0 && turnNo > 0 && turnNo - prev.turn_from + 1 >= every) return true;
+
+  // 强制封场：按本场原文 token（场记 Agent 的输入不能无限增长）
+  const maxTokens = config.context.sceneMaxTokens;
+  if (maxTokens > 0) {
+    const rows = getTurnsForBranch(sessionId, branchId, forkTurn, {
+      from: prev.turn_to + 1, to: turnNo, kinds: ['player', 'narrator'],
+    });
+    const tokens = rows.reduce((sum, r) => sum + (Number(r.token_count) || 0), 0);
+    if (tokens >= maxTokens) return true;
+  }
   return false;
 }
 
@@ -163,6 +217,7 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
   if (!recentText) return { issues: [], healthy: [] };
 
   let parsed = {};
+  let usage = null;
   try {
     const res = await chat({
       messages: [
@@ -182,6 +237,7 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
       responseFormat: { type: 'json_object' },
       signal,
     });
+    usage = res.usage || null;
     parsed = obj(tryParseJson(res.content));
   } catch (err) {
     if (err?.name === 'AbortError') throw err;
@@ -222,7 +278,7 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
     // 单次校勘最多自动落库 N 条；超出的保留为 open，交给人或下一次校勘。
     if (applied >= maxApplied) {
       addPatch(sessionId, {
-        branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status: 'open',
+        branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status: 'open',
         severity: issue.severity, payload: issue, evidence: issue.evidence,
       });
       continue;
@@ -265,12 +321,12 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
       }
     }
     addPatch(sessionId, {
-      branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
+      branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
       severity: issue.severity, payload: issue, evidence: issue.evidence,
     });
   }
 
-  return { issues, healthy: arr(parsed.healthy).map(str).filter(Boolean), applied };
+  return { issues, healthy: arr(parsed.healthy).map(str).filter(Boolean), applied, usage };
 }
 
 /** 供 UI 的 canon 健康度：最近未处理的补丁 + 断言规模。 */
@@ -394,6 +450,7 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
 
   const last = latestScene(sessionId, branchId);
   let events = [];
+  let usage = null;
   try {
     const res = await chat({
       messages: [
@@ -421,6 +478,7 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
       responseFormat: { type: 'json_object' },
       signal,
     });
+    usage = res.usage || null;
     const parsed = obj(tryParseJson(res.content));
     events = arr(parsed.events)
       .map((raw) => {
@@ -446,7 +504,7 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
 
   for (const e of events) {
     addPatch(sessionId, {
-      branchId, agent: 'world-tick', kind: 'offstage_event', turn_no: turnNo,
+      branch_id: branchId, agent: 'world-tick', kind: 'offstage_event', turn_no: turnNo,
       status: e.visibility === 'hidden' ? 'applied' : 'open',
       severity: e.visibility === 'hidden' ? 'info' : 'minor',
       payload: e, evidence: `第 ${turnNo} 轮幕后推演`,
@@ -461,5 +519,5 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
       }
     }
   }
-  return { events };
+  return { events, usage };
 }

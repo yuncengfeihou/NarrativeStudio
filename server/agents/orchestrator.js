@@ -17,21 +17,24 @@ import { config } from '../config.js';
 import { estimateTokens } from '../tokens.js';
 import { normalizeCard } from '../world/schema.js';
 import { buildEffectiveWorld } from '../world/effective.js';
-import { branchSnapshot, guardOf, isBranchCurrent } from '../memory/branch-guard.js';
+import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId, runEffectOnce } from '../memory/branch-guard.js';
+import { buildPlayerView } from '../memory/player-view.js';
 import {
-  accumulateUsage, addSummary, addTurn, copyBranchState, createBranch, createSession,
-  getActiveSummary, getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession,
+  accumulateUsage, addTurn, copyBranchState, createBranch, createSession,
+  getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession,
   getState, getThreads, getTurnsForBranch, getWorld, getWorldState, listBranches, saveWorld,
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
   upsertRelation,
+  upsertThread,
 } from '../memory/store.js';
-import { planCompaction, runSummarizer } from './summarizer.js';
 import { runRetrieval, shouldPrecheckRetrieval } from './retrieval.js';
 
 // sessionId -> 串行链
 const sessionLocks = new Map();
 // 最近一次装配诊断（供记忆面板展示，进程内存）
 const lastAssembly = new Map();
+// 最近一次真实发给模型的 messages（只用于下一轮计算前缀复用率，不参与装配内容）
+const lastMessages = new Map();
 // 最近一次校勘结果
 const lastContinuity = new Map();
 
@@ -70,6 +73,16 @@ async function runTurnInner({
 }) {
   const emit = (evt) => { try { onEvent(evt); } catch { /* 监听器错误不影响管线 */ } };
 
+  /**
+   * 旁路 Agent 的用量也必须进会话账本。
+   * 旧实现只累计 narrator 一路，于是「一局花了多少 token / 缓存命中多少」的分母是错的，
+   * 所有成本结论都建立在错误数字上。定义在使用点之前，避免 TDZ。
+   */
+  const trackUsage = (agent, usage) => {
+    if (!usage) return;
+    try { accumulateUsage(sessionId, usage, agent); } catch { /* 遥测失败不影响管线 */ }
+  };
+
   const session = getDbSession(sessionId);
   if (!session) throw new Error(`session not found: ${sessionId}`);
   const worldRow = session.world_id ? getWorld(session.world_id) : null;
@@ -83,7 +96,7 @@ async function runTurnInner({
   const { assembleContext } = await import('../memory/context-engine.js');
   const { runNarrator } = await import('./narrator.js');
   const { resolveNarrationMode, runNarratorSegmented } = await import('./narrator-loop.js');
-  const { runArchivist } = await import('./archivist.js');
+  const { buildDeclaredTargets, runArchivist } = await import('./archivist.js');
   const { runBranchAgent } = await import('./branch.js');
   const { closeScene, detectSceneChange, runContinuity, runWorldTick } = await import('./memory-pipeline.js');
 
@@ -126,6 +139,7 @@ async function runTurnInner({
     try {
       const ledger = getState(sessionId, { branchId, atTurn: Math.max(0, turnNo - 1) })?.state || null;
       retrieval = await runRetrieval({ card: world?.card || null, playerText, ledger, signal });
+      trackUsage('retrieval', retrieval?.usage);
     } catch (err) {
       if (err?.name === 'AbortError') throw err;
       console.warn(`[orchestrator] 检索预检失败：${err?.message || err}`);
@@ -139,6 +153,9 @@ async function runTurnInner({
       session, world, turnNo, playerText, images, branchChoice, isOpening,
       directive: options.directive || '',
       retrieval,
+      // 上一轮真实发给模型的 messages：用于计算「这一轮可以复用多少前缀」。
+      // 只做字符串比较，不影响装配内容本身。
+      previousMessages: lastMessages.get(sessionId) || null,
     });
   } catch (err) {
     emit({ type: 'error', message: `上下文装配失败: ${err.message}`, turn_no: turnNo });
@@ -165,6 +182,15 @@ async function runTurnInner({
     onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
     signal,
   });
+
+  // 记下这一轮真正发给模型的 messages，供下一轮计算前缀复用率（缓存归因）。
+  // 必须在 narrator 跑之前抓，因为 guidance 会被插进尾部。
+  try {
+    const { buildNarratorMessages } = await import('./narrator.js');
+    lastMessages.set(sessionId, buildNarratorMessages({
+      session, world: effectiveWorld, context, guidance: narratorOptions.guidance,
+    }));
+  } catch { /* 归因失败不影响回合 */ }
 
   let narrator;
   try {
@@ -260,61 +286,94 @@ async function runTurnInner({
   const sessionUsage = accumulateUsage(sessionId, narratorUsage ? {
     ...narratorUsage,
     output_chars: narrative.length + (narrator.reasoning?.length || 0),
-  } : null);
+  } : null, 'narrator');
 
   // 4) 史官记账（失败不阻断回合）
   let memoryStats = null;
   let sceneChanged = false;
   try {
     // 旁路调用期间用户可能 rollback / rewrite；落库前核对分支与回合没变。
+    // 回执保证同一轮的同一次写入不会因重试/重复调用落两遍。
     const archivistSnap = branchSnapshot(sessionId, branchId);
-    const arch = await runArchivist({
+    // 目标声明集合来自装配结果（卡 + 在场/辞书 + 账本人物），不由模型声明：
+    // 史官越界提案会被拒写并记 skipped_targets，避免模型给「没出现过的人」记账。
+    const targetLedger = getState(sessionId, { branchId, atTurn: turnNo });
+    const declaredTargets = buildDeclaredTargets({
+      card: effectiveWorld?.card || {},
+      present: context.meta?.present || [],
+      codex: context.meta?.codex || [],
+      ledgerCharacters: Object.keys(targetLedger?.state?.characters || {}),
+      playerName: effectiveWorld?.card?.player?.name || '',
+    });
+    const archEffect = {
+      sessionId, branchId, turnNo, agent: 'archivist',
+      effectId: makeEffectId('archivist', `t${turnNo}`),
+      fingerprint: hashFingerprint('archivist', turnNo, branchId, playerText || '', narrative),
+    };
+    const archRun = await runEffectOnce(archEffect, () => runArchivist({
       session, world: effectiveWorld, turnNo,
       playerText: playerText || '(开场)',
       narrative, branchChoice,
       options: options.archivist || {},
+      declaredTargets,
       signal,
       guard: guardOf(archivistSnap),
-    });
+    }), { isStale: (r) => !!r?.stale });
+    // skipped 表示这一轮的记账已经落过（applied）或旧分支已废弃（stale）：不重复写。
+    const arch = archRun.skipped
+      ? { applied: {}, stale: archRun.status === 'stale', skipped: archRun.status, effect_id: archEffect.effectId }
+      : archRun.result;
     memoryStats = arch;
+    if (!archRun.skipped) trackUsage('archivist', arch.usage);
     emit({ type: 'memory', stats: summarizeMemory(sessionId, arch, context, branchId) });
     const st = getState(sessionId, { branchId, atTurn: turnNo });
-    if (st) emit({ type: 'state', state: st.state, turn_no: st.turn_no });
+    // state 是完整账本（导出/排查用）；状态条只认 player_view，前端不得从 state 自取展示字段。
+    if (st) {
+      emit({
+        type: 'state', state: st.state, turn_no: st.turn_no,
+        player_view: buildPlayerView(st.state, { cast: context.card?.cast }),
+      });
+    }
     sceneChanged = !arch.stale && detectSceneChange(session, arch, turnNo);
   } catch (err) {
     emit({ type: 'memory', stats: { error: err.message }, degraded: true });
   }
 
-  // 4.5) 前情提要（滚动摘要）：史官落账之后，摘要能读到最新账本。
-  // 失败/不够长/期间切线都只跳过，不影响正文与后续 Agent。
-  if (!memoryStats?.stale && !signal?.aborted) {
-    try {
-      await maybeSummarize({ session, world: effectiveWorld, turnNo, branchId, emit, signal });
-    } catch (err) {
-      if (err?.name === 'AbortError') throw err;
-      console.warn(`[orchestrator] 摘要失败：${err?.message || err}`);
-    }
-  }
-
   // 5) 切场：场记归档 + 世界呼吸（都不阻断回合）
+  // 场次记录取代了原来的「滚动摘要」：每场一行、只追加、永不互相改写。
   let sceneRecord = null;
   if (sceneChanged && !signal?.aborted) {
     try {
-      sceneRecord = await closeScene({
+      const sceneEffect = {
+        sessionId, branchId, turnNo, agent: 'scene_keeper',
+        effectId: makeEffectId('scene', `t${turnNo}`),
+        fingerprint: hashFingerprint('scene', turnNo, branchId, memoryStats?.scene_change?.reason || ''),
+      };
+      const sceneRun = await runEffectOnce(sceneEffect, () => closeScene({
         session, world: effectiveWorld, turnNo,
         reason: memoryStats?.scene_change?.reason || '',
         guard: guardOf(branchSnapshot(sessionId, branchId)),
-      });
-      if (sceneRecord) emit({ type: 'scene', scene: sceneRecord });
+      }), { isStale: (r) => r === null });
+      sceneRecord = sceneRun.skipped ? null : sceneRun.result;
+      if (sceneRecord) { trackUsage('scene-keeper', sceneRecord.usage); emit({ type: 'scene', scene: sceneRecord }); }
     } catch (err) {
       console.warn(`[orchestrator] 场记归档失败：${err?.message || err}`);
     }
     try {
-      const tick = await runWorldTick({
+      const tickEffect = {
+        sessionId, branchId, turnNo, agent: 'world_tick',
+        effectId: makeEffectId('world_tick', `t${turnNo}`),
+        fingerprint: hashFingerprint('world_tick', turnNo, branchId),
+      };
+      const tickRun = await runEffectOnce(tickEffect, () => runWorldTick({
         session, world: effectiveWorld, turnNo, signal,
         guard: guardOf(branchSnapshot(sessionId, branchId)),
-      });
-      if (tick.events?.length) emit({ type: 'world_tick', events: tick.events });
+      }), { isStale: (r) => !!r?.stale });
+      if (!tickRun.skipped) {
+        const tick = tickRun.result;
+        if (tick.events?.length) emit({ type: 'world_tick', events: tick.events });
+        trackUsage('world-tick', tick.usage);
+      }
     } catch (err) {
       if (err?.name !== 'AbortError') console.warn(`[orchestrator] 世界呼吸失败：${err?.message || err}`);
     }
@@ -324,12 +383,21 @@ async function runTurnInner({
   const every = config.context.continuityEvery;
   if (every > 0 && turnNo % every === 0 && !signal?.aborted) {
     try {
-      const report = await runContinuity({
+      const continuityEffect = {
+        sessionId, branchId, turnNo, agent: 'continuity',
+        effectId: makeEffectId('continuity', `t${turnNo}`),
+        fingerprint: hashFingerprint('continuity', turnNo, branchId, every),
+      };
+      const continuityRun = await runEffectOnce(continuityEffect, () => runContinuity({
         session, world: effectiveWorld, turnNo, signal,
         guard: guardOf(branchSnapshot(sessionId, branchId)),
-      });
-      if (!report.stale) lastContinuity.set(sessionId, report);
-      emit({ type: 'continuity', report });
+      }), { isStale: (r) => !!r?.stale });
+      if (!continuityRun.skipped) {
+        const report = continuityRun.result;
+        if (!report.stale) lastContinuity.set(sessionId, report);
+        trackUsage('continuity', report.usage);
+        emit({ type: 'continuity', report });
+      }
     } catch (err) {
       if (err?.name !== 'AbortError') console.warn(`[orchestrator] 校勘失败：${err?.message || err}`);
     }
@@ -341,7 +409,12 @@ async function runTurnInner({
     try {
       const branchAgentSnap = branchSnapshot(sessionId, branchId);
       const st = getState(sessionId, { branchId, atTurn: turnNo });
-      branches = await runBranchAgent({
+      const branchEffect = {
+        sessionId, branchId, turnNo, agent: 'branch',
+        effectId: makeEffectId('branch', `t${turnNo}`),
+        fingerprint: hashFingerprint('branch', turnNo, branchId, narrative),
+      };
+      const branchRun = await runEffectOnce(branchEffect, () => runBranchAgent({
         world: effectiveWorld,
         state: st?.state || null,
         recentNarrative: narrative,
@@ -349,13 +422,19 @@ async function runTurnInner({
         sceneSheet: context.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '',
         options: options.branch || {},
         signal,
-      });
-      // 走向只是展示；期间切了分支就不上屏，避免把旧线的选项塞给新线。
-      if (isBranchCurrent(branchAgentSnap)) {
-        emit({ type: 'branches', branches: branches.branches, scene_summary: branches.scene_summary });
-      } else {
+      }));
+      if (branchRun.skipped) {
         branches = null;
-        emit({ type: 'branches', branches: [], scene_summary: '', stale: true });
+      } else {
+        branches = branchRun.result;
+        // 走向只是展示；期间切了分支就不上屏，避免把旧线的选项塞给新线。
+        trackUsage('branch', branches.usage);
+        if (isBranchCurrent(branchAgentSnap)) {
+          emit({ type: 'branches', branches: branches.branches, scene_summary: branches.scene_summary });
+        } else {
+          branches = null;
+          emit({ type: 'branches', branches: [], scene_summary: '', stale: true });
+        }
       }
     } catch (err) {
       emit({ type: 'branches', branches: [], scene_summary: '', error: err.message, degraded: true });
@@ -382,80 +461,6 @@ async function runTurnInner({
   };
 }
 
-/**
- * 回合末的前情提要（原文沉淀）。
- *
- * 触发是 token 水位，不是固定轮数：摘要边界之后的原文超过 high 水位（或轮数上限）时，
- * 把最旧一批压进摘要，压到 low 水位以下。压缩成功后 covers_turn_to 前移，
- * 下一次装配的原文窗口从新的边界继续——摘要与原文始终无缝接力。
- * 失败/不够长/期间切线都只跳过，不影响正文；原文继续保留，不会因此出现空洞。
- */
-async function maybeSummarize({ session, world, turnNo, branchId, emit, signal }) {
-  const active = getActiveSummary(session.id, { branchId, atTurn: turnNo });
-  const covered = Number(active?.covers_turn_to) || 0;
-  const branch = getBranch(session.id, branchId);
-  const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
-  const rows = getTurnsForBranch(session.id, branchId, forkTurn, {
-    from: covered + 1, to: turnNo, kinds: ['player', 'narrator'],
-  }).filter((r) => String(r.content || '').trim());
-  const plan = planCompaction({
-    active, rows,
-    highTokens: config.context.summaryHighTokens,
-    lowTokens: config.context.summaryLowTokens,
-    minRawTurns: config.context.summaryMinRawTurns,
-    maxRawTurns: config.context.summaryMaxRawTurns,
-  });
-  if (!plan || signal?.aborted) return null;
-
-  const playerName = world?.card?.player?.name || '';
-  const charName = world?.card?.title || '';
-  const snap = branchSnapshot(session.id, branchId);
-  emit({
-    type: 'summary', state: 'start',
-    from: plan.from, to: plan.to, covers_turn_to: plan.covered,
-  });
-
-  let r;
-  try {
-    r = await runSummarizer({
-      session, branchId,
-      turnFrom: plan.from, turnTo: plan.to,
-      previousSummary: active?.text || '',
-      playerName, charName, signal,
-    });
-  } catch (err) {
-    if (err?.name === 'AbortError') throw err;
-    emit({ type: 'summary', state: 'end', ok: false, reason: err?.message || String(err) });
-    console.warn(`[summary] 摘要失败：${err?.message || err}`);
-    return null;
-  }
-
-  if (!r || r.skipped) {
-    emit({
-      type: 'summary', state: 'end', ok: false,
-      reason: r?.reason || 'skipped', chars: r?.chars ?? 0,
-    });
-    return null;
-  }
-  if (!isBranchCurrent(snap)) {
-    emit({ type: 'summary', state: 'end', ok: false, reason: 'stale', from: plan.from, to: plan.to });
-    return null;
-  }
-
-  const saved = addSummary(session.id, {
-    branchId,
-    coversTurnTo: plan.to,
-    text: r.text,
-    prevId: active?.id ?? null,
-    tokenCount: estimateTokens(r.text),
-  });
-  emit({
-    type: 'summary', state: 'end', ok: true,
-    from: plan.from, to: plan.to, covers_turn_to: plan.to,
-    turns: r.turns, chars: r.chars, tokens: saved?.token_count ?? estimateTokens(r.text),
-  });
-  return saved;
-}
 
 /**
  * 装配清单：把「这一轮模型看到了什么、为什么」写进 turns.meta_json。
@@ -480,6 +485,10 @@ function buildAssemblyMeta(context, narrator) {
     retrieval: meta.retrieval || null,
     soft_max: meta.soft_max ?? null,
     hard_max: meta.hard_max ?? null,
+    // P0-2/P0-1 的可观测结果随回合持久化：缓存前缀归因与硬上限处置。
+    cache: meta.cache || null,
+    hard_cap: meta.hard_cap || null,
+    coverage: meta.coverage || null,
     model: narrator?.model || null,
     effort: config.agents.narrator.reasoningEffort,
     temperature: config.agents.narrator.temperature,
@@ -555,6 +564,21 @@ export function createSessionWithSettings({ title, settings, worldId = null, anc
     }
   }
 
+  // 伏笔表播种成线索：这是「必须回收的钩子」唯一的初始值来源。
+  // 只靠史官在正文里「埋」，漏埋一次就永久丢失（旧实现就是这样）。
+  for (const seed of card?.seeds || []) {
+    if (!seed?.title) continue;
+    upsertThread(id, {
+      branch_id: 'main',
+      title: seed.title,
+      status: 'open',
+      weight: Number.isFinite(Number(seed.weight)) ? Number(seed.weight) : 0.5,
+      note: seed.note || '',
+      planted_turn: 0,
+      turn_no: 0,
+    });
+  }
+
   // 用锚点快照初始化账本（turn_no = 0 表示「开局之前」）
   const snap = anchor ? card?.anchors.find((a) => a.id === anchor) : null;
   if (snap?.snapshot && Object.keys(snap.snapshot).length) {
@@ -610,6 +634,7 @@ export function getSessionSnapshot(sessionId) {
     } : null,
     turns,
     state: stateEntry?.state || null,
+    playerView: buildPlayerView(stateEntry?.state, { cast: card.cast }),
     usage,
     memoryStats: getMemoryStats(sessionId),
   };

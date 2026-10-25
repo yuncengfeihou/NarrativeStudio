@@ -29,6 +29,7 @@ _work/real-10turn-report.json
 
 # 第三方参考实现（仅本地研究，不随仓库分发）
 /Liyuan-1.6.4/
+/shujuku/
 
 # 内部开发文档与素材（不入公开仓库）
 /AGENTS.md

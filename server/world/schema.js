@@ -175,6 +175,9 @@ function normalizeCodex(raw) {
         canon_from: str(o.canon_from),
         detail: str(o.detail),
         pinned: !!o.pinned,
+        // 静音：作者明确「不要自动进场」。它仍留在卡里可被模型主动检索，
+        // 但世界索引与场记单候选都不再自动渲染它；静音优先于钉选，避免两个开关互相打脸。
+        muted: !!o.muted,
         // v5 图谱字段（可选）：包含关系与来源。没有时由 graph 层从 links/relations 推导。
         parent_id: str(o.parent_id),
         sources: asArray(o.sources)
@@ -324,6 +327,174 @@ function normalizeClaims(raw) {
     .filter(Boolean);
 }
 
+/**
+ * v5：成长曲线（fates）。全部可选；缺省 = 该卡没有这一层，行为与纯 v4 完全一致。
+ *
+ * 这是「未来固定」的正确形状：不是事件清单（会变成必达节拍），
+ * 而是「阶段 + 确定性解锁条件 + 增量 + 一行预兆」。
+ * 运行期由 `server/world/fates.js` 的纯函数求值，不调模型。
+ */
+function normalizeUnlock(raw) {
+  const u = obj(raw);
+  const rule = (r) => {
+    const o = obj(r);
+    return {
+      subject: str(o.subject),
+      predicate: str(o.predicate),
+      object: o.object == null ? null : str(o.object || ''),
+    };
+  };
+  return {
+    after_turn: num(u.after_turn, 0),
+    after_events: asStringArray(u.after_events),
+    claims: asArray(u.claims).map(rule).filter((c) => c.subject && c.predicate),
+    knowledge: asStringArray(u.knowledge),
+    min_relation: asArray(u.min_relation).map((r) => {
+      const o = obj(r);
+      if (!str(o.to)) return null;
+      return {
+        to: str(o.to),
+        kind: str(o.kind),
+        sentiment_gte: o.sentiment_gte == null ? null : num(o.sentiment_gte, 0),
+      };
+    }).filter(Boolean),
+    any_of: asArray(u.any_of).map(normalizeUnlock),
+    all_of: asArray(u.all_of).map(normalizeUnlock),
+  };
+}
+
+function normalizeFateChange(raw) {
+  const c = obj(raw);
+  const voice = obj(c.voice);
+  const psyche = obj(c.psyche);
+  const knowledge = obj(c.knowledge);
+  return {
+    role: str(c.role),
+    one_line: str(c.one_line),
+    voice: {
+      rhythm: str(voice.rhythm),
+      lexicon_add: asStringArray(voice.lexicon_add),
+      never_add: asStringArray(voice.never_add),
+    },
+    psyche: {
+      wants_add: asStringArray(psyche.wants_add),
+      fears_add: asStringArray(psyche.fears_add),
+      hides_add: asStringArray(psyche.hides_add),
+      values_add: asStringArray(psyche.values_add),
+    },
+    knowledge: {
+      knows_add: asStringArray(knowledge.knows_add),
+      believes_falsely_add: asStringArray(knowledge.believes_falsely_add),
+    },
+    agenda_add: asArray(c.agenda_add).map((a) => {
+      const o = obj(a);
+      if (!str(o.goal)) return null;
+      return {
+        goal: str(o.goal),
+        method: str(o.method),
+        pressure: clamp01(o.pressure, 0.5),
+        deadline: str(o.deadline),
+      };
+    }).filter(Boolean),
+    relations_set: asArray(c.relations_set).map((r) => {
+      const o = obj(r);
+      if (!str(o.to)) return null;
+      return {
+        to: str(o.to),
+        kind: str(o.kind),
+        sentiment: Math.max(-1, Math.min(1, num(o.sentiment, 0))),
+        note: str(o.note),
+      };
+    }).filter(Boolean),
+  };
+}
+
+function normalizeFates(raw) {
+  return asArray(raw)
+    .map((f) => {
+      const o = obj(f);
+      const who = str(o.who);
+      if (!who) return null;
+      return {
+        id: str(o.id) || uniqueId(`fate-${slugify(who)}-${num(o.stage, 1)}`, new Set()),
+        who,
+        stage: Math.max(1, num(o.stage, 1)),
+        label: str(o.label),
+        unlock: normalizeUnlock(o.unlock),
+        change: normalizeFateChange(o.change),
+        omen: asStringArray(o.omen),
+        visibility: ['engine', 'author'].includes(o.visibility) ? o.visibility : 'engine',
+        sources: asArray(o.sources).map((s) => {
+          const x = obj(s);
+          return { kind: str(x.kind), chapter: num(x.chapter, 0), quote: str(x.quote) };
+        }).filter((s) => s.kind || s.chapter || s.quote),
+      };
+    })
+    .filter(Boolean);
+}
+
+/** 伏笔表：开局播种成 threads，避免「史官没埋到就永久丢失」。 */
+function normalizeSeeds(raw) {
+  return asArray(raw)
+    .map((s) => {
+      const o = obj(s);
+      const title = str(o.title);
+      if (!title) return null;
+      return {
+        id: str(o.id) || uniqueId(`seed-${slugify(title)}`, new Set()),
+        title,
+        kind: ['mystery', 'debt', 'promise', 'secret'].includes(o.kind) ? o.kind : 'mystery',
+        weight: clamp01(o.weight, 0.5),
+        note: str(o.note),
+        payoff_hint: str(o.payoff_hint),
+        source: obj(o.source),
+      };
+    })
+    .filter(Boolean);
+}
+
+/** 原著事件骨架：永不注入，只给作者视图与偏离检测。 */
+function normalizeCanonArc(raw) {
+  return asArray(raw)
+    .map((a) => {
+      const o = obj(a);
+      if (!str(o.id) && !str(o.label)) return null;
+      return {
+        id: str(o.id) || uniqueId(`arc-${slugify(str(o.label))}`, new Set()),
+        chapter_from: num(o.chapter_from, 0),
+        chapter_to: num(o.chapter_to, 0),
+        label: str(o.label),
+        summary: str(o.summary),
+        beats: asArray(o.beats).map((b) => {
+          const x = obj(b);
+          return {
+            what: str(x.what),
+            who: asStringArray(x.who),
+            where: str(x.where),
+          };
+        }).filter((b) => b.what),
+        load_bearing: !!o.load_bearing,
+      };
+    })
+    .filter(Boolean);
+}
+
+/** 偏离度：只影响 fates 解锁条件的宽严与 canon_arc 的可引用度，不新增注入层。 */
+function normalizeDivergence(raw) {
+  const d = obj(raw);
+  const cutoff = obj(d.cutoff);
+  return {
+    mode: ['strict', 'loose', 'free'].includes(d.mode) ? d.mode : 'loose',
+    cutoff: {
+      chapter: num(cutoff.chapter, 0),
+      arc_id: str(cutoff.arc_id),
+      label: str(cutoff.label),
+    },
+    must_hold: asStringArray(d.must_hold),
+    allow: asStringArray(d.allow),
+  };
+}
+
 function normalizePlayer(raw, cast) {
   const p = obj(raw);
   const name = str(p.name);
@@ -394,6 +565,12 @@ export function normalizeCard(raw) {
     // v5 图谱字段（可选）；没有时由 server/world/graph.js 从 v4 字段推导。
     edges: normalizeEdges(c.edges),
     claims: normalizeClaims(c.claims),
+    // v5 成长曲线（可选）。缺省为空 → 行为与纯 v4 完全一致。
+    // 手搓原创卡同样适用：canon_arc 为空、unlock 用 after_turn。
+    fates: normalizeFates(c.fates),
+    seeds: normalizeSeeds(c.seeds),
+    canon_arc: normalizeCanonArc(c.canon_arc),
+    divergence: normalizeDivergence(c.divergence),
     player: normalizePlayer(c.player, cast),
     author_notes: asArray(c.author_notes)
       .map((n) => {

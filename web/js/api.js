@@ -279,7 +279,8 @@ export const api = {
     return request('/api/sessions', { method: 'POST', body, signal });
   },
 
-  /** GET /api/sessions/:id -> {session, world, turns, state, usage, memoryStats} */
+  /** GET /api/sessions/:id -> {session, card, world, turns, state, playerView, usage, memoryStats}
+   *  state 是完整账本（导出/排查用）；展示层只读 playerView。 */
   getSession(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}`, { signal });
   },

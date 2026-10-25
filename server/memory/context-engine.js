@@ -4,15 +4,19 @@
  * v4 与 v3 的根本差别：**提示词不是从词条库里检索出来的，是从世界状态里渲染出来的。**
  * 没有关键词触发、没有扫描深度、没有递归、没有优先级、没有常驻开关。
  *
- * 装配顺序（缓存友好：稳定前缀 → 追加原文 → 易变尾部）：
- *   1. system  演绎契约 + 命题 + 宪章 + 世界索引   （canon，只随卡片变化）
- *   2. user    前情提要（摘要覆盖的旧剧情）
- *   3. …      最近原文 = 摘要边界之后的**全部**回合（player/narrator 交替，只追加）
- *   4. user    场记单 + 回声                       （runtime，每场变一次，尾部注意力最强）
- *   5. user    本场指令 + 本轮行动
+ * 装配顺序（缓存友好：冻结前缀 → 只追加历史 → 易变尾部）：
+ *   1. system  演绎契约 + 命题 + 宪章 + 世界索引 + 主角（canon，**只读模板快照**）
+ *   2. user    本局场次索引（每场一行，只追加）
+ *   3. …       当前场次逐字原文（上一场 turn_to + 1 起，player/narrator 交替，只追加）
+ *   4. user    刚才这一场怎么收的（最近 1–2 场细节）
+ *   5. user    场记单 + 回声（runtime，每场变一次，尾部注意力最强）
+ *   6. user    本场指令 + 本轮行动
  *
- * 记忆不变量：摘要边界 + 1 必须等于原文窗口的第一轮。原文窗口不做字符串裁剪；
- * 它的体积由回合末的摘要沉淀（planCompaction）控制，先被摘要接住，才允许离开窗口。
+ * 记忆不变量：场次边界 + 1 必须等于原文窗口的第一轮。原文窗口不做字符串裁剪；
+ * 它由「场次记录」（每场一行、只追加、永不互相改写）接住，场次从本场完整原文生成。
+ *
+ * 缓存不变量：system 只承载 canon，绝不读 world_state 投影后的运行态——
+ * 它一变，后面整段前缀全部失效。判据见 test-context.js 的「缓存前缀」段。
  *
  * 词条（codex）进场靠三条路：实体连接（在场/被提及/被钉选）、主题标签、用户钉选。
  * 唯一保留的字符串匹配是实体链接：它只回答「文本提到了谁」，用来更新场记单的
@@ -22,16 +26,28 @@ import { config } from '../config.js';
 import { estimateMessageTokens, estimateTokens, truncateToTokens } from '../tokens.js';
 import { normalizeCard, buildAliasIndex, linkEntities, sceneThemeTags } from '../world/schema.js';
 import { buildEffectiveWorld, emptyCastEntry } from '../world/effective.js';
-import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet } from '../world/scene-sheet.js';
+import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet, renderSceneIndex, renderRecentScenes } from '../world/scene-sheet.js';
 import { buildWorldGraph, graphNeighbors } from '../world/graph.js';
+import { isFunctionalPredicate } from './predicates.js';
+import { lintState } from './lint-state.js';
+import { comparePromptMessages } from './prompt-drift.js';
+import { evaluateFates, renderOmens } from '../world/fates.js';
 import { narratorTailInstruction } from '../prompts/narrator.js';
 import {
-  getActiveSummary, getAssertions, getBranch, getRelations, getRecentTextForBranch,
-  getState, getThreads, getTurnsForBranch, getVoiceMap, getWorldState,
+  getAssertions, getBranch, getRelations, getRecentTextForBranch,
+  getScenes, getState, getThreads, getTurnsForBranch, getVoiceMap, getWorldState,
 } from './store.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
 const join = (arr, sep = '、') => (arr || []).filter(Boolean).join(sep);
+
+/** 稳定短哈希：用于判断「这一轮 system 与上一轮是否逐字节相同」。 */
+function hashText(text) {
+  let h = 5381;
+  const t = String(text || '');
+  for (let i = 0; i < t.length; i++) h = ((h * 33) ^ t.charCodeAt(i)) >>> 0;
+  return h.toString(36);
+}
 
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 1. 演绎契约（唯一一条 system 消息）                                      */
@@ -85,7 +101,16 @@ export function buildContract(session, world, card = normalizeCard(world?.card |
   return lines.join('\n');
 }
 
-/** 系统层总装：契约 + 命题 + 宪章 + 世界索引。 */
+/**
+ * 系统层总装：契约 + 命题 + 宪章 + 世界索引 + 主角（canon）。
+ *
+ * **只读模板快照，绝不读运行态。** system 是缓存前缀里最长的一段，
+ * 一旦混进随轮次变化的内容（cast.role / cast.status / player.situation /
+ * 剧情里临时登场的新实体），上一轮的 prompt 就不再是这一轮的前缀，
+ * 命中率会被压缩到个位数。实测：system 冻结后相邻轮可共享前缀 +16.7pp。
+ *
+ * 运行态（此刻处境、伤情、临时登场者）由场记单负责，它不是 canon。
+ */
 export function buildSystemLayer(
   session, world, {
     card = normalizeCard(world?.card || {}),
@@ -107,7 +132,9 @@ export function buildSystemLayer(
   const player = card.player;
   if (player && (player.name || player.situation || player.inner_voice)) {
     const pl = [`【主角】${player.name}${player.age ? `，${player.age}` : ''}${player.identity ? `｜${player.identity}` : ''}`];
-    if (player.situation) pl.push(`处境：${player.situation}`);
+    // 这一段的每一项都是「他是谁」，不是「他此刻如何」。
+    // 运行态（此刻处境 / 伤情 / 情绪 / 位置 / 当下目标）由场记单渲染，不进 system。
+    if (player.situation) pl.push(`来路：${player.situation}`);
     if (player.capability) pl.push(`能力边界：${player.capability}`);
     if (player.inner_voice) pl.push(`内心声音：${player.inner_voice}`);
     if (player.wants) pl.push(`想要的：${player.wants}`);
@@ -291,20 +318,112 @@ function pickCodex(card, { ledger, linked, present = [], pinnedIds = [], graph =
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+/* 4.5 断言选择（单值常驻 + 多值按相关性）                                  */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 选择进场的断言。旧实现是 `slice(0, 6)`——语义是「最近 6 条」，
+ * 与「此刻相关的 6 条」完全是两件事。
+ *
+ * 分两类渲染是必要的：
+ *   - **单值谓词**（位于/是/曾经是）：同一时刻只有一个对象，数量天然有界，**全部渲染**。
+ *     漏掉它们就等于漏掉「他在哪」「她是谁」，是最贵的失忆。
+ *   - **多值谓词**（知道/拥有/想要…）：数量无界，必须按相关性选。
+ *
+ * 相关性只用确定性信号，不做语义打分（避免变成变相的检索注入）：
+ *   主语/宾语命中在场者 +3、命中当前地点 +2、命中未回收线索 +2、
+ *   secret/engine 可见性 +1（张力来源）、越新越优先。
+ *
+ * @returns {{single:Array, many:Array, meta:object}}
+ */
+export function selectFacts(assertions = [], {
+  presentKeys = new Set(), placeId = null, threadTitles = [], manyLimit = 10,
+} = {}) {
+  const threadText = (threadTitles || []).join('|');
+  const hits = (text) => (text ? threadText.includes(text) : false);
+
+  const score = (a) => {
+    let s = 0;
+    if (presentKeys.has(a.subject) || presentKeys.has(a.object)) s += 3;
+    if (placeId && (a.object === placeId || a.subject === placeId)) s += 2;
+    if (hits(a.subject) || hits(a.object)) s += 2;
+    if (a.visibility === 'secret') s += 1;
+    else if (a.visibility === 'engine') s += 1;
+    return s;
+  };
+
+  const single = [];
+  const many = [];
+  for (const a of assertions || []) {
+    if (isFunctionalPredicate(a.predicate)) single.push(a);
+    else many.push({ a, s: score(a) });
+  }
+
+  many.sort((x, y) => y.s - x.s
+    || (Number(y.a.valid_from) || 0) - (Number(x.a.valid_from) || 0));
+
+  const keptMany = many.slice(0, Math.max(0, manyLimit)).map((x) => x.a);
+  return {
+    single,
+    many: keptMany,
+    meta: {
+      single: single.length,
+      many_candidates: many.length,
+      many_rendered: keptMany.length,
+      many_dropped: Math.max(0, many.length - keptMany.length),
+    },
+  };
+}
+
+/**
+ * 知识边界按**线索组织**，而不是泛泛列 knows / does_not_know。
+ * 「七年前的真相：凌玥知道；伍卿不知道」比两串词表有用得多——
+ * 前者直接回答「这一拍谁不能说什么」。
+ */
+export function renderKnowledgeMatrix(present = []) {
+  const byTopic = new Map();
+  for (const c of present) {
+    const k = c.knowledge || {};
+    for (const t of k.knows || []) {
+      if (!byTopic.has(t)) byTopic.set(t, { know: [], notKnow: [], wrong: [] });
+      byTopic.get(t).know.push(c.name);
+    }
+    for (const t of k.does_not_know || []) {
+      if (!byTopic.has(t)) byTopic.set(t, { know: [], notKnow: [], wrong: [] });
+      byTopic.get(t).notKnow.push(c.name);
+    }
+    for (const t of k.believes_falsely || []) {
+      if (!byTopic.has(t)) byTopic.set(t, { know: [], notKnow: [], wrong: [] });
+      byTopic.get(t).wrong.push(c.name);
+    }
+  }
+  const lines = [];
+  for (const [topic, v] of byTopic) {
+    const parts = [];
+    if (v.know.length) parts.push(`${v.know.join('、')}知道`);
+    if (v.notKnow.length) parts.push(`${v.notKnow.join('、')}不知道`);
+    if (v.wrong.length) parts.push(`${v.wrong.join('、')}误信`);
+    if (parts.length) lines.push(`${topic}：${parts.join('；')}`);
+  }
+  return lines;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 /* 5. 回声（过去的原话）                                                    */
 /* ══════════════════════════════════════════════════════════════════════ */
 
 /**
  * 回声 = 在场角色最近的原文台词 + 与未回收线索同文的旧原文片段。
  * 逐字引用，不是摘要——这是「细节能唤起」的落地方式。
+ *
+ * 轮次必须是真的：旧实现写死 turn_no:0，渲染成「第0轮」，模型无法判断这句是何时说的。
  */
-function buildEchoes(sessionId, { branchId, present }) {
-  const voices = getVoiceMap(sessionId, { branchId, perWho: 2 });
+function buildEchoes(voices, { present }) {
   const echoes = [];
   for (const c of present) {
-    const name = c.name;
-    for (const line of (voices[name] || voices[c.id] || []).slice(0, 2)) {
-      echoes.push({ who: name, text: line, turn_no: 0 });
+    const lines = voices[c.name] || voices[c.id] || [];
+    for (const v of lines.slice(0, 2)) {
+      if (v?.text) echoes.push({ who: c.name, text: v.text, turn_no: Number(v.turn_no) || 0 });
     }
   }
   return echoes;
@@ -383,11 +502,13 @@ function toRecentMessages(rows) {
  */
 export async function assembleContext({
   session, world, turnNo, playerText, images, branchChoice, isOpening = false, directive = '',
-  retrieval = null,
+  retrieval = null, previousMessages = null,
 }) {
   const budget = config.context.layerBudget;
   const hardMax = session?.settings?.context_max_tokens ?? config.context.maxTokens;
   const softMax = Math.min(config.context.softTokens, hardMax);
+  // 超硬上限策略：fail（默认，拒绝本轮并报错）| truncate（旧行为，调试/应急）。
+  const hardCapMode = config.context.overHardCap === 'truncate' ? 'truncate' : 'fail';
   const sessionId = session.id;
   const branchId = session.branch_id || 'main';
   const branch = getBranch(sessionId, branchId);
@@ -396,16 +517,27 @@ export async function assembleContext({
   /* ---- 模板快照 + 世界线增量 → 本轮真实有效的世界 ---- */
   const templateCard = normalizeCard(session?.card_snapshot || world?.card || {});
   const deltas = getWorldState(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0 });
-  const card = buildEffectiveWorld(templateCard, deltas);
-  // 辞书图谱：实体去重、包含关系、1 跳邻域都从投影后的世界计算。
-  const graph = buildWorldGraph(card);
-  const anchors = card.anchors || [];
+
+  /* ---- 账本（fates 解锁判定要用到它，所以先读） ---- */
+  const anchors = templateCard.anchors || [];
   const anchorId = session.anchor_id || anchors[0]?.id || null;
   const anchor = anchors.find((a) => a.id === anchorId) || anchors[0] || null;
-
-  /* ---- 账本 ---- */
   const ledgerAtTurn = Number.isInteger(turnNo) && turnNo > 0 ? turnNo - 1 : 0;
   const ledger = loadLedger(sessionId, anchor, { branchId, atTurn: ledgerAtTurn });
+
+  /* ---- 成长曲线（fates）：纯函数求值，不调模型 ----
+   * 没有 fates 的卡这里得到空数组，行为与纯 v4 完全一致。 */
+  const fateState = evaluateFates(templateCard, {
+    turnNo: Number(turnNo) || 0,
+    ledger,
+    assertions: getAssertions(sessionId, { branchId, atTurn: Number(turnNo) || 0, limit: 300 }),
+    relations: getRelations(sessionId, { branchId, limit: 120 }),
+    charStates: ledger?.characters || {},
+  });
+
+  const card = buildEffectiveWorld(templateCard, deltas, fateState.unlocked);
+  // 辞书图谱：实体去重、包含关系、1 跳邻域都从投影后的世界计算。
+  const graph = buildWorldGraph(card);
 
   /* ---- 实体链接：只回答「提到了谁」，不回答「注入什么」 ---- */
   const aliasIndex = buildAliasIndex(card);
@@ -423,7 +555,13 @@ export async function assembleContext({
   };
 
   /* ---- 在场卡司 ---- */
-  const present = pickPresent(card, { ledger, linked: linkedPlayer });
+  const present0 = pickPresent(card, { ledger, linked: linkedPlayer });
+
+  /* ---- 渲染前体检：能确定性修的矛盾就地修（死亡角色不应仍在场） ---- */
+  const lint = lintState({
+    ledger, present: present0, assertions: [], scenes: [], turnNo: Number(turnNo) || 0,
+  });
+  const present = lint.present;
 
   /* ---- 辞书 ---- */
   const pinnedIds = (card.codex || []).filter((e) => e.pinned).map((e) => e.id);
@@ -435,12 +573,28 @@ export async function assembleContext({
   const relations = getRelations(sessionId, { branchId, limit: 60 });
   const threads = getThreads(sessionId, { branchId, limit: 40 });
   const presentKeys = new Set(present.flatMap((c) => [c.id, c.name]));
-  const facts = getAssertions(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0, limit: 60 })
-    .filter((a) => a.visibility !== 'secret' || presentKeys.has(a.subject))
-    .slice(0, 6);
+  const allFacts = getAssertions(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0, limit: 300 })
+    .filter((a) => a.visibility !== 'secret' || presentKeys.has(a.subject));
+  // 单值谓词全渲染（有界），多值谓词按相关性选（无界）。
+  const factSel = selectFacts(allFacts, {
+    presentKeys,
+    placeId: ledger?.place_id || null,
+    threadTitles: threads.filter((t) => t.status === 'open').map((t) => t.title),
+    manyLimit: 10,
+  });
+  const facts = [...factSel.single, ...factSel.many];
+  // 知识边界按线索组织（谁能在这一拍说出什么），而不是泛泛词表。
+  const knowledgeMatrix = renderKnowledgeMatrix(present);
+  // 成长曲线的「预兆」：只取已解锁且在场者，最多 2 条，进既有「压力」段。
+  // 这样不需要新增注入通道——它就是压力的一种。
+  const presentNames = new Set(present.flatMap((c) => [c.id, c.name]));
+  const omens = renderOmens(fateState.unlocked, presentNames, 2);
 
-  /* ---- 原声 → 回声 ---- */
-  const echoes = buildEchoes(sessionId, { branchId, present });
+  /* ---- 原声：既做「回声」，也按角色给在场者卡锚定声线 ---- */
+  const voiceMap = getVoiceMap(sessionId, { branchId, perWho: 3 });
+  const voices = {};
+  for (const [who, lines] of Object.entries(voiceMap)) voices[who] = lines.map((v) => v.text);
+  const echoes = buildEchoes(voiceMap, { present });
 
   /* ---- 场记单 ---- */
   // 辞书条目按「每条预估成本」决定能塞几条，而不是固定 slice：
@@ -458,10 +612,18 @@ export async function assembleContext({
     threads,
     codex: selectedCodex,
     codexBrief: selectedBrief,
-    voices: {},
+    voices,
     echoes,
     facts,
+    knowledgeMatrix,
+    omens,
     worldRuntime: card.runtime || {},
+    // 主角运行态从 system 搬到场记单：信息不丢，但 system 得以逐字节冻结。
+    playerNow: {
+      condition: card.player?.condition, mood: card.player?.mood,
+      location: card.player?.location, goal: card.player?.goal,
+      status: card.player?.status, situation: card.player?.situation,
+    },
     directive: directive || str(session.settings?.scene_directive),
     capTokens: sceneCap,
   });
@@ -470,39 +632,36 @@ export async function assembleContext({
   const codexBriefRendered = sheet.meta?.codex_brief_rendered ?? 0;
   const factsRendered = (sheet.meta?.kept || []).includes('facts') ? facts.length : 0;
 
-  /* ---- 系统层（稳定前缀） ---- */
+  /* ---- 系统层（稳定前缀，只读 canon） ---- */
+  // 关键：传的是**模板快照** templateCard，不是投影后的 card。
+  // system 一旦读运行态，前缀每轮都失效（实测 1000 轮里 system 变 251 次）。
   const systemMsg = {
     role: 'system',
     content: buildSystemLayer(session, world, {
-      card,
+      card: templateCard,
       indexCap: budget.system,
-      graph,
+      graph: buildWorldGraph(templateCard),
     }),
   };
 
-  /* ---- 前情提要（滚动摘要） ---- */
-  // 只取「本轮之前」的摘要：摘要覆盖的是已经写完的回合，不能把尚未演绎的当前轮算进去。
-  const summary = getActiveSummary(sessionId, {
-    branchId,
-    atTurn: Number.isInteger(turnNo) && turnNo > 0 ? turnNo - 1 : 0,
-  });
-  // 摘要层有独立配额：摘要 Agent 可能写超，装配时按 BUDGET_SUMMARY 截断，
-  // 不能因为总预算还宽裕就让它越过自己的层预算。
-  const summaryMsg = summary
-    ? {
-      role: 'user',
-      content: truncateToTokens(
-        `【前情提要】以下是更早剧情的接力摘要，是既定事实。\n\n${summary.text}`,
-        budget.summary,
-      ),
-    }
-    : null;
+  /* ---- 场次索引（长程记忆的载体，只追加） ---- */
+  // 只取「本轮之前」已经封场的场次；当前这一场还在写，不能进索引。
+  // 索引是缓存友好的：老场次的行永远不变，只有末尾追加新行。
+  const allScenes = getScenes(sessionId, { branchId, limit: 4000 });
+  const closedScenes = (Number.isInteger(turnNo) && turnNo > 0)
+    ? allScenes.filter((s) => s.turn_to < turnNo)
+    : allScenes;
+  const sceneIndex = renderSceneIndex(closedScenes, budget.archive);
+  const archiveMsg = sceneIndex.text ? { role: 'user', content: sceneIndex.text } : null;
 
-  /* ---- 最近原文 ---- */
-  // 原文窗口 = 摘要边界之后的**全部**回合：不按「最后 N 轮」取，也不做字符串裁剪。
-  // 它的体积由回合末的摘要沉淀控制；这里一旦再截一次，就会制造「摘要没接住、原文已丢」的空洞。
+  /* ---- 逐字原文窗口 ---- */
+  // 窗口 = **当前场次起点到本轮之前**的全部回合：不按「最后 N 轮」取，也不做字符串裁剪。
+  // 旧实现用「摘要边界 + 1」做起点；摘要被移除后，边界改由场次决定：
+  // 场次记录已经覆盖的回合不再逐字出现（它们在场次索引里），当前场次逐字保留。
+  // 这条不变量比旧版更强：不会出现「摘要覆盖了但场次没记」的空洞。
+  const sceneCoveredTo = closedScenes.length ? closedScenes[closedScenes.length - 1].turn_to : 0;
   const rawRows = getTurnsForBranch(sessionId, branchId, forkTurn, {
-    from: summary ? summary.covers_turn_to + 1 : 1,
+    from: sceneCoveredTo + 1,
     kinds: ['player', 'narrator'],
   });
   const recentRows = (Number.isInteger(turnNo) && turnNo > 0)
@@ -510,11 +669,23 @@ export async function assembleContext({
     : rawRows;
   const recentMsgs = toRecentMessages(recentRows);
   const recentTurnNos = [...new Set(recentRows.map((r) => r.turn_no))];
+
+  /* ---- 刚才这一场怎么收的（场次细节，位置贴近生成点） ---- */
+  const recentScenes = renderRecentScenes(closedScenes, budget.archiveDetail);
+  let recentSceneMsg = recentScenes.text ? { role: 'user', content: recentScenes.text } : null;
+
   const coverage = {
-    summary_to: summary ? summary.covers_turn_to : 0,
+    // 这两个字段保留旧名，便于 UI/测试平滑读取；含义改为「场次覆盖到哪」。
+    summary_to: sceneCoveredTo,
     recent_from: recentTurnNos.length ? recentTurnNos[0] : null,
     recent_to: recentTurnNos.length ? recentTurnNos[recentTurnNos.length - 1] : null,
     turns: recentTurnNos.length,
+    // 场次覆盖：索引覆盖到第几轮，当前场从哪一轮起。
+    scene_count: closedScenes.length,
+    scene_to: sceneCoveredTo,
+    scene_index_rendered: sceneIndex.meta.rendered,
+    scene_index_dropped: sceneIndex.meta.dropped,
+    scene_index_degraded: sceneIndex.meta.degraded,
   };
 
   /* ---- 本轮输入 ---- */
@@ -534,24 +705,38 @@ export async function assembleContext({
   }
   const currentMsg = buildCurrent(playerText, images, branchChoice, extra, buildTail(card, { directive: directiveText, isOpening }));
 
-  /* ---- 汇总：system → 前情提要 → 最近原文 → 场记单 → 检索结果 → 本轮输入 ---- */
-  const sheetMsg = sheet.text ? { role: 'user', content: sheet.text } : null;
-  const retrievalMsg = retrieval?.text ? { role: 'user', content: retrieval.text } : null;
+  /* ---- 汇总：system → 场次索引 → 最近原文 → 场次细节 → 场记单 → 检索 → 本轮 ---- */
+  // 缓存友好的顺序：稳定前缀（system）→ 只追加的历史（场次索引 + 逐字原文）→
+  // 每轮易变的尾部（场景细节 + 场记单 + 检索 + 本轮输入）。
+  let sheetMsg = sheet.text ? { role: 'user', content: sheet.text } : null;
+  let retrievalMsg = retrieval?.text ? { role: 'user', content: retrieval.text } : null;
   const compose = () => [
     systemMsg,
-    ...(summaryMsg ? [summaryMsg] : []),
+    ...(archiveMsg ? [archiveMsg] : []),
     ...recentMsgs,
+    ...(recentSceneMsg ? [recentSceneMsg] : []),
     ...(sheetMsg ? [sheetMsg] : []),
     ...(retrievalMsg ? [retrievalMsg] : []),
     currentMsg,
   ];
   let messages = compose();
 
-  /* ---- 超预算降级：场记单 → 摘要 → 硬上限兜底 ---- */
-  // 原文窗口不参与软目标降级：它的体积由回合末的摘要沉淀控制。
-  // 摘要滞后时宁可让总预算短暂超过软目标，也不在中间制造空洞。
+  /* ---- 超预算降级：软目标只裁易变尾部；硬上限整层收窄，绝不切半句 ----
+   * 顺序原则：**先牺牲易变尾部，再牺牲历史**。
+   * 场次索引（archive）与逐字原文（recent）不在软目标降级范围内：
+   * 它们是记忆载体，砍了就是静默失忆。
+   * 硬上限是「事故」不是「策略」：默认 fail-closed（拒绝本轮并说明处置办法），
+   * 不允许把半句话送进模型；只有显式 CONTEXT_OVER_HARD_CAP=truncate 才回退旧行为。
+   */
   const totalNow = () => messages.reduce((s, m) => s + estimateMessageTokens(m), 0);
   const degraded = [];
+  if (totalNow() > softMax && recentSceneMsg) {
+    const excess = totalNow() - softMax;
+    const cur = estimateMessageTokens(recentSceneMsg);
+    recentSceneMsg.content = truncateToTokens(recentSceneMsg.content, Math.max(200, cur - excess));
+    messages = compose();
+    degraded.push('scene_detail');
+  }
   if (totalNow() > softMax && sheetMsg) {
     const excess = totalNow() - softMax;
     const cur = estimateMessageTokens(sheetMsg);
@@ -559,37 +744,127 @@ export async function assembleContext({
     messages = compose();
     degraded.push('scene_sheet');
   }
-  if (totalNow() > softMax && summaryMsg) {
-    const excess = totalNow() - softMax;
-    const cur = estimateMessageTokens(summaryMsg);
-    summaryMsg.content = truncateToTokens(summaryMsg.content, Math.max(600, cur - excess));
+
+  // 硬上限：先按「整层」收窄（场景细节 → 场记单 → 检索）。每次都是完整消息进/出，
+  // 不会出现「半句话」；记忆载体（archive/recent/current/system）永不被字符串截断。
+  const narrowed = [];
+  if (totalNow() > hardMax && recentSceneMsg) {
+    recentSceneMsg = null;
     messages = compose();
-    degraded.push('summary');
+    narrowed.push('scene_detail');
+    degraded.push('scene_detail_dropped');
   }
-  // 硬安全网：只在超过 CONTEXT_MAX_TOKENS 时触发，且不碰 system 与最后一条本轮输入。
-  for (let guard = 0; guard < 30 && totalNow() > hardMax; guard++) {
-    const candidates = messages
-      .map((m, i) => ({ m, i }))
-      .filter(({ m, i }) => typeof m.content === 'string' && m.role !== 'system' && i !== messages.length - 1);
-    if (!candidates.length) break;
-    candidates.sort((a, b) => estimateMessageTokens(b.m) - estimateMessageTokens(a.m));
-    const m = candidates[0].m;
-    const t = estimateMessageTokens(m);
-    if (t < 80) break;
-    m.content = truncateToTokens(m.content, Math.max(60, Math.floor(t * 0.7)));
+  if (totalNow() > hardMax && sheetMsg) {
+    sheetMsg = null;
+    messages = compose();
+    narrowed.push('scene_sheet');
+    degraded.push('scene_sheet_dropped');
+  }
+  if (totalNow() > hardMax && retrievalMsg) {
+    retrievalMsg = null;
+    messages = compose();
+    narrowed.push('retrieval');
+    degraded.push('retrieval_dropped');
+  }
+  let hardCapped = false;
+  if (totalNow() > hardMax) {
+    if (hardCapMode === 'truncate') {
+      // 显式回退：旧行为，只给调试/应急。仍然必须显式记录，不允许静默失真。
+      for (let guard = 0; guard < 30 && totalNow() > hardMax; guard++) {
+        const candidates = messages
+          .map((m, i) => ({ m, i }))
+          .filter(({ m, i }) => typeof m.content === 'string' && m.role !== 'system'
+            && i !== messages.length - 1 && m !== currentMsg);
+        if (!candidates.length) break;
+        candidates.sort((a, b) => estimateMessageTokens(b.m) - estimateMessageTokens(a.m));
+        const m = candidates[0].m;
+        const t = estimateMessageTokens(m);
+        if (t < 80) break;
+        m.content = truncateToTokens(m.content, Math.max(60, Math.floor(t * 0.7)));
+        hardCapped = true;
+      }
+      // 记「仍超硬上限」而不是「是否真的截过」：即使只剩 system 一条放不下，
+      // 也必须让调用方看到 over_hard_cap，而不是静默送模。
+      if (totalNow() > hardMax || hardCapped) degraded.push('over_hard_cap');
+    } else {
+      const over = totalNow();
+      const err = new Error(
+        `上下文超过硬上限 ${hardMax} tok（当前约 ${over} tok）。场次索引与逐字原文是记忆载体，`
+        + `不做字符串截断；已整层收窄：[${narrowed.join(', ') || '无'}]。`
+        + `请先封场（减少当前场原文）、换更大上下文的模型，或调低 BUDGET_RECENT。`,
+      );
+      err.code = 'CONTEXT_OVER_HARD_CAP';
+      err.meta = {
+        total: over,
+        hard_max: hardMax,
+        soft_max: softMax,
+        mode: hardCapMode,
+        narrowed,
+        degraded: [...degraded, 'over_hard_cap'],
+      };
+      throw err;
+    }
   }
 
   const budgetOf = (content) => (content ? estimateTokens(content) + 4 : 0);
   const breakdown = {
     system: budgetOf(systemMsg.content),
-    summary: summaryMsg ? budgetOf(summaryMsg.content) : 0,
+    archive: archiveMsg ? budgetOf(archiveMsg.content) : 0,
+    summary: 0,
     recent: recentMsgs.reduce((s, m) => s + estimateMessageTokens(m), 0),
-    scene: sheetMsg ? budgetOf(sheetMsg.content) : 0,
+    scene: (sheetMsg ? budgetOf(sheetMsg.content) : 0)
+      + (recentSceneMsg ? budgetOf(recentSceneMsg.content) : 0),
     retrieval: retrievalMsg ? budgetOf(retrievalMsg.content) : 0,
     current: estimateMessageTokens(currentMsg),
   };
-  breakdown.total = breakdown.system + breakdown.summary + breakdown.recent
+  breakdown.total = breakdown.system + breakdown.archive + breakdown.summary + breakdown.recent
     + breakdown.scene + breakdown.retrieval + breakdown.current;
+
+  /* ---- 缓存可归因信息：这一轮的前缀能复用多少、第一个断点在哪 ----
+   * 没有这两个字段，就无法回答「这一轮缓存没命中是因为什么」，
+   * 所有优化都只能靠猜。纯字符串比较，零 token 成本。 */
+  const prev = previousMessages && previousMessages.length ? previousMessages : null;
+  let prefixShared = 0;
+  let firstDivergence = null;
+  if (prev) {
+    const labels = ['system', 'archive', 'recent', 'scene', 'retrieval', 'current'];
+    const bucket = (i) => {
+      if (i === 0) return 'system';
+      if (archiveMsg && i === 1) return 'archive';
+      if (recentSceneMsg && messages[i] === recentSceneMsg) return 'scene';
+      if (sheetMsg && messages[i] === sheetMsg) return 'scene';
+      if (retrievalMsg && messages[i] === retrievalMsg) return 'retrieval';
+      if (messages[i] === currentMsg) return 'current';
+      return 'recent';
+    };
+    const lim = Math.min(prev.length, messages.length);
+    for (let i = 0; i < lim; i++) {
+      const a = prev[i], b = messages[i];
+      const ca = typeof a.content === 'string' ? a.content : JSON.stringify(a.content);
+      const cb = typeof b.content === 'string' ? b.content : JSON.stringify(b.content);
+      if (a.role === b.role && ca === cb) { prefixShared += estimateMessageTokens(b); continue; }
+      if (a.role === b.role) {
+        let k = 0;
+        while (k < ca.length && k < cb.length && ca[k] === cb[k]) k++;
+        prefixShared += estimateTokens(ca.slice(0, k));
+      }
+      firstDivergence = bucket(i) || labels[0];
+      break;
+    }
+  }
+  // 消息级漂移探针：比「层名」更细——给出第一条分叉的消息 index、字符 offset
+  // 与两侧摘录，用来回答「缓存没命中到底断在哪个字」。纯字符串比较，零 token。
+  const drift = comparePromptMessages(prev, messages);
+
+  // 渲染归属：每条送模消息来自哪一层（顺序与 compose 一致）。只进 meta，不进提示词，
+  // 用来回答「这句是谁加的」；后续按层归因开销也从这里查。
+  const messageOwners = ['system'];
+  if (archiveMsg) messageOwners.push('archive');
+  for (let i = 0; i < recentMsgs.length; i++) messageOwners.push('recent');
+  if (recentSceneMsg) messageOwners.push('scene_detail');
+  if (sheetMsg) messageOwners.push('scene_sheet');
+  if (retrievalMsg) messageOwners.push('retrieval');
+  messageOwners.push('current');
 
   return {
     messages,
@@ -623,17 +898,53 @@ export async function assembleContext({
       world_state_changes: deltas.length,
       facts: factsRendered,
       facts_candidates: facts.length,
+      facts_single: factSel.meta.single,
+      facts_many_rendered: factSel.meta.many_rendered,
+      facts_many_dropped: factSel.meta.many_dropped,
+      // 渲染前体检：修了什么、还有什么矛盾（都不进提示词，只进 meta 供排查）
+      state_fixes: lint.fixes,
+      state_warnings: lint.warnings,
+      // 成长曲线：解锁了哪些阶段、渲染了哪几条预兆
+      fates: {
+        total: fateState.meta.total,
+        unlocked: fateState.unlocked.map((f) => ({ who: f.who, stage: f.stage, label: f.label })),
+        omens: omens.map((o) => ({ who: o.who, stage: o.stage })),
+      },
       dropped_sections: sheet.meta?.dropped || [],
       branch: branchId,
-      // 覆盖清单：摘要边界 + 原文窗口。两者应当首尾相接；recent_from 必须等于 summary_to + 1。
+      // 覆盖清单：场次索引边界 + 原文窗口。两者应当首尾相接：
+      // recent_from 必须等于 scene_to + 1（场次无缝、无洞）。
       coverage,
-      summary: summary ? { id: summary.id, covers_turn_to: summary.covers_turn_to, tokens: breakdown.summary } : null,
+      // 摘要层已移除，保留这个字段为 null 以保持下游读取形状稳定。
+      summary: null,
       retrieval: retrieval?.text
         ? { queries: retrieval.queries || [], entries: retrieval.entries || [], tokens: breakdown.retrieval }
         : null,
       degraded,
+      // 渲染归属审计：逐条列出 owner 与估算 token（只进 meta，不进提示词）。
+      messages: messages.map((m, i) => ({
+        index: i,
+        role: m.role,
+        owner: messageOwners[i] || 'unknown',
+        tokens: estimateMessageTokens(m),
+      })),
+      // 缓存可归因：上一轮消息序列与本轮的最长公共前缀（估算 tok），
+      // 以及第一个分叉发生在哪一层。有了它才能回答「为什么没命中」。
+      cache: {
+        prefix_shared_tokens: prefixShared,
+        prefix_shared_rate: breakdown.total > 0
+          ? Math.round((prefixShared / breakdown.total) * 1000) / 1000
+          : null,
+        first_divergence: firstDivergence,
+        system_hash: hashText(systemMsg.content),
+        // identical / appendedMessages / broken / unknown + index/offset/摘录。
+        // 只进 meta 与诊断日志，不进提示词；摘录可能含正文，不往前端展示面推。
+        drift,
+      },
       soft_max: softMax,
       hard_max: hardMax,
+      // 硬上限策略与「整层收窄」记录：fail 模式下本字段只出现在错误 meta 里。
+      hard_cap: { mode: hardCapMode, narrowed },
     },
   };
 }

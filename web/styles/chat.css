@@ -9,6 +9,59 @@
 
 .play-view { position: relative; }
 
+/* -------------------------------------------------------------------------
+ * 场景信息条：固定组件，只展示 playerView 的四个字段
+ *
+ * 数据已由服务端白名单投影（server/memory/player-view.js），这里不做字段取舍。
+ * 默认收起：摘要行只放时间/地点/天气，点开看在场者。
+ * ---------------------------------------------------------------------- */
+.status-strip {
+  flex: none;
+  width: 100%;
+  max-width: calc(var(--read-max) + 40px);
+  margin: 0 auto;
+  padding: 4px 20px 5px;
+  border-bottom: 1px solid var(--line-soft);
+}
+.status-strip-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+  font-size: var(--fs-micro);
+  color: var(--ink-3);
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-variant-numeric: tabular-nums;
+}
+.status-strip-line::-webkit-details-marker { display: none; }
+.status-strip-line:hover { color: var(--ink-2); }
+.status-strip-sep { opacity: 0.45; }
+.status-strip-caret {
+  margin-left: 2px;
+  font-size: 9px;
+  opacity: 0.55;
+  transition: transform var(--dur-fast) var(--ease);
+}
+.status-strip[open] .status-strip-caret { transform: rotate(180deg); }
+.status-strip-more {
+  display: flex;
+  gap: 8px;
+  padding: 5px 0 1px;
+  font-size: var(--fs-caption);
+  color: var(--ink-2);
+  line-height: 1.6;
+}
+.status-strip-key {
+  flex: none;
+  padding-top: 1px;
+  font-size: var(--fs-micro);
+  font-weight: 600;
+  color: var(--ink-4);
+}
+.status-strip-people { min-width: 0; word-break: break-word; }
+
 .play-scroll { scroll-behavior: auto; }
 .play-body {
   max-width: calc(var(--read-max) + 40px);

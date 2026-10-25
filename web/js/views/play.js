@@ -16,6 +16,7 @@ import {
 } from '../app.js';
 import { ui } from '../store.js';
 import { openMemoryPanel } from '../panels/memory.js';
+import { openTimelinePanel, refreshTimelinePanels } from '../panels/timeline.js';
 import { formatNarrative } from '../markdown.js';
 import { usageBar, buildRing } from '../ui-kit.js';
 
@@ -39,6 +40,7 @@ export default {
     let selectedBranch = null;
     let attachments = [];
     let memStats = null;
+    let statusView = null;
     let lastTurnNo = 0;
     let contextMeta = null;
     let assemblerBudget = null;
@@ -47,6 +49,7 @@ export default {
     /* ---------------- DOM ---------------- */
     let navTitle, navSub, scroll, msgList, branchHost, composerWrap, ctxMeterFill;
     let input, sendBtn, attachStrip, quickRow, selStrip, ringSlot, jumpBtn, fileInput;
+    let statusStrip, statusSummary, statusDetail;
 
     /* ---------------- 骨架 ---------------- */
     navTitle = el('div', {}, '加载中');
@@ -63,14 +66,25 @@ export default {
       onclick: () => openMore(),
     }, icon('more', { size: 16 }));
 
+    const timelineBtn = el('button.icon-btn', {
+      type: 'button', title: '时间轴', 'aria-label': '时间轴',
+      onclick: () => openTimeline(),
+    }, icon('history', { size: 16 }));
+
     const nav = el('header.topbar', {},
       el('button.icon-btn.mobile-only', {
         type: 'button', 'aria-label': '目录',
         onclick: () => import('../shell.js').then((m) => m.openDrawer()),
       }, icon('sidebar', { size: 17 })),
       el('div.topbar-title', {}, navTitle, navSub),
-      el('div.topbar-actions', {}, memBtn, moreBtn),
+      el('div.topbar-actions', {}, timelineBtn, memBtn, moreBtn),
     );
+
+    // 场景信息条：只读展示服务端投影好的 playerView，默认收起。
+    // 账本里的心境/目标/物品/任务不进这里（见 server/memory/player-view.js）。
+    statusSummary = el('summary.status-strip-line');
+    statusDetail = el('div.status-strip-more');
+    statusStrip = el('details.status-strip', { style: 'display:none;' }, statusSummary, statusDetail);
 
     msgList = el('div.play-body', {});
     branchHost = el('div', {});
@@ -140,7 +154,7 @@ export default {
     );
 
     const view = el('section.view.play-view', { 'data-view': 'play' },
-      nav, scroll, composerWrap, jumpBtn, fileInput,
+      nav, statusStrip, scroll, composerWrap, jumpBtn, fileInput,
     );
     root.appendChild(view);
 
@@ -177,6 +191,8 @@ export default {
     paintRing();
     paintCtxMeter();
     renderTurns();
+    statusView = detail.playerView || null;
+    paintStatusBar();
 
     document.addEventListener('sessions:changed', onSessionsChanged);
 
@@ -470,6 +486,8 @@ export default {
           }
           case 'scene': {
             appendSceneCard(evt);
+            // 时间轴面板开着时跟着刷新：新场次是它唯一的数据增长来源。
+            refreshTimelinePanels();
             break;
           }
           case 'world_tick': {
@@ -556,6 +574,11 @@ export default {
               memStats = { ...(memStats || {}), ...evt.stats };
               paintRing();
             }
+            break;
+          case 'state':
+            // 只把服务端投影好的展示字段交给状态条；完整账本不参与前端渲染。
+            statusView = evt.player_view || null;
+            paintStatusBar();
             break;
           case 'summary': {
             // 前情提要：best-effort。成功时给一条轻提示，失败静默（下一拍会再判）。
@@ -1052,9 +1075,11 @@ export default {
             value: 'segmented',
             icon: 'sparkles',
           },
+          { label: statusBarLabel(), value: 'statusbar', icon: 'layers' },
           { label: '换一批走向', value: 'branches', icon: 'compass' },
           { label: '搜索本段剧情', value: 'search', icon: 'search' },
           { label: '回忆旧事', value: 'recall', icon: 'rewind' },
+          { label: '时间轴', value: 'timeline', icon: 'history' },
           { label: '记忆与上下文', value: 'memory', icon: 'memory' },
           { label: '跑一次校勘', value: 'audit', icon: 'check' },
           { label: '导出', value: 'export', icon: 'download' },
@@ -1064,9 +1089,11 @@ export default {
       });
       if (action === 'continue') send({ silent: true, generateBranches: true });
       else if (action === 'segmented') toggleSegmentation();
+      else if (action === 'statusbar') toggleStatusBar();
       else if (action === 'branches') regenerateBranches();
       else if (action === 'search') openSearch();
       else if (action === 'recall') openRecall();
+      else if (action === 'timeline') openTimeline();
       else if (action === 'memory') openMemory();
       else if (action === 'audit') {
         try {
@@ -1191,6 +1218,63 @@ export default {
       if (val) val.textContent = `${fmtTokens(used)} / ${fmtTokens(soft)}`;
     }
 
+    /* ---------------------------------------------------------------------
+     * 场景信息条
+     *
+     * 数据来源只有 playerView（服务端 player-view.js 白名单投影）。
+     * 要加展示字段：先改投影并把字段登记进 docs/CONTRACTS.md，再动这里。
+     * ------------------------------------------------------------------- */
+    function statusBarOff() {
+      return detail?.session?.settings?.status_bar === 'off';
+    }
+
+    function statusBarLabel() {
+      return statusBarOff() ? '场景信息条：已关' : '场景信息条：已开';
+    }
+
+    async function toggleStatusBar() {
+      const next = statusBarOff() ? 'on' : 'off';
+      try {
+        const updated = await api.patchSession(sessionId, { settings: { status_bar: next } });
+        if (detail?.session) {
+          detail.session = updated || {
+            ...detail.session,
+            settings: { ...(detail.session.settings || {}), status_bar: next },
+          };
+        }
+        paintStatusBar();
+        toast(next === 'on' ? '已显示场景信息条' : '已收起场景信息条', { type: 'success' });
+      } catch (err) {
+        toast(err.message || '切换失败', { type: 'error' });
+      }
+    }
+
+    function paintStatusBar() {
+      const view = statusView;
+      const line = view ? [view.time, view.place, view.weather].filter(Boolean) : [];
+      const people = view?.present || [];
+      const show = (line.length > 0 || people.length > 0) && !statusBarOff();
+      statusStrip.style.display = show ? '' : 'none';
+      if (!show) return;
+
+      clear(statusSummary);
+      if (line.length) {
+        line.forEach((text, i) => {
+          if (i) statusSummary.appendChild(el('span.status-strip-sep', {}, '·'));
+          statusSummary.appendChild(el('span', {}, text));
+        });
+      } else {
+        statusSummary.appendChild(el('span', {}, `在场 ${people.length} 人`));
+      }
+      if (people.length) statusSummary.appendChild(el('span.status-strip-caret', {}, '▾'));
+
+      clear(statusDetail);
+      if (people.length) {
+        statusDetail.appendChild(el('span.status-strip-key', {}, '在场'));
+        statusDetail.appendChild(el('span.status-strip-people', {}, people.join('、')));
+      }
+    }
+
     function openMemory() {
       openMemoryPanel(sessionId, {
         onUpdate: (s) => {
@@ -1198,6 +1282,18 @@ export default {
           memStats = s;
           paintRing();
           paintCtxMeter();
+        },
+      });
+    }
+
+    function openTimeline() {
+      // 跳轮次前先收起面板：面板是整屏浮层，留着它玩家看不到自己跳到了哪里。
+      // openTimelinePanel 是 async 的，所以这里拿 promise，点击时再取真正的 sheetApi。
+      const pending = openTimelinePanel(sessionId, {
+        card: detail?.card || null,
+        onJump: async (turnNo) => {
+          (await pending)?.close?.();
+          jumpToTurn(turnNo);
         },
       });
     }
@@ -1232,13 +1328,19 @@ export default {
     function appendSceneCard(evt) {
       const body = scroll.querySelector('.play-body');
       if (!body) return;
+      // 服务端发的是 {type:'scene', scene:{...}}；早期这里按扁平字段读过，
+      // 于是场次 id 与轮次范围永远是空串。两种形状都认，避免再错一次。
+      const s = evt.scene || evt;
+      const range = (s.turn_from && s.turn_to) ? `第 ${s.turn_from}-${s.turn_to} 轮` : '';
+      const meta = [s.when_label, s.place].filter(Boolean).join(' · ');
       const card = el('div.scene-card', {},
         el('div.scene-card-head', {},
-          el('span.scene-card-id', {}, evt.scene_id || ''),
-          el('span.scene-card-range', {}, `第 ${evt.turn_from}-${evt.turn_to} 轮`),
+          el('span.scene-card-id', {}, s.scene_id || ''),
+          el('span.scene-card-range', {}, range),
         ),
-        evt.question ? el('div.scene-card-q', {}, `本场在问：${evt.question}`) : null,
-        evt.outcome ? el('div.scene-card-outcome', {}, evt.outcome) : null,
+        meta ? el('div.scene-card-meta', {}, meta) : null,
+        s.question ? el('div.scene-card-q', {}, `本场在问：${s.question}`) : null,
+        s.outcome ? el('div.scene-card-outcome', {}, s.outcome) : null,
       );
       body.appendChild(card);
     }
@@ -1343,6 +1445,8 @@ export default {
     function onSessionsChanged() {
       api.getSession(sessionId).then((d) => {
         detail = d;
+        statusView = d.playerView || null;
+        paintStatusBar();
         updateSub();
       }).catch(() => {});
     }

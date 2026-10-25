@@ -236,7 +236,8 @@ export async function openMemoryPanel(sessionId, opts = {}) {
               await refresh();
             },
           }, '接受'),
-          el('button.btn-sm btn-ghost', {
+          el('button.btn-sm', {
+            class: 'btn-ghost',
             onclick: async () => {
               await api.resolvePatch(sessionId, p.id, 'dismissed');
               await refresh();

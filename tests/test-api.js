@@ -181,6 +181,10 @@ console.log('\n=== 记忆六表 ===');
   const detail = await req('GET', `/api/sessions/${SESSION_ID}`);
   ok(detail.data.card?.title === '接口测试世界', '会话返回冻结的卡片快照');
   ok(detail.data.world_version >= 1, '会话记录模板版本');
+  ok(detail.data.playerView?.time === '午夜前十分钟', '会话返回状态条视图（时间）');
+  ok(detail.data.playerView?.place === '屋子', '会话返回状态条视图（地点）');
+  ok(detail.data.playerView?.present.includes('阿砚'), '状态条在场 id 归一成显示名');
+  ok(!JSON.stringify(detail.data.playerView).includes('疲惫'), '状态条不投影人物心境');
 
   const ws = await req('GET', `/api/sessions/${SESSION_ID}/world-state`);
   ok(ws.status === 200 && Array.isArray(ws.data.changes), '世界状态增量可读');

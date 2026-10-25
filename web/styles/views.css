@@ -1691,11 +1691,12 @@
 }
 .codex-item-head { display: flex; align-items: center; gap: 6px; }
 .codex-item-name { font-size: 12px; font-weight: 600; color: var(--ink); }
-.codex-item-pin, .codex-item-secret {
+.codex-item-pin, .codex-item-secret, .codex-item-muted {
   font-size: 9px; padding: 1px 5px; border-radius: 4px;
 }
 .codex-item-pin { background: var(--accent-soft); color: var(--accent); }
 .codex-item-secret { background: var(--paper-raised); color: var(--ink-4); }
+.codex-item-muted { background: var(--paper-raised); color: var(--ink-4); }
 .codex-item-summary { font-size: 11px; color: var(--ink-2); line-height: 1.7; margin-top: 3px; }
 .codex-item-facets { display: flex; flex-direction: column; gap: 2px; margin-top: 4px; font-size: 10px; color: var(--ink-4); }
 .codex-item-links { margin-top: 4px; font-size: 10px; color: var(--ink-4); }

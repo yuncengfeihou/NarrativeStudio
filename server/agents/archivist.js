@@ -41,6 +41,58 @@ function canonicalize(name, aliasIndex) {
   return hit ? hit.name : n;
 }
 
+/**
+ * 构建「目标声明集合」：史官只能更新这一拍真正进场/已声明的实体。
+ *
+ * 输入都来自装配结果，不由模型声明：卡片（投影后）给作者公理里的实体，
+ * present / codex 给本拍场记单里的条目，账本人物给本世界线已登场过的临时实体；
+ * player 永远允许。未知实体只能走 introduce（见 sanitizeChange）。
+ */
+export function buildDeclaredTargets({
+  card, present = [], codex = [], ledgerCharacters = [], playerName = '',
+} = {}) {
+  const out = new Set();
+  const add = (v) => {
+    if (Array.isArray(v)) { v.forEach(add); return; }
+    if (v && typeof v === 'object') { add(v.id); add(v.name); return; }
+    const s = str(v);
+    if (s) out.add(s);
+  };
+  for (const c of arr(card?.cast)) { add(c.id); add(c.name); add(c.aliases); }
+  for (const e of arr(card?.codex)) { add(e.id); add(e.name); add(e.aliases); }
+  add(present); add(codex); add(ledgerCharacters); add(playerName); add('player');
+  return [...out];
+}
+
+/** 把声明集合归一成可比对的集合（含规范名与实体 id）。null = 不启用白名单。 */
+function declaredSetOf(declaredTargets, aliasIndex) {
+  if (!Array.isArray(declaredTargets)) return null;
+  const set = new Set();
+  for (const raw of declaredTargets) {
+    const name = str(raw);
+    if (!name) continue;
+    set.add(name);
+    const canonical = canonicalize(name, aliasIndex);
+    if (canonical) set.add(canonical);
+    const ref = resolveEntity(name, aliasIndex);
+    if (ref.id) set.add(ref.id);
+    if (ref.name) set.add(ref.name);
+  }
+  return set;
+}
+
+/** 目标是否在声明集合内。未启用白名单（declaredSet 为 null）时一律放行。 */
+function isDeclaredTarget(target, declaredSet, aliasIndex) {
+  if (!declaredSet) return true;
+  const raw = str(target);
+  if (!raw) return false;
+  if (declaredSet.has(raw)) return true;
+  const canonical = canonicalize(raw, aliasIndex);
+  if (canonical && declaredSet.has(canonical)) return true;
+  const ref = resolveEntity(raw, aliasIndex);
+  return !!((ref.id && declaredSet.has(ref.id)) || (ref.name && declaredSet.has(ref.name)));
+}
+
 /** 校验并清洗一条断言。不合法返回 null。 */
 export function sanitizeAssertion(a, aliasIndex) {
   const o = obj(a);
@@ -368,6 +420,54 @@ export function parseArchivistUpdate(content) {
   };
 }
 
+/* ── 解析失败的补救协议 ────────────────────────────────────────────────
+ * 只用于「重试一次」：把坏输出与错误回灌给模型，要求它只重发 JSON。
+ * 不改 system、不新增注入点；正常路径永远不会走到这里。 */
+export function buildArchivistRetryMessages(baseMessages, badContent, error) {
+  const raw = String(badContent || '').slice(0, 2000);
+  return [
+    ...baseMessages,
+    { role: 'assistant', content: raw || '（上一轮回复为空）' },
+    {
+      role: 'user',
+      content: `你上一次的回复无法解析成 JSON（${error || '格式错误'}）。`
+        + '请只输出一个符合要求的 JSON 对象：不要代码块、不要解释、不要任何前后缀；'
+        + '字段与内容按上一条要求重写，能确认的保留，其余留空。',
+    },
+  ];
+}
+
+/** 严格解析：只有顶层是 JSON 对象才算成功；失败返回原因，供重试与留痕。 */
+export function parseArchivistUpdateStrict(content) {
+  const text = escapeRawControlCharsInStrings(String(content || ''));
+  const parsed = tryParseJson(text);
+  if (!isPlainObject(parsed)) {
+    return {
+      ok: false,
+      error: String(content || '').trim() ? '输出不是合法 JSON 对象' : '输出为空',
+      update: { ...EMPTY_UPDATE },
+    };
+  }
+  return { ok: true, error: '', update: parseArchivistUpdate(content) };
+}
+
+/** 合并两次调用的 usage：token 相加、耗时相加、tps 置空（混算没有意义）。 */
+function mergeUsage(a, b) {
+  if (!a) return b || null;
+  if (!b) return a;
+  const out = { ...a };
+  for (const k of ['prompt_tokens', 'completion_tokens', 'total_tokens', 'cached_tokens', 'reasoning_tokens', 'output_chars']) {
+    out[k] = Number(a[k] || 0) + Number(b[k] || 0);
+  }
+  out.duration_ms = Number(a.duration_ms || 0) + Number(b.duration_ms || 0);
+  out.cache_rate = out.prompt_tokens > 0
+    ? Math.round((out.cached_tokens / out.prompt_tokens) * 1000) / 1000
+    : null;
+  out.ttft_ms = a.ttft_ms ?? b.ttft_ms ?? null;
+  out.tps = null;
+  return out;
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 主流程                                                                */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -377,7 +477,8 @@ export function parseArchivistUpdate(content) {
  * @returns {Promise<{applied:object, scene_change:object, uncertain:string[], usage:object|null}>}
  */
 export async function runArchivist({
-  session, world, turnNo, playerText, narrative, branchChoice, options = {}, signal, guard,
+  session, world, turnNo, playerText, narrative, branchChoice, options = {}, declaredTargets = null,
+  signal, guard,
 }) {
   const cfg = config.agents.archivist;
   const sessionId = session?.id;
@@ -396,92 +497,157 @@ export async function runArchivist({
     .join('\n');
   const openThreads = getThreads(sessionId, { branchId, status: 'open', limit: 12 }).map((t) => t.title);
 
-  const res = await chat({
-    messages: [
-      { role: 'system', content: archivistSystemPrompt() },
-      {
-        role: 'user',
-        content: archivistUserPrompt({
-          turnNo: no, playerText, branchChoice, narrative,
-          castIndex, codexIndex, openThreads, playerName: card.player?.name,
-        }),
-      },
-    ],
+  const baseMessages = [
+    { role: 'system', content: archivistSystemPrompt() },
+    {
+      role: 'user',
+      content: archivistUserPrompt({
+        turnNo: no, playerText, branchChoice, narrative,
+        castIndex, codexIndex, openThreads, playerName: card.player?.name,
+      }),
+    },
+  ];
+  const callOpts = {
     temperature: options.temperature ?? cfg.temperature,
     maxTokens: options.maxTokens ?? cfg.maxTokens,
     reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
     model: options.model ?? cfg.model ?? undefined,
     responseFormat: { type: 'json_object' },
     signal,
-  });
+  };
 
-  const update = parseArchivistUpdate(res.content);
+  const res = await chat({ messages: baseMessages, ...callOpts });
+  let usage = res.usage || null;
+  let parsed = parseArchivistUpdateStrict(res.content);
+  let retried = false;
+  if (!parsed.ok) {
+    // 解析失败回灌一次：只重发 JSON，不改提示词结构。仍失败则写一条 failed patch，
+    // 让「这一轮记忆没落」在审计里可见，而不是静默当空提案。
+    retried = true;
+    const retry = await chat({
+      messages: buildArchivistRetryMessages(baseMessages, res.content, parsed.error),
+      ...callOpts,
+    });
+    usage = mergeUsage(usage, retry.usage);
+    parsed = parseArchivistUpdateStrict(retry.content);
+    if (!parsed.ok) {
+      addPatch(sessionId, {
+        branch_id: branchId, agent: 'archivist', kind: 'archivist_parse_failed',
+        turn_no: no, status: 'failed', severity: 'warn',
+        payload: { error: parsed.error, retried: true, preview: String(retry.content || '').slice(0, 400) },
+      });
+      return {
+        applied: {
+          assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
+          relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
+        },
+        scene_change: { ...EMPTY_UPDATE.scene_change },
+        uncertain: [],
+        usage,
+        parse_failed: true,
+        retried,
+      };
+    }
+  }
+  const update = parsed.update;
 
   // 分支守卫：旁路调用期间用户可能 rollback / rewrite。分支变了就整批丢弃，
   // 不让旧线的提案写进新线（新线会从自己的分叉点状态重建）。
   if (typeof guard === 'function' && !guard()) {
     addPatch(sessionId, {
-      branchId, agent: 'archivist', kind: 'stale', turn_no: no, status: 'stale',
+      branch_id: branchId, agent: 'archivist', kind: 'stale', turn_no: no, status: 'stale',
       severity: 'info', payload: { reason: 'branch changed during archivist call' },
     });
     return {
       applied: {
         assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
-        relations: 0, threads: 0, voices: 0, ledger: false,
+        relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
       },
       scene_change: update.scene_change, uncertain: update.uncertain,
-      usage: res.usage || null, stale: true,
+      usage, stale: true,
     };
   }
 
   const applied = applyArchivistUpdate({
     sessionId, branchId, turnNo: no, update, aliasIndex, playerName: card.player?.name || '',
+    declaredTargets,
   });
-  return { applied, scene_change: update.scene_change, uncertain: update.uncertain, usage: res.usage || null };
+  return { applied, scene_change: update.scene_change, uncertain: update.uncertain, usage };
 }
 
 /**
  * 确定性应用史官提案。所有写入都在这里发生，全部可回放、可审计。
  */
 export function applyArchivistUpdate({
-  sessionId, branchId, turnNo, update, aliasIndex = [], playerName = '',
+  sessionId, branchId, turnNo, update, aliasIndex = [], playerName = '', declaredTargets = null,
 }) {
   const applied = {
     assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
-    relations: 0, threads: 0, voices: 0, ledger: false,
+    relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
   };
+  // 目标声明：只允许更新已登场/已声明的实体。未提供 declaredTargets 时不启用（内部/测试兼容）。
+  const declaredSet = declaredSetOf(declaredTargets, aliasIndex);
+  const skipped = [];
+  const skipTarget = (kind, target) => { skipped.push({ kind, target: str(target) }); };
+
+  // 同一批提案里，模型可能先写新角色的账本/状态/关系，再把 introduce 放进 changes。
+  // 先扫一遍 introduce 纳入声明集合，避免「同拍引入的实体被自己的提案拒掉」。
+  if (declaredSet) {
+    for (const raw of update.changes || []) {
+      const c = sanitizeChange(raw, { aliasIndex, playerName });
+      if (c && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
+    }
+  }
 
   /* ---- 断言：冲突时旧断言失效，不删除 ---- */
   for (const raw of update.assertions || []) {
     const a = sanitizeAssertion(raw, aliasIndex);
     if (!a) continue;
+    if (!isDeclaredTarget(a.subject, declaredSet, aliasIndex)) { skipTarget('assertion', a.subject); continue; }
     const conflicts = findConflictingAssertions(sessionId, {
       branchId, subject: a.subject, predicate: a.predicate, object: a.object, validFrom: turnNo,
     });
     const id = addAssertion(sessionId, {
-      branchId, ...a, valid_from: turnNo, asserted_turn: turnNo, source_turn: turnNo,
+      branch_id: branchId, ...a, valid_from: turnNo, asserted_turn: turnNo, source_turn: turnNo,
     });
     for (const c of conflicts) {
       invalidateAssertion(sessionId, c.id, { validTo: turnNo, supersededBy: id });
       applied.assertions_invalidated++;
     }
     addPatch(sessionId, {
-      branchId, agent: 'archivist', kind: 'assertion', turn_no: turnNo, status: 'applied',
+      branch_id: branchId, agent: 'archivist', kind: 'assertion', turn_no: turnNo, status: 'applied',
       payload: a, evidence: a.evidence,
     });
     applied.assertions++;
   }
 
   /* ---- 人物状态：按字段可寻址，局部更新 ---- */
-  // states 与 ledger.characters 可能写同一个字段，以 states 为准，按 (who, field) 去重
+  // states 与 ledger.characters 可能写同一个字段，以 states 为准，按 (who, field) 去重。
+  // 目标声明：越界人物既不进状态表，也不进账本；逐条留痕，不静默丢。
+  const ledgerDelta = { ...obj(update.ledger) };
+  if (declaredSet && ledgerDelta.characters) {
+    const declaredChars = {};
+    for (const [who, fields] of Object.entries(obj(ledgerDelta.characters))) {
+      if (isDeclaredTarget(who, declaredSet, aliasIndex) || (playerName && who === playerName)) {
+        declaredChars[who] = fields;
+      } else {
+        skipTarget('ledger', who);
+      }
+    }
+    ledgerDelta.characters = declaredChars;
+  }
   const stateItems = [];
   const seen = new Set();
   for (const s of (update.states || []).map((s) => sanitizeState(s, aliasIndex))) {
     if (!s) continue;
+    if (!isDeclaredTarget(s.who, declaredSet, aliasIndex) && !(playerName && s.who === playerName)) {
+      skipTarget('state', s.who);
+      continue;
+    }
     stateItems.push(s);
     seen.add(`${s.who}::${s.field}`);
   }
-  for (const [who, fields] of Object.entries(update.ledger?.characters || {})) {
+  for (const [who, fields] of Object.entries(ledgerDelta.characters || {})) {
     for (const [field, value] of Object.entries(fields)) {
       if (!str(value)) continue;
       const s = sanitizeState({ who, field, value }, aliasIndex);
@@ -514,6 +680,9 @@ export function applyArchivistUpdate({
     const from = canonicalize(r.from, aliasIndex);
     const to = canonicalize(r.to, aliasIndex);
     if (!from || !to || from === to) continue;
+    const fromOk = isDeclaredTarget(from, declaredSet, aliasIndex);
+    const toOk = isDeclaredTarget(to, declaredSet, aliasIndex);
+    if (!fromOk || !toOk) { skipTarget('relation', fromOk ? to : from); continue; }
     upsertRelation(sessionId, {
       branch_id: branchId,
       from, to,
@@ -563,7 +732,7 @@ export function applyArchivistUpdate({
     const who = canonicalize(q.who, aliasIndex);
     const text = str(q.text);
     if (!who || !text || text.length > 60) continue;
-    addVoice(sessionId, { branchId, who, text, turn_no: turnNo, kind: 'line' });
+    addVoice(sessionId, { branch_id: branchId, who, text, turn_no: turnNo, kind: 'line' });
     applied.voices++;
   }
 
@@ -571,6 +740,11 @@ export function applyArchivistUpdate({
   for (const raw of update.changes || []) {
     const c = sanitizeChange(raw, { aliasIndex, playerName });
     if (!c) continue;
+    // introduce 是唯一允许新实体的入口（且已限定 cast/codex）；其余变更受目标声明约束。
+    if (declaredSet && c.op !== 'introduce' && !isDeclaredTarget(c.entity_id, declaredSet, aliasIndex)) {
+      skipTarget('change', c.entity_id);
+      continue;
+    }
     addWorldState(sessionId, {
       branch_id: branchId,
       entity_kind: c.kind,
@@ -587,11 +761,12 @@ export function applyArchivistUpdate({
       status: 'applied', payload: c, evidence: str(obj(raw).evidence).slice(0, 120),
     });
     applied.changes++;
+    if (declaredSet && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
   }
 
   /* ---- 账本合并 ---- */
   const old = getState(sessionId, { branchId, atTurn: turnNo });
-  const delta = update.ledger || {};
+  const delta = ledgerDelta;
   const scene = update.scene_change || {};
 
   // 地点名能对上辞书里的 place 时，自动补 place_id；这让「当前地点」加分与
@@ -627,8 +802,18 @@ export function applyArchivistUpdate({
   /* ---- 未确定项：交给人，不当事实 ---- */
   for (const u of update.uncertain || []) {
     addPatch(sessionId, {
-      branchId, agent: 'archivist', kind: 'uncertain', turn_no: turnNo, status: 'open',
+      branch_id: branchId, agent: 'archivist', kind: 'uncertain', turn_no: turnNo, status: 'open',
       payload: { text: u }, severity: 'minor',
+    });
+  }
+
+  /* ---- 目标声明：越界提案留痕（不静默丢，也不阻断同批合法写入） ---- */
+  applied.skipped = skipped.length;
+  if (skipped.length) {
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'skipped_targets', turn_no: turnNo,
+      status: 'skipped', severity: 'warn', evidence: 'declared-targets',
+      payload: { total: skipped.length, items: skipped.slice(0, 50) },
     });
   }
 

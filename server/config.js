@@ -25,32 +25,35 @@ export const config = {
   // ---- Context / memory budget ----
   //
   // v4：提示词是「渲染」出来的，不是「检索」出来的。
-  //   系统层 = 契约 + 命题 + 宪章 + 世界索引（一个会话内几乎不变，吃前缀缓存）
-  //   原文层 = 最近若干轮逐字（只追加）
+  //   系统层 = 契约 + 命题 + 宪章 + 世界索引（**只读卡快照，会话内逐字节不变**）
+  //   原文层 = 当前场次的全部回合逐字（只追加）
   //   场记单 = 当前这一刻的世界状态（每场变一次，放在尾部注意力最强处）
   // 没有词条配额、没有导演卡配额、没有检索配额——那三层在 v4 里不存在。
+  //
+  // 预算口径：`tokens.js` 已按真实上游标定（TOKEN_SCALE=0.72），
+  // 下列数字与上游 prompt_tokens 基本同尺度，不再是「虚高的配额」。
   context: {
     maxTokens: int(env.CONTEXT_MAX_TOKENS, 200000),
-    softTokens: int(env.CONTEXT_SOFT_TOKENS, 52000),
+    softTokens: int(env.CONTEXT_SOFT_TOKENS, 64000),
+    // 超硬上限策略：fail（默认）= 拒绝本轮并给出处置建议；truncate = 旧行为，
+    // 从最长非 system 消息截断 70% 并记 degraded='over_hard_cap'（调试/应急用，会送半句话）。
+    overHardCap: String(env.CONTEXT_OVER_HARD_CAP || 'fail').toLowerCase() === 'truncate'
+      ? 'truncate'
+      : 'fail',
 
     // 每层 token 配额（软上限）。装配器按此逐层裁剪，不会互相挤占。
     layerBudget: {
-      system: int(env.BUDGET_SYSTEM, 3200),      // 契约 + 命题 + 宪章 + 世界索引
-      summary: int(env.BUDGET_SUMMARY, 1800),    // 前情提要（滚动摘要）
-      recent: int(env.BUDGET_RECENT, 9000),      // 最近原文（逐字；由摘要沉淀控制，不做字符串截断）
-      scene: int(env.BUDGET_SCENE, 2400),        // 场记单
-      retrieval: int(env.BUDGET_RETRIEVAL, 600), // 模型主动检索到的辞书全文（当拍）
+      system: int(env.BUDGET_SYSTEM, 3400),      // 契约 + 命题 + 宪章 + 世界索引 + 主角（canon）
+      // 场次索引：长程记忆的载体。一行一场、只追加、永不互相改写。
+      // 起手 1800（约 24 行 major 或 40 行 normal），场数多了靠降级而不是硬砍。
+      archive: int(env.BUDGET_ARCHIVE, 1800),
+      // 最近 1–2 场的细节：放在原文之后、场记单之前，贴近生成点。
+      archiveDetail: int(env.BUDGET_ARCHIVE_DETAIL, 900),
+      recent: int(env.BUDGET_RECENT, 24000),     // 当前场次逐字原文（按场次边界，不做字符串截断）
+      scene: int(env.BUDGET_SCENE, 3000),        // 场记单（运行态 + 辞书 + 回声 + 原声）
+      retrieval: int(env.BUDGET_RETRIEVAL, 1000), // 模型主动检索到的辞书全文（当拍）
       current: int(env.BUDGET_CURRENT, 2000),    // 本轮输入 + 尾注
     },
-
-    // 前情提要：按 token 水位批量沉淀，不按固定轮数。
-    // 原文窗口 = 摘要边界之后的全部回合；超过 high 时把最旧一批压进摘要，
-    // 压到 low 以下，并至少保留 minRawTurns 轮逐字原文。
-    summaryHighTokens: int(env.SUMMARY_HIGH_TOKENS, 12000),
-    summaryLowTokens: int(env.SUMMARY_LOW_TOKENS, 8000),
-    summaryMinRawTurns: int(env.SUMMARY_KEEP_RECENT, 4),
-    summaryMaxRawTurns: int(env.SUMMARY_MAX_RAW_TURNS, 12),
-    summaryMinChars: int(env.SUMMARY_MIN_CHARS, 2000),
 
     // 辞书主动检索：auto = 只在大卡上启用；on/off 可被会话 settings.codex_retrieval 覆盖。
     retrievalMinCodex: int(env.RETRIEVAL_MIN_CODEX, 24),
@@ -64,7 +67,10 @@ export const config = {
     continuityEvery: int(env.CONTINUITY_EVERY, 10),   // 每 N 轮跑一次校勘
     continuityMaxApplied: int(env.CONTINUITY_MAX_APPLIED, 20), // 单次校勘最多自动落库几条
     worldTickEvery: int(env.WORLD_TICK_EVERY, 8),     // 每 N 轮跑一次世界呼吸
-    sceneEvery: int(env.SCENE_EVERY, 0),              // >0 时按固定轮数强制切场
+    // 强制切场：>0 时按固定轮数封场。0 = 只按「地点变化」切场，会导致
+    // 角色在一个地点待 100 轮就一场都不关，「最近一场」永远未归档。
+    sceneEvery: int(env.SCENE_EVERY, 12),
+    sceneMaxTokens: int(env.SCENE_MAX_TOKENS, 20000), // 单场原文超过这个就强制封场
   },
 
   // ---- 分段演绎（P1-1 第一阶段） ----
@@ -102,12 +108,6 @@ export const config = {
       temperature: float(env.SCENE_KEEPER_TEMPERATURE, 0.3),
       maxTokens: int(env.SCENE_KEEPER_MAX_TOKENS, 10000),
       model: env.SCENE_KEEPER_MODEL || null,
-    },
-    summarizer: {
-      reasoningEffort: env.SUMMARY_EFFORT || 'low',
-      temperature: float(env.SUMMARY_TEMPERATURE, 0.3),
-      maxTokens: int(env.SUMMARY_MAX_TOKENS, 10000),
-      model: env.SUMMARY_MODEL || null,
     },
     retrieval: {
       reasoningEffort: env.RETRIEVAL_EFFORT || 'low',

@@ -732,6 +732,7 @@ export default {
           el('span.codex-edit-type', {}, (CODEX_TYPES.find((t) => t[0] === e.type) || ['custom', '其他'])[1]),
           el('span.codex-edit-name', {}, e.name || '（未命名）'),
           e.pinned ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '钉选') : null,
+          e.muted ? el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, '静音') : null,
           e.reveal === 'secret' ? el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, '未解') : null,
           el('span.codex-edit-chev', {}, icon('chevronRight', { size: 12 })),
         );
@@ -751,7 +752,7 @@ export default {
         : {
           id: '', type: 'concept', name: '', aliases: [], tags: [],
           summary: '', facets: { sensory: '', rules: [], consequences: [], history: '' },
-          links: [], reveal: 'public', detail: '', parent_id: '',
+          links: [], reveal: 'public', detail: '', parent_id: '', muted: false,
         };
 
       const nameInput = el('input.field', { value: draft.name || '', placeholder: '名称（如「司楼」）' });
@@ -795,6 +796,17 @@ export default {
         el('option', { value: 'secret', selected: draft.reveal === 'secret' }, '未解（只引擎知道，不得说破）'),
       );
 
+      // 静音：作者显式关掉自动进场。它不是「删除」——条目仍在卡里，模型仍可主动检索到。
+      const mutedSw = el('div.switch.is-sm', {
+        role: 'switch', 'aria-checked': String(!!draft.muted), tabindex: '0',
+        title: '静音：不进世界索引与场记单候选',
+      }, el('div.switch-knob'));
+      mutedSw.addEventListener('click', () => {
+        draft.muted = !draft.muted;
+        mutedSw.setAttribute('aria-checked', String(draft.muted));
+        markDirty();
+      });
+
       openSheet({
         title: entry ? '编辑辞书条目' : '添加辞书条目',
         confirmText: entry ? '保存' : '添加',
@@ -803,6 +815,10 @@ export default {
           b.appendChild(field('名称', nameInput));
           b.appendChild(field('别名', aliasInput));
           b.appendChild(el('div.field-row', {}, field('类型', typeSelect), field('可见性', revealSelect)));
+          b.appendChild(el('div',
+            { style: 'display:flex;align-items:center;gap:8px;font-size:11px;color:var(--ink-3);margin:2px 0 8px;' },
+            mutedSw,
+            el('span', {}, '静音：不进自动注入（世界索引与场记单不自动列出；仍可被模型主动检索）')));
           b.appendChild(field('一句话摘要', summaryInput));
           b.appendChild(field('规则', rulesInput));
           b.appendChild(field('后果', consInput));
@@ -829,6 +845,7 @@ export default {
             links: split(linksInput.value),
             parent_id: parentInput.value.trim(),
             reveal: revealSelect.value,
+            muted: !!draft.muted,
             facets: {
               sensory: sensoryInput.value.trim(),
               rules: split(rulesInput.value),

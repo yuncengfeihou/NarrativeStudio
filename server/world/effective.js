@@ -11,6 +11,7 @@
 import {
   CAST_PATHS, CODEX_PATHS, PLAYER_PATHS, WORLD_PATHS, LIST_PATH_SET as LIST_PATHS,
 } from './state-paths.js';
+import { applyFates } from './fates.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const asArray = (v) => (Array.isArray(v) ? v : []);
@@ -244,7 +245,7 @@ function applyDelta(world, delta) {
  * @param {Array}  deltas    getWorldState(session, { branchId, atTurn }) 的结果
  * @returns {object} 世界卡形状的 effective world
  */
-export function buildEffectiveWorld(card, deltas = []) {
+export function buildEffectiveWorld(card, deltas = [], fates = []) {
   const world = {
     ...card,
     cast: (card.cast || []).map(cloneCast),
@@ -264,6 +265,20 @@ export function buildEffectiveWorld(card, deltas = []) {
     .sort((a, b) => (Number(a.valid_from) || 0) - (Number(b.valid_from) || 0)
       || (Number(a.id) || 0) - (Number(b.id) || 0));
 
+  // 运行期增量先落，因为 introduce 会创建后续阶段要作用的实体。
   for (const d of ordered) applyDelta(world, d);
+
+  // 优先级：运行期 world_state > fates > 卡初始值。
+  // fates 代表「按条件解锁的预置增量」，语义上就是 valid_from 由条件表达式决定的
+  // world_state delta。运行期已经显式写过的路径，fates 不得覆盖——否则玩家/史官
+  // 在剧情里造就的变化会被卡里的预设轨迹抹掉。
+  if (fates && fates.length) {
+    const touched = new Set();
+    for (const d of ordered) {
+      if (d.path) touched.add(`${d.entity_id}::${d.path}`);
+    }
+    applyFates(world, fates, { touched });
+  }
+
   return world;
 }

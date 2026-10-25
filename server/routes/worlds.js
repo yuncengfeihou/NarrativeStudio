@@ -25,8 +25,7 @@ import { createSessionWithSettings } from '../agents/orchestrator.js';
 export const worldsRouter = Router();
 
 /** 从卡片生成会话的初始 settings。 */
-function settingsFromWorld(world, overrides = {}) {
-  const card = normalizeCard(world.card || {});
+function settingsFromWorld(world, overrides = {}) {  const card = normalizeCard(world.card || {});
   return {
     world_id: world.id,
     title: overrides.title || card.title || world.title,
@@ -35,6 +34,15 @@ function settingsFromWorld(world, overrides = {}) {
     style_tags: card.genre,
     ...overrides,
   };
+}
+
+/**
+ * 辞书投影给前端的形状：muted 只存在 card_json（投影表没有这一列），读出时从卡里合并回来。
+ * 写入仍走 saveWorld（编辑器整卡保存），不要为它加 PATCH 接口。
+ */
+function codexView(world) {
+  const mutedById = new Map((world.card?.codex || []).map((e) => [e.id, !!e.muted]));
+  return getCodex(world.id).map((c) => ({ ...c, muted: !!mutedById.get(c.codex_id) }));
 }
 
 worldsRouter.get('/worlds', (req, res) => {
@@ -74,7 +82,7 @@ worldsRouter.get('/worlds/:id', (req, res) => {
   res.json({
     ...world,
     card: normalizeCard(world.card || {}),
-    codex: getCodex(world.id),
+    codex: codexView(world),
     sessions: listSessions({ worldId: world.id }),
   });
 });
@@ -109,7 +117,7 @@ worldsRouter.post('/worlds', (req, res) => {
     card,
     source: body.source || card.source || null,
   });
-  res.status(201).json({ ...world, codex: getCodex(world.id) });
+  res.status(201).json({ ...world, codex: codexView(world) });
 });
 
 worldsRouter.patch('/worlds/:id', (req, res) => {
@@ -127,7 +135,7 @@ worldsRouter.patch('/worlds/:id', (req, res) => {
     card,
     source: body.source ?? existing.source,
   });
-  res.json({ ...world, codex: getCodex(world.id) });
+  res.json({ ...world, codex: codexView(world) });
 });
 
 worldsRouter.delete('/worlds/:id', (req, res) => {
@@ -144,7 +152,7 @@ worldsRouter.post('/worlds/:id/codex/:codexId/pin', (req, res) => {
   if (!world) return res.status(404).json({ error: { message: 'world not found' } });
   const pinned = !!req.body?.pinned;
   setCodexPinned(world.id, req.params.codexId, pinned);
-  res.json({ codex: getCodex(world.id) });
+  res.json({ codex: codexView(world) });
 });
 
 /* ------------------------------- 开局 -------------------------------- */

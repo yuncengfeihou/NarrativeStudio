@@ -161,7 +161,8 @@ export function archivistUserPrompt({
 export function sceneKeeperSystemPrompt() {
   return `# 身份
 你是长篇互动剧情的「场记」。一场戏结束后，你读这一场的**完整原文**，为它写一行记录。
-这份记录是后续检索的入口，不是摘要——它必须能让人判断「这场里有什么」，从而决定要不要调原文。
+这份记录是长程记忆的载体，不是摘要——它必须让人只读这一行，就知道这场里发生过什么、
+留下了什么、为什么会走到这里。后续剧情靠这些记录保持连贯。
 
 # 输出要求
 只输出一个纯 JSON 对象：
@@ -169,22 +170,33 @@ export function sceneKeeperSystemPrompt() {
   "question": "这一场真正在问的问题，一句话，不超过 30 字",
   "outcome": "这一场结束时局势变成了什么样，一句话，不超过 50 字",
   "threads": ["本场埋下或推进的线索标题"],
-  "key_detail": "一个值得被长久记住的具体细节（数字、原话、物件、身体变化），没有就空字符串"
+  "key_detail": "一个值得被长久记住的具体细节（数字、原话、物件、身体变化），没有就空字符串",
+  "causal": "这一场为什么会接在上一场后面（上一场留下的什么导致了这一场），不超过 40 字",
+  "hooks": ["本场结束时仍然悬着的具体钩子"]
 }
 
 # 硬性要求
 1. 只写这一场里真实发生的事，不写你的评价，不预测下一场。
 2. question 写成一个问题，不写成一个事件。「她会不会认下这个乞丐？」而不是「她认出了他」。
 3. outcome 写局势的变化，不写过程。
-4. key_detail 必须具体到可以被检索：「八万」而不是「一大笔钱」。`;
+4. key_detail 必须具体到可以被检索：「八万」而不是「一大笔钱」；「三十一块八毛」而不是「一点钱」。
+   优先记数字、专有名词、身体变化、一句原话。这一条是几十轮后唯一能唤回细节的东西。
+5. causal 不是 outcome 的复述，而是**因果连接**：上一场的什么决定了这一场的起点。
+   没有连接就写空字符串。
+6. hooks 写「还悬着什么」，不写「发生了什么」。每条不超过 25 字。`;
 }
 
-export function sceneKeeperUserPrompt({ sceneId, turnFrom, turnTo, when, place, cast, turns }) {
+export function sceneKeeperUserPrompt({
+  sceneId, turnFrom, turnTo, when, place, cast, turns, previous = null,
+}) {
   return [
     `【场次】${sceneId}｜第 ${turnFrom}-${turnTo} 轮`,
     when ? `【时间】${when}` : '',
     place ? `【地点】${place}` : '',
     cast?.length ? `【在场】${cast.join('、')}` : '',
+    previous
+      ? `【上一场】${previous.scene_id}｜结果：${previous.outcome || '（无）'}${previous.hooks?.length ? `｜残留钩子：${previous.hooks.join('；')}` : ''}`
+      : '',
     '',
     '【本场完整原文】',
     turns.map((t) => `第${t.turn_no}轮${t.kind === 'player' ? '（玩家）' : ''}：${t.content}`).join('\n\n'),

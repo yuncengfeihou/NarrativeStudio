@@ -241,12 +241,15 @@ export function getDb() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_branches ON branches(session_id, branch_id);
 
     -- 场次记录：从完整原文重写，不是摘要的摘要。
+    -- 这是长程记忆的载体：它取代「一份滚动摘要」，每场一行、只追加、永不互相改写。
+    -- key_detail / causal / hooks 是长程召回的关键：前者是可检索的具体细节，
+    -- 后者回答「这一场为什么接在上一场后面」。
     CREATE TABLE IF NOT EXISTS scenes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       branch_id TEXT NOT NULL DEFAULT 'main',
       scene_id TEXT NOT NULL,
-      level INTEGER NOT NULL DEFAULT 1,
+      level INTEGER NOT NULL DEFAULT 1,          -- 1 = 场；2 = 幕（每 10 场聚合）；3 = 卷
       turn_from INTEGER NOT NULL,
       turn_to INTEGER NOT NULL,
       when_label TEXT NOT NULL DEFAULT '',
@@ -255,7 +258,11 @@ export function getDb() {
       cast_json TEXT NOT NULL DEFAULT '[]',
       question TEXT NOT NULL DEFAULT '',
       outcome TEXT NOT NULL DEFAULT '',
+      key_detail TEXT NOT NULL DEFAULT '',       -- 一个值得被记住的具体细节（数字/原话/物件）
+      causal TEXT NOT NULL DEFAULT '',           -- 与上一场的因果连接（为什么走到这里）
+      importance TEXT NOT NULL DEFAULT 'normal', -- major | normal | minor（决定渲染粒度）
       threads_json TEXT NOT NULL DEFAULT '[]',
+      hooks_json TEXT NOT NULL DEFAULT '[]',     -- 本场留下、尚未回收的钩子
       state_json TEXT NOT NULL DEFAULT '{}',
       token_count INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
@@ -348,20 +355,30 @@ export function getDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_patches ON patches(session_id, branch_id, created_at DESC);
 
-    -- 前情提要：滚动摘要，分支级。covers_turn_to 及之前的回合在装配时不再逐字出现。
-    -- 原文永不删除：摘要只影响装配，细节仍可从 turns 检索/回溯。
-    CREATE TABLE IF NOT EXISTS summaries (
+    -- 旁路写入（史官/场记/校勘/世界呼吸/走向）的幂等回执。
+    -- 同一 (session, branch, effect_id) 只落一次：pending = 已认领未完成（可重试），
+    -- applied = 已落库（重复执行直接跳过），failed = 本次失败（可重试），
+    -- stale = 落库前守卫判定分支已失效（旧线整批丢弃，不回写）。
+    CREATE TABLE IF NOT EXISTS effect_receipts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       branch_id TEXT NOT NULL DEFAULT 'main',
-      covers_turn_to INTEGER NOT NULL,
-      text TEXT NOT NULL,
-      prev_id INTEGER,
-      token_count INTEGER NOT NULL DEFAULT 0,
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      agent TEXT NOT NULL,
+      effect_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempt INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
-      UNIQUE(session_id, branch_id, covers_turn_to)
+      applied_at INTEGER,
+      UNIQUE(session_id, branch_id, effect_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_summaries ON summaries(session_id, branch_id, covers_turn_to DESC);
+    CREATE INDEX IF NOT EXISTS idx_effect_receipts ON effect_receipts(session_id, branch_id, status);
+
+    -- 注意：summaries 表已删除。
+    -- 「一份滚动摘要」要求 1056:1 的压缩比，结构上不可能承载千轮，
+    -- 且每轮以上一份摘要为输入（摘要的摘要）违反「原文是唯一真相」。
+    -- 长程记忆改由 scenes（场次记录）+ turns（原文）承担。
 
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
@@ -536,13 +553,28 @@ export function touchSession(id, turnCount) {
 }
 
 /** 累加会话级 token 遥测（每轮把本轮 usage 汇总进 sessions.usage_json）。 */
-export function accumulateUsage(sessionId, usage) {
+/**
+ * 累计会话级 usage。
+ *
+ * `usage.agent` 用于分路统计：narrator / archivist / scene-keeper / continuity /
+ * world-tick / branch / retrieval。旧实现只累计 narrator 一路，
+ * 于是「这一局花了多少 token」「缓存命中率多少」的分母是错的。
+ */
+export function accumulateUsage(sessionId, usage, agent = 'narrator') {
   if (!usage) return null;
   const s = getSession(sessionId);
   if (!s) return null;
   const prev = s.usage || {
     requests: 0, prompt_tokens: 0, completion_tokens: 0, cached_tokens: 0,
     reasoning_tokens: 0, total_ms: 0, first_token_ms: 0, output_chars: 0,
+  };
+  const byAgent = { ...(prev.by_agent || {}) };
+  const a = byAgent[agent] || { requests: 0, prompt_tokens: 0, completion_tokens: 0, cached_tokens: 0 };
+  byAgent[agent] = {
+    requests: a.requests + 1,
+    prompt_tokens: a.prompt_tokens + (usage.prompt_tokens || 0),
+    completion_tokens: a.completion_tokens + (usage.completion_tokens || 0),
+    cached_tokens: a.cached_tokens + (usage.cached_tokens || 0),
   };
   const next = {
     requests: prev.requests + 1,
@@ -553,6 +585,7 @@ export function accumulateUsage(sessionId, usage) {
     total_ms: prev.total_ms + (usage.duration_ms || 0),
     first_token_ms: prev.first_token_ms + (usage.ttft_ms || 0),
     output_chars: prev.output_chars + (usage.output_chars || 0),
+    by_agent: byAgent,
   };
   getDb().prepare(`UPDATE sessions SET usage_json=? WHERE id=?`).run(JSON.stringify(next), sessionId);
   return next;
@@ -1130,23 +1163,33 @@ export function copyBranchState(sessionId, { fromBranch, toBranch, forkTurn = 0 
       `).run(to, sessionId, from, turn);
     }
 
+    // 复制时把 valid_to 裁到分叉点：旧线在分叉之后才发生的失效，在新线上从未发生。
+    // 不裁的话，新分支往回走一步就多出一批「未来才会失效」的状态，
+    // atTurn 查询会返回空集——比没有记忆更糟，因为它自相矛盾。
     d.prepare(`
       INSERT INTO character_states (session_id, branch_id, who, field, value, valid_from, valid_to, updated_turn, created_at)
-      SELECT session_id, ?, who, field, value, valid_from, valid_to, updated_turn, created_at
+      SELECT session_id, ?, who, field, value, valid_from,
+        CASE WHEN valid_to IS NOT NULL AND valid_to > ? THEN NULL ELSE valid_to END,
+        updated_turn, created_at
       FROM character_states
       WHERE session_id=? AND branch_id=? AND valid_from<=?
         AND (valid_to IS NULL OR valid_to>=?)
-    `).run(to, sessionId, from, turn, turn);
+    `).run(to, turn, sessionId, from, turn, turn);
 
+    // 断言同理：旧线在分叉点之后才失效的断言，在新线上应当仍然有效。
+    // status='invalidated' 但 valid_to > forkTurn 的，重置回 active 并清空 valid_to。
     d.prepare(`
       INSERT INTO assertions (session_id, branch_id, subject, predicate, object, valid_from, valid_to,
         asserted_turn, source_turn, confidence, visibility, status, superseded_by, evidence, created_at)
-      SELECT session_id, ?, subject, predicate, object, valid_from, valid_to,
-        asserted_turn, source_turn, confidence, visibility, status, NULL, evidence, created_at
+      SELECT session_id, ?, subject, predicate, object, valid_from,
+        CASE WHEN valid_to IS NOT NULL AND valid_to > ? THEN NULL ELSE valid_to END,
+        asserted_turn, source_turn, confidence, visibility,
+        CASE WHEN status='invalidated' AND (valid_to IS NULL OR valid_to > ?) THEN 'active' ELSE status END,
+        NULL, evidence, created_at
       FROM assertions
       WHERE session_id=? AND branch_id=? AND valid_from<=?
         AND (valid_to IS NULL OR valid_to>?) AND status<>'retracted'
-    `).run(to, sessionId, from, turn, turn);
+    `).run(to, turn, turn, sessionId, from, turn, turn);
 
     d.prepare(`
       INSERT INTO voices (session_id, branch_id, who, text, turn_no, kind, pinned, created_at)
@@ -1154,29 +1197,37 @@ export function copyBranchState(sessionId, { fromBranch, toBranch, forkTurn = 0 
       FROM voices WHERE session_id=? AND branch_id=? AND turn_no<=?
     `).run(to, sessionId, from, turn);
 
+    // 列清单必须与 CREATE TABLE 对齐：漏列的后果不是「少一个字段」，而是
+    // importance 变空 → fork 之后所有历史大事件在时间轴上降级成 normal，
+    // key_detail / causal 变空 → 场次索引渲染掉档。曾经就漏过这四列。
     d.prepare(`
       INSERT INTO scenes (session_id, branch_id, scene_id, level, turn_from, turn_to, when_label, place,
-        place_id, cast_json, question, outcome, threads_json, state_json, token_count, created_at)
+        place_id, cast_json, question, outcome, key_detail, causal, importance,
+        threads_json, hooks_json, state_json, token_count, created_at)
       SELECT session_id, ?, scene_id, level, turn_from, turn_to, when_label, place,
-        place_id, cast_json, question, outcome, threads_json, state_json, token_count, created_at
+        place_id, cast_json, question, outcome, key_detail, causal, importance,
+        threads_json, hooks_json, state_json, token_count, created_at
       FROM scenes WHERE session_id=? AND branch_id=? AND turn_to<=?
     `).run(to, sessionId, from, turn);
 
+    // world_state 同理：被复制行的 valid_to 若落在分叉点之后，就是旧线的未来，必须抹掉。
     d.prepare(`
       INSERT INTO world_state (session_id, branch_id, entity_kind, entity_id, path, op,
         value_json, valid_from, valid_to, source, evidence, created_at)
       SELECT session_id, ?, entity_kind, entity_id, path, op,
-        value_json, valid_from, valid_to, source, evidence, created_at
+        value_json, valid_from,
+        CASE WHEN valid_to IS NOT NULL AND valid_to > ? THEN NULL ELSE valid_to END,
+        source, evidence, created_at
       FROM world_state WHERE session_id=? AND branch_id=? AND valid_from<=?
-    `).run(to, sessionId, from, turn);
+        AND (valid_to IS NULL OR valid_to>?)
+    `).run(to, turn, sessionId, from, turn, turn);
 
-    // 摘要只继承覆盖到分叉点为止的那部分；分叉之后写下的摘要不能被新线看到。
+    // 幂等回执：分叉点之前已 applied 的效果在新分支视为已落库，避免重放；
+    // pending/failed/stale 是旧线在途或已丢弃的回执，不带过去（新线可以从自己的状态重跑）。
     d.prepare(`
-      INSERT INTO summaries (session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
-      SELECT session_id, ?, covers_turn_to, text, NULL, token_count, created_at
-      FROM summaries WHERE session_id=? AND branch_id=? AND covers_turn_to<=?
-      ON CONFLICT(session_id, branch_id, covers_turn_to) DO UPDATE SET
-        text=excluded.text, token_count=excluded.token_count, created_at=excluded.created_at
+      INSERT INTO effect_receipts (session_id, branch_id, turn_no, agent, effect_id, fingerprint, status, attempt, created_at, applied_at)
+      SELECT session_id, ?, turn_no, agent, effect_id, fingerprint, status, attempt, created_at, applied_at
+      FROM effect_receipts WHERE session_id=? AND branch_id=? AND status='applied' AND turn_no<=?
     `).run(to, sessionId, from, turn);
 
     d.exec('COMMIT');
@@ -1195,28 +1246,35 @@ export function addScene(sessionId, scene) {
   const d = getDb();
   const existing = d.prepare(`SELECT id FROM scenes WHERE session_id=? AND branch_id=? AND scene_id=?`)
     .get(sessionId, scene.branch_id || 'main', scene.scene_id);
+  const tokenCount = estimateTokens([
+    scene.question, scene.outcome, scene.key_detail, scene.causal,
+  ].filter(Boolean).join(''));
   if (existing) {
     d.prepare(`
-      UPDATE scenes SET turn_to=?, question=?, outcome=?, cast_json=?, threads_json=?, state_json=?, token_count=?
+      UPDATE scenes SET turn_to=?, question=?, outcome=?, key_detail=?, causal=?, importance=?,
+        cast_json=?, threads_json=?, hooks_json=?, state_json=?, token_count=?
       WHERE id=?
     `).run(
       scene.turn_to, scene.question || '', scene.outcome || '',
+      scene.key_detail || '', scene.causal || '', scene.importance || 'normal',
       JSON.stringify(scene.cast || []), JSON.stringify(scene.threads || []),
-      JSON.stringify(scene.state || {}),
-      estimateTokens(`${scene.question || ''}${scene.outcome || ''}`), existing.id,
+      JSON.stringify(scene.hooks || []), JSON.stringify(scene.state || {}),
+      tokenCount, existing.id,
     );
     return existing.id;
   }
   const info = d.prepare(`
     INSERT INTO scenes (session_id, branch_id, scene_id, level, turn_from, turn_to, when_label, place, place_id,
-      cast_json, question, outcome, threads_json, state_json, token_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      cast_json, question, outcome, key_detail, causal, importance, threads_json, hooks_json, state_json,
+      token_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     sessionId, scene.branch_id || 'main', scene.scene_id, scene.level || 1,
     scene.turn_from, scene.turn_to, scene.when_label || '', scene.place || '', scene.place_id || '',
     JSON.stringify(scene.cast || []), scene.question || '', scene.outcome || '',
-    JSON.stringify(scene.threads || []), JSON.stringify(scene.state || {}),
-    estimateTokens(`${scene.question || ''}${scene.outcome || ''}`), Date.now(),
+    scene.key_detail || '', scene.causal || '', scene.importance || 'normal',
+    JSON.stringify(scene.threads || []), JSON.stringify(scene.hooks || []),
+    JSON.stringify(scene.state || {}), tokenCount, Date.now(),
   );
   return Number(info.lastInsertRowid);
 }
@@ -1227,6 +1285,7 @@ function decorateScene(row) {
     ...row,
     cast: JSON.parse(row.cast_json || '[]'),
     threads: JSON.parse(row.threads_json || '[]'),
+    hooks: JSON.parse(row.hooks_json || '[]'),
     state: JSON.parse(row.state_json || '{}'),
   };
 }
@@ -1261,13 +1320,30 @@ export function latestScene(sessionId, branchId = null) {
 /* v4：断言（带有效期，冲突失效不删除）                                     */
 /* ══════════════════════════════════════════════════════════════════════ */
 
+/**
+ * 分支必须显式给出，缺失直接抛错。
+ *
+ * 历史事故：调用方传 camelCase `branchId`，这里读 `branch_id || 'main'`，
+ * 于是断言/原声/审计三张表全部静默写进废弃分支，模型永远读不到自己刚写的记忆，
+ * 且「冲突失效不删除」因为查写不在同一分支而从未触发过。
+ * 静默兜底比报错危险得多——宁可启动即失败。
+ */
+function requireBranchId(source, where) {
+  const id = source?.branch_id ?? source?.branchId;
+  if (typeof id !== 'string' || !id.trim()) {
+    throw new Error(`${where}: branch_id is required (got ${JSON.stringify(source?.branch_id ?? source?.branchId)})`);
+  }
+  return id;
+}
+
 export function addAssertion(sessionId, a) {
+  const branchId = requireBranchId(a, 'addAssertion');
   const info = getDb().prepare(`
     INSERT INTO assertions (session_id, branch_id, subject, predicate, object, valid_from, valid_to,
       asserted_turn, source_turn, confidence, visibility, status, superseded_by, evidence, created_at)
     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'active', NULL, ?, ?)
   `).run(
-    sessionId, a.branch_id || 'main', String(a.subject || ''), String(a.predicate || ''),
+    sessionId, branchId, String(a.subject || ''), String(a.predicate || ''),
     String(a.object || ''), Number(a.valid_from) || 0, Number(a.asserted_turn) || 0,
     Number(a.source_turn) || 0, Number.isFinite(Number(a.confidence)) ? Number(a.confidence) : 0.9,
     String(a.visibility || 'public'), String(a.evidence || ''), Date.now(),
@@ -1368,11 +1444,12 @@ export function getCharStateMap(sessionId, { branchId = null, atTurn = null } = 
 /* ══════════════════════════════════════════════════════════════════════ */
 
 export function addVoice(sessionId, v) {
+  const branchId = requireBranchId(v, 'addVoice');
   const info = getDb().prepare(`
     INSERT INTO voices (session_id, branch_id, who, text, turn_no, kind, pinned, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    sessionId, v.branch_id || 'main', String(v.who || ''), String(v.text || ''),
+    sessionId, branchId, String(v.who || ''), String(v.text || ''),
     Number(v.turn_no) || 0, String(v.kind || 'line'), v.pinned ? 1 : 0, Date.now(),
   );
   return Number(info.lastInsertRowid);
@@ -1397,14 +1474,24 @@ export function deleteVoice(sessionId, id) {
   return Number(getDb().prepare(`DELETE FROM voices WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
 }
 
-/** 每个 who 取最近 n 条原声，组装成 {who: [text]}。 */
+/**
+ * 每个 who 最近 n 条原声，**最近的在前**，且保留 turn_no。
+ *
+ * 旧实现返回 {who: [text]}，把轮次丢掉了，装配层只好写死 turn_no:0，
+ * 渲染出来是「第0轮」——出处信息是假的，模型无法判断这是什么时候说的话。
+ *
+ * 顺序约定：本函数返回「最新 → 最旧」。需要顺着剧情读的渲染方自行 reverse。
+ * 因为 `perWho` 的语义是「最近 N 条」，slice(0,2) 必须拿到最新的那条。
+ */
 export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
   const rows = getVoices(sessionId, { branchId, limit: 400 });
   const out = {};
   for (const r of rows) {
     if (!r.who) continue;
     out[r.who] = out[r.who] || [];
-    if (out[r.who].length < perWho) out[r.who].push(r.text);
+    if (out[r.who].length < perWho) {
+      out[r.who].push({ text: r.text, turn_no: Number(r.turn_no) || 0, pinned: !!r.pinned });
+    }
   }
   return out;
 }
@@ -1414,11 +1501,12 @@ export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
 /* ══════════════════════════════════════════════════════════════════════ */
 
 export function addPatch(sessionId, p) {
+  const branchId = requireBranchId(p, 'addPatch');
   const info = getDb().prepare(`
     INSERT INTO patches (session_id, branch_id, agent, kind, payload_json, evidence, status, severity, turn_no, applied_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    sessionId, p.branch_id || 'main', String(p.agent || ''), String(p.kind || ''),
+    sessionId, branchId, String(p.agent || ''), String(p.kind || ''),
     JSON.stringify(p.payload ?? {}), String(p.evidence || ''), String(p.status || 'proposed'),
     String(p.severity || 'info'), Number(p.turn_no) || 0,
     p.status === 'applied' ? Date.now() : null, Date.now(),
@@ -1442,6 +1530,80 @@ export function setPatchStatus(sessionId, id, status) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+/* 幂等回执（旁路写入）                                                    */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+const EFFECT_STATUSES = new Set(['pending', 'applied', 'failed', 'stale']);
+
+function decorateEffectReceipt(row) {
+  return row ? { ...row } : null;
+}
+
+export function getEffectReceipt(sessionId, effectId, { branchId = null } = {}) {
+  const branch = branchId || 'main';
+  const row = getDb().prepare(
+    `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=? AND effect_id=?`,
+  ).get(sessionId, branch, effectId);
+  return decorateEffectReceipt(row);
+}
+
+export function listEffectReceipts(sessionId, { branchId = null, status = null, limit = 100 } = {}) {
+  const branch = branchId || 'main';
+  let sql = `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=?`;
+  const params = [sessionId, branch];
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  sql += ` ORDER BY id DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params).map(decorateEffectReceipt);
+}
+
+/**
+ * 认领一个旁路效果。返回 { claimed, status, conflict, receipt }：
+ * - claimed=true：调用方应当执行，并以 applied/failed/stale 落回回执；
+ * - applied/stale：已终结，直接跳过（stale 只属于旧分支，不在新线重放）；
+ * - conflict：同一 effect_id 但输入指纹不同——这是「同一效果换了输入」的 bug，
+ *   不执行也不静默覆盖，交给调用方记录。
+ */
+export function claimEffect({ sessionId, branchId = null, turnNo = 0, agent = '', effectId, fingerprint = '' }) {
+  const branch = branchId || 'main';
+  const fp = String(fingerprint || '');
+  const d = getDb();
+  const existing = d.prepare(
+    `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=? AND effect_id=?`,
+  ).get(sessionId, branch, effectId);
+  if (!existing) {
+    d.prepare(`
+      INSERT INTO effect_receipts (session_id, branch_id, turn_no, agent, effect_id, fingerprint, status, attempt, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?)
+    `).run(sessionId, branch, Number(turnNo) || 0, String(agent || ''), effectId, fp, Date.now());
+    return { claimed: true, status: 'pending', conflict: false, receipt: getEffectReceipt(sessionId, effectId, { branchId: branch }) };
+  }
+  // 同一 effect_id 换了输入指纹就是 bug：无论当前状态如何都先报冲突，不静默覆盖。
+  if (fp && existing.fingerprint && fp !== existing.fingerprint) {
+    return { claimed: false, status: existing.status, conflict: true, receipt: decorateEffectReceipt(existing) };
+  }
+  if (existing.status === 'applied' || existing.status === 'stale') {
+    return { claimed: false, status: existing.status, conflict: false, receipt: decorateEffectReceipt(existing) };
+  }
+  // pending / failed：可重试。
+  d.prepare(`UPDATE effect_receipts SET attempt=attempt+1, fingerprint=?, turn_no=? WHERE id=?`)
+    .run(fp || existing.fingerprint, Number(turnNo) || existing.turn_no, existing.id);
+  return { claimed: true, status: 'pending', conflict: false, receipt: getEffectReceipt(sessionId, effectId, { branchId: branch }) };
+}
+
+/** 落回执。status: applied / failed / stale；pending 只由 claimEffect 产生。 */
+export function settleEffect(sessionId, effectId, { branchId = null, status, turnNo = null, agent = null } = {}) {
+  const branch = branchId || 'main';
+  if (!EFFECT_STATUSES.has(status)) throw new Error(`settleEffect: 非法状态 ${status}`);
+  getDb().prepare(`
+    UPDATE effect_receipts SET status=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END,
+      turn_no=COALESCE(?, turn_no), agent=COALESCE(?, agent)
+    WHERE session_id=? AND branch_id=? AND effect_id=?
+  `).run(status, status, Date.now(), turnNo == null ? null : Number(turnNo), agent, sessionId, branch, effectId);
+  return getEffectReceipt(sessionId, effectId, { branchId: branch });
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 /* v4：分支可见的回合与原文检索                                            */
 /* ══════════════════════════════════════════════════════════════════════ */
 
@@ -1449,66 +1611,6 @@ export function setPatchStatus(sessionId, id, status) {
  * 取某分支可见的回合：分支自己的回合 + 分叉点之前继承来的回合。
  * 回合编号全局递增，回rollback只是换分支，不是删历史。
  */
-/* ══════════════════════════════════════════════════════════════════════ */
-/* v4：前情提要（滚动摘要）                                                */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-/**
- * 写入一份摘要。同一分支/同一覆盖边界重复写入时覆盖（重压安全）。
- * 不删除旧摘要：它们保留在表里，作为「当时怎么概括的」审计记录。
- */
-export function addSummary(sessionId, { branchId = 'main', coversTurnTo, text, prevId = null, tokenCount = null }) {
-  const covers = Number(coversTurnTo);
-  if (!Number.isFinite(covers) || covers < 1) throw new Error('summary coversTurnTo must be >= 1');
-  const body = String(text || '').trim();
-  if (!body) throw new Error('summary text is empty');
-  const tokens = tokenCount ?? estimateTokens(body);
-  const d = getDb();
-  d.prepare(`
-    INSERT INTO summaries (session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(session_id, branch_id, covers_turn_to) DO UPDATE SET
-      text=excluded.text, prev_id=excluded.prev_id, token_count=excluded.token_count, created_at=excluded.created_at
-  `).run(sessionId, branchId, covers, body, prevId ?? null, tokens, Date.now());
-  const row = d.prepare(`SELECT * FROM summaries WHERE session_id=? AND branch_id=? AND covers_turn_to=?`)
-    .get(sessionId, branchId, covers);
-  return row ? decorateSummary(row) : null;
-}
-
-function decorateSummary(row) {
-  return {
-    id: row.id,
-    session_id: row.session_id,
-    branch_id: row.branch_id,
-    covers_turn_to: row.covers_turn_to,
-    text: row.text,
-    prev_id: row.prev_id,
-    token_count: row.token_count,
-    created_at: row.created_at,
-  };
-}
-
-/**
- * 某一轮生效的摘要 = 覆盖边界不超过该轮的最新一份。
- * atTurn 省略时取最新（UI 查看用）；装配必须传当前回合。
- */
-export function getActiveSummary(sessionId, { branchId = 'main', atTurn = null } = {}) {
-  const limit = Number.isInteger(atTurn) ? atTurn : Number.MAX_SAFE_INTEGER;
-  const row = getDb().prepare(`
-    SELECT * FROM summaries
-    WHERE session_id=? AND branch_id=? AND covers_turn_to<=?
-    ORDER BY covers_turn_to DESC, id DESC LIMIT 1
-  `).get(sessionId, branchId, limit);
-  return row ? decorateSummary(row) : null;
-}
-
-/** 摘要历史（记忆面板/调试用）。 */
-export function getSummaries(sessionId, { branchId = 'main', limit = 20 } = {}) {
-  return getDb().prepare(`
-    SELECT * FROM summaries WHERE session_id=? AND branch_id=?
-    ORDER BY covers_turn_to DESC, id DESC LIMIT ?
-  `).all(sessionId, branchId, limit).map(decorateSummary);
-}
 
 /**
  * 当前分支 → 祖先链，每条边带上「祖先可继承到哪一轮」的上限。

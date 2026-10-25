@@ -23,6 +23,7 @@ const arch = await import('../server/agents/archivist.js');
 const orch = await import('../server/agents/orchestrator.js');
 const schema = await import('../server/world/schema.js');
 const effective = await import('../server/world/effective.js');
+const playerView = await import('../server/memory/player-view.js');
 
 let pass = 0;
 let fail = 0;
@@ -42,8 +43,8 @@ console.log('\n=== 断言：冲突失效，不删除 ===');
   store.createSession({ id: sid, title: 't' });
   store.createBranch(sid, { branchId: 'main' });
 
-  const a1 = store.addAssertion(sid, { subject: '凌玥', predicate: '位于', object: '帝都', valid_from: 1, source_turn: 1 });
-  const a2 = store.addAssertion(sid, { subject: '凌玥', predicate: '位于', object: '湘曲', valid_from: 5, source_turn: 5 });
+  const a1 = store.addAssertion(sid, { branch_id: 'main', subject: '凌玥', predicate: '位于', object: '帝都', valid_from: 1, source_turn: 1 });
+  const a2 = store.addAssertion(sid, { branch_id: 'main', subject: '凌玥', predicate: '位于', object: '湘曲', valid_from: 5, source_turn: 5 });
 
   const conflict = store.findConflictingAssertions(sid, {
     branchId: 'main', subject: '凌玥', predicate: '位于', object: '湘曲', validFrom: 5,
@@ -65,7 +66,7 @@ console.log('\n=== 断言：冲突失效，不删除 ===');
   const at9 = store.getAssertions(sid, { branchId: 'main', atTurn: 9 });
   eq(at9.map((a) => a.object), ['湘曲'], '按时间点查询得到新事实');
 
-  store.addAssertion(sid, { subject: '凌玥', predicate: '想要', object: '带走他', valid_from: 6, source_turn: 6 });
+  store.addAssertion(sid, { branch_id: 'main', subject: '凌玥', predicate: '想要', object: '带走他', valid_from: 6, source_turn: 6 });
   eq(store.getAssertions(sid, { branchId: 'main', subject: '凌玥' }).length, 2, '不同谓词不冲突');
 
   store.retractAssertion(sid, a2);
@@ -79,23 +80,23 @@ console.log('\n=== 断言：多值谓词不误判冲突 ===');
   store.createSession({ id: sid, title: 't' });
   store.createBranch(sid, { branchId: 'main' });
 
-  store.addAssertion(sid, { subject: '伍卿', predicate: '知道', object: '玉佩在发光', valid_from: 1, source_turn: 1 });
+  store.addAssertion(sid, { branch_id: 'main', subject: '伍卿', predicate: '知道', object: '玉佩在发光', valid_from: 1, source_turn: 1 });
   const conflict = store.findConflictingAssertions(sid, {
     branchId: 'main', subject: '伍卿', predicate: '知道', object: '凌玥在门外', validFrom: 2,
   });
   eq(conflict.length, 0, '知道 A 与知道 B 不冲突');
 
-  store.addAssertion(sid, { subject: '伍卿', predicate: '知道', object: '凌玥在门外', valid_from: 2, source_turn: 2 });
+  store.addAssertion(sid, { branch_id: 'main', subject: '伍卿', predicate: '知道', object: '凌玥在门外', valid_from: 2, source_turn: 2 });
   const knows = store.getAssertions(sid, { branchId: 'main', subject: '伍卿' })
     .filter((a) => a.predicate === '知道');
   eq(knows.length, 2, '多值事实可以并存');
 
-  store.addAssertion(sid, { subject: '伍卿', predicate: '拥有', object: '无纹玉佩', valid_from: 2, source_turn: 2 });
-  store.addAssertion(sid, { subject: '伍卿', predicate: '拥有', object: '牛车', valid_from: 3, source_turn: 3 });
+  store.addAssertion(sid, { branch_id: 'main', subject: '伍卿', predicate: '拥有', object: '无纹玉佩', valid_from: 2, source_turn: 2 });
+  store.addAssertion(sid, { branch_id: 'main', subject: '伍卿', predicate: '拥有', object: '牛车', valid_from: 3, source_turn: 3 });
   eq(store.getAssertions(sid, { branchId: 'main', subject: '伍卿' })
     .filter((a) => a.predicate === '拥有').length, 2, '拥有多个物品不冲突');
 
-  store.addAssertion(sid, { subject: '伍卿', predicate: '位于', object: '雨街', valid_from: 1, source_turn: 1 });
+  store.addAssertion(sid, { branch_id: 'main', subject: '伍卿', predicate: '位于', object: '雨街', valid_from: 1, source_turn: 1 });
   const move = store.findConflictingAssertions(sid, {
     branchId: 'main', subject: '伍卿', predicate: '位于', object: '凌府', validFrom: 4,
   });
@@ -134,8 +135,9 @@ console.log('\n=== 原声 ===');
   store.addVoice(sid, { branchId: 'main', who: '张兰', text: '去去去', turn_no: 1 });
 
   const map = store.getVoiceMap(sid, { branchId: 'main', perWho: 2 });
-  eq(map['凌玥'], ['第5句', '第4句'], '每人限量取最近');
-  eq(map['张兰'], ['去去去'], '其他人不受影响');
+  eq(map['凌玥'].map((v) => v.text), ['第5句', '第4句'], '每人限量取最近（最新在前）');
+  eq(map['凌玥'].map((v) => v.turn_no), [5, 4], '原声保留真实轮次（不再丢成第 0 轮）');
+  eq(map['张兰'].map((v) => v.text), ['去去去'], '其他人不受影响');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -269,6 +271,40 @@ console.log('\n=== 史官：净化与合并 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 玩家视图：状态条只拿场景字段 ===');
+{
+  const cast = [
+    { id: 'c-lingyue', name: '凌玥', aliases: ['玥姐姐'] },
+    { id: 'c-wuqing', name: '伍卿' },
+  ];
+  const full = {
+    time: '辰时', place: '凌府天井', weather: '细雨',
+    tension: 0.8, last_hook: '玉佩在她袖中发烫',
+    present: ['c-lingyue', ' 伍卿 ', '', null, '玥姐姐'],
+    characters: { 凌玥: { mood: '戒备', goal: '藏起玉佩', condition: '袖口湿了' } },
+    inventory: [{ name: '玉佩', holder: '凌玥' }],
+    quests: [{ goal: '弄清玉佩来历', status: 'active' }],
+    theme_tags: ['雨', '秘密'],
+  };
+  const view = playerView.buildPlayerView(full, { cast });
+
+  eq(Object.keys(view).sort(), ['place', 'present', 'time', 'weather'], '字段白名单只有四个');
+  eq(view.time, '辰时', '时间进视图');
+  eq(view.place, '凌府天井', '地点进视图');
+  eq(view.weather, '细雨', '天气进视图');
+  eq(view.present, ['凌玥', '伍卿'], '在场 id/别名归一成显示名并去重');
+
+  const serialized = JSON.stringify(view);
+  for (const secret of ['戒备', '藏起玉佩', '玉佩', '弄清玉佩来历', '玉佩在她袖中发烫', '0.8', '秘密']) {
+    ok(!serialized.includes(secret), `不投影账本细节：${secret}`);
+  }
+
+  eq(playerView.buildPlayerView(null), { time: '', place: '', weather: '', present: [] }, '空账本给空视图');
+  eq(playerView.buildPlayerView('坏数据').present, [], '非对象账本不抛错');
+  eq(playerView.buildPlayerView({ present: ['陌生路人'] }).present, ['陌生路人'], '不在卡司里的名字原样保留');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 史官：解析容错 ===');
 {
   const good = arch.parseArchivistUpdate(JSON.stringify({
@@ -389,6 +425,96 @@ console.log('\n=== 史官：确定性落库 ===');
   const ledger = store.getState(sid).state;
   eq(ledger.characters['凌玥'].mood, '急切', '账本人物状态落库');
   eq(ledger.last_hook, '她认出他', '账本 last_hook 落库');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 提案白名单：越界目标拒写并留痕 ===');
+{
+  const sid = `declared-${Date.now()}`;
+  const world = {
+    id: `w-${Date.now()}`, title: 't',
+    card: schema.normalizeCard({
+      title: 't',
+      cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }],
+    }),
+  };
+  store.saveWorld(world);
+  store.createSession({ id: sid, title: 't', worldId: world.id });
+  store.createBranch(sid, { branchId: 'main' });
+  const aliasIndex = schema.buildAliasIndex(world.card);
+
+  const declaredTargets = arch.buildDeclaredTargets({
+    card: world.card, present: ['凌玥'], codex: [], ledgerCharacters: [], playerName: '',
+  });
+  ok(declaredTargets.includes('凌玥') && declaredTargets.includes('伍卿'), '声明集合包含卡司');
+  ok(declaredTargets.includes('玥姐姐'), '声明集合包含别名');
+  ok(declaredTargets.includes('player'), '玩家永远允许');
+
+  const r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex, declaredTargets,
+    update: {
+      scene_change: {},
+      ledger: { characters: { 凌玥: { mood: '急切' }, 幽灵甲: { mood: '阴森' } } },
+      assertions: [
+        { subject: '凌玥', predicate: '位于', object: '帝都', confidence: 1 },
+        { subject: '白袍客', predicate: '知道', object: '玉佩', confidence: 1 },
+      ],
+      states: [
+        { who: '伍卿', field: 'condition', value: '湿透' },
+        { who: '陌生人乙', field: 'mood', value: '敌意' },
+      ],
+      relations: [
+        { from: '凌玥', to: '伍卿', kind: '旧识' },
+        { from: '凌玥', to: '路人丙', kind: '敌对' },
+      ],
+    },
+  });
+  eq(r.assertions, 1, '声明内的断言写入');
+  eq(r.states, 2, '声明内的状态写入（凌玥 mood + 伍卿 condition）');
+  eq(r.relations, 1, '声明内的关系写入');
+  eq(r.skipped, 4, '越界的账本人物/断言/状态/关系各 1 条');
+
+  const st = store.getState(sid, { branchId: 'main', atTurn: 1 }).state;
+  eq(st.characters['凌玥'].mood, '急切', '声明内账本人物落库');
+  ok(!st.characters['幽灵甲'], '越界账本人物未落库');
+  ok(!st.characters['陌生人乙'], '越界状态未落库');
+  ok(!store.getAssertions(sid, { branchId: 'main' }).some((a) => a.subject === '白袍客'), '越界断言未落库');
+  ok(!store.getRelations(sid, { branchId: 'main' }).some(
+    (x) => [x.from_name, x.to_name].includes('路人丙'),
+  ), '越界关系未落库');
+
+  const skips = store.listPatches(sid, { limit: 50 }).filter((p) => p.kind === 'skipped_targets');
+  eq(skips.length, 1, '越界项合并成一条 patches 记录');
+  eq(skips[0].status, 'skipped', '状态 skipped，不静默');
+  eq(skips[0].payload.items.length, 4, '明细可审计');
+
+  // 未提供 declaredTargets 时不启用白名单（内部/测试路径保持旧行为）。
+  const legacy = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 2, aliasIndex,
+    update: {
+      scene_change: {},
+      assertions: [{ subject: '白袍客', predicate: '知道', object: '玉佩', confidence: 1 }],
+    },
+  });
+  eq(legacy.assertions, 1, '未提供声明集合时不做白名单');
+  eq(legacy.skipped, 0, '未提供声明集合时无越界计数');
+
+  // 同一批提案里的 introduce 先纳入声明集合：模型可能先写账本/关系，再在 changes 声明引入。
+  const introR = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 3, aliasIndex, declaredTargets,
+    update: {
+      scene_change: {},
+      ledger: { characters: { 新面孔: { mood: '警觉' } } },
+      assertions: [{ subject: '新面孔', predicate: '效忠', object: '凌玥', confidence: 1 }],
+      relations: [{ from: '新面孔', to: '凌玥', kind: '主仆' }],
+      changes: [{ kind: 'cast', op: 'introduce', id: '新面孔', fields: { name: '新面孔', role: '探子' } }],
+    },
+  });
+  eq(introR.skipped, 0, '同批 introduce 的实体不被自己的提案拒掉');
+  eq(introR.changes, 1, 'introduce 落库');
+  eq(introR.assertions, 1, '同批引入的断言落库');
+  eq(introR.relations, 1, '同批引入的关系落库');
+  ok(store.getAssertions(sid, { branchId: 'main' }).some((a) => a.subject === '新面孔'), '同批引入的断言可查');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -661,34 +787,177 @@ console.log('\n=== 定稿：世界线 → 新世界卡 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-console.log('\n=== 前情提要：摘要、覆盖边界、分支复制 ===');
+console.log('\n=== 场次记录：取代滚动摘要的记忆载体 ===');
 {
-  const sid = `sum-${Date.now()}`;
-  store.createSession({ id: sid, title: 'summary' });
+  const sid = `scene-${Date.now()}`;
+  store.createSession({ id: sid, title: 'scene' });
   store.createBranch(sid, { branchId: 'main' });
+
   for (let i = 1; i <= 10; i++) {
     store.addTurn(sid, { turn_no: i, kind: 'player', content: `行动${i}`, branch_id: 'main' });
     store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `正文${i}`, branch_id: 'main' });
   }
 
-  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 5 }), null, '没有摘要时返回 null');
-  const s1 = store.addSummary(sid, { branchId: 'main', coversTurnTo: 4, text: '前四轮摘要' });
-  ok(s1 && s1.covers_turn_to === 4, '摘要写入');
-  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 4 }).text, '前四轮摘要', '覆盖边界内可取');
-  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 3 }), null, '覆盖边界之前不可取');
+  eq(store.getScenes(sid, { branchId: 'main' }).length, 0, '没有封场时场次为空');
 
-  const s2 = store.addSummary(sid, { branchId: 'main', coversTurnTo: 8, text: '前八轮摘要', prevId: s1.id });
-  eq(store.getActiveSummary(sid, { branchId: 'main', atTurn: 10 }).id, s2.id, '取覆盖边界最大的那条');
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 4,
+    place: '雨街', question: '她会不会认下他？', outcome: '她当众认下了他。',
+    key_detail: '三十一块八毛', causal: '', importance: 'major',
+    threads: ['玉佩'], hooks: ['玉佩为什么发光'],
+  });
+  const s1 = store.latestScene(sid, 'main');
+  ok(s1 && s1.scene_id === 'S001', '场次写入成功');
+  eq(s1.key_detail, '三十一块八毛', '关键细节独立成列（不再被拼进 outcome 后截断）');
+  eq(s1.hooks, ['玉佩为什么发光'], '钩子独立存列');
+  eq(s1.causal, '', '因果连接可为空');
+  eq(s1.importance, 'major', '重要度落库');
 
-  store.addSummary(sid, { branchId: 'main', coversTurnTo: 8, text: '前八轮摘要 v2', prevId: s1.id });
-  eq(store.getSummaries(sid, { branchId: 'main' }).length, 2, '同一边界重压不新增行');
-  eq(store.getActiveSummary(sid, { branchId: 'main' }).text, '前八轮摘要 v2', '重压覆盖文本');
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S002', level: 1, turn_from: 5, turn_to: 8,
+    place: '凌府', outcome: '他留下了。',
+  });
+  eq(store.getScenes(sid, { branchId: 'main' }).length, 2, '两场都在');
+  eq(store.latestScene(sid, 'main').scene_id, 'S002', '最新场次正确');
+  eq(store.getSceneAt(sid, 6, 'main').scene_id, 'S002', '按轮次定位场次');
 
-  // fork：只继承覆盖到分叉点为止的摘要
+  // 同一 scene_id 再写只扩展内容，不新增行（追加轮次时的正常路径）。
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S002', level: 1, turn_from: 5, turn_to: 9,
+    place: '凌府', outcome: '他留下了，但没答应。', key_detail: '烫金帖子',
+  });
+  eq(store.getScenes(sid, { branchId: 'main' }).length, 2, '同一场次不新增行');
+  eq(store.latestScene(sid, 'main').turn_to, 9, 'turn_to 被扩展');
+  eq(store.latestScene(sid, 'main').key_detail, '烫金帖子', '内容被更新');
+
+  // fork：场次记录按 turn_to 复制
   store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 5 });
   store.copyBranchState(sid, { fromBranch: 'main', toBranch: 'b2', forkTurn: 5 });
-  eq(store.getActiveSummary(sid, { branchId: 'b2' }).covers_turn_to, 4, '新分支只继承分叉点内的摘要');
-  eq(store.getActiveSummary(sid, { branchId: 'b2' }).text, '前四轮摘要', '继承的摘要内容正确');
+  eq(store.getScenes(sid, { branchId: 'b2' }).length, 1, '只复制分叉点之前已封的场次（S002 的 turn_to=9 > forkTurn=5）');
+  eq(store.getScenes(sid, { branchId: 'b2' })[0].scene_id, 'S001', '复制的是 S001');
+  // 回归：copyBranchState 的列清单曾漏掉 key_detail / causal / importance / hooks_json，
+  // 结果 fork 之后所有历史大事件在时间轴上降级成 normal、细节整段消失。
+  const b2S1 = store.getScenes(sid, { branchId: 'b2' })[0];
+  eq(b2S1.key_detail, '三十一块八毛', 'fork 保留关键细节（时间轴 major 展开依赖它）');
+  eq(b2S1.hooks, ['玉佩为什么发光'], 'fork 保留钩子');
+  eq(b2S1.importance, 'major', 'fork 保留重要度，不被降级成 normal');
+  eq(store.getScenes(sid, { branchId: 'main' }).length, 2, '旧分支场次保持原样');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 摘要层已移除：表与函数都不存在 ===');
+{
+  const hasTable = store.getDb().prepare(
+    `SELECT name FROM sqlite_master WHERE type='table' AND name='summaries'`,
+  ).get();
+  ok(!hasTable, 'summaries 表不存在（长程记忆改由 scenes 承担）');
+  eq(typeof store.addSummary, 'undefined', 'addSummary 已删除');
+  eq(typeof store.getActiveSummary, 'undefined', 'getActiveSummary 已删除');
+  eq(typeof store.getSummaries, 'undefined', 'getSummaries 已删除');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支写入：branch_id 必须显式，缺失即报错（不再静默兜底 main） ===');
+{
+  const sid = `br-req-${Date.now()}`;
+  store.createSession({ id: sid, title: 'brreq' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  const throwsOn = (fn) => {
+    try { fn(); return false; } catch { return true; }
+  };
+  ok(throwsOn(() => store.addAssertion(sid, { subject: 'A', predicate: '位于', object: 'B' })),
+    'addAssertion 缺 branch_id 抛错');
+  ok(throwsOn(() => store.addVoice(sid, { who: 'A', text: 'hi' })), 'addVoice 缺 branch_id 抛错');
+  ok(throwsOn(() => store.addPatch(sid, { agent: 'x', kind: 'y' })), 'addPatch 缺 branch_id 抛错');
+
+  // camelCase 也必须被接受（历史调用方这么传过），但绝不能被兜底成 main。
+  store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 0 });
+  const aCamel = store.addAssertion(sid, { branchId: 'b2', subject: '丙', predicate: '位于', object: '丁', valid_from: 1 });
+  const vCamel = store.addVoice(sid, { branchId: 'b2', who: '丙', text: '一句', turn_no: 1 });
+  const pCamel = store.addPatch(sid, { branchId: 'b2', agent: 'x', kind: 'y' });
+  ok(aCamel > 0 && vCamel > 0 && pCamel > 0, 'camelCase branchId 仍然可用');
+
+  eq(store.getAssertions(sid, { branchId: 'b2' }).map((a) => a.subject), ['丙'], '断言落在指定分支');
+  eq(store.getAssertions(sid, { branchId: 'main' }).length, 0, '没有写进 main');
+  eq(store.getVoices(sid, { branchId: 'b2' }).length, 1, '原声落在指定分支');
+  eq(store.getVoices(sid, { branchId: 'main' }).length, 0, '原声没有写进 main');
+  eq(store.listPatches(sid, { branchId: 'b2' }).length, 1, '审计落在指定分支');
+  eq(store.listPatches(sid, { branchId: 'main' }).length, 0, '审计没有写进 main');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 分支复制：不把旧线「分叉之后才发生的失效」带进新分支 ===');
+{
+  const sid = `fork-vt-${Date.now()}`;
+  store.createSession({ id: sid, title: 'forkvt' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  // 第 1 轮：A 位于「甲」。第 5 轮：A 改到「乙」，甲被失效（valid_to=5）。
+  const a1 = store.addAssertion(sid, {
+    branch_id: 'main', subject: '甲', predicate: '位于', object: '甲地', valid_from: 1, source_turn: 1,
+  });
+  store.addAssertion(sid, {
+    branch_id: 'main', subject: '甲', predicate: '位于', object: '乙地', valid_from: 5, source_turn: 5,
+  });
+  store.invalidateAssertion(sid, a1, { validTo: 5 });
+
+  store.setCharState(sid, { branchId: 'main', who: '甲', field: 'condition', value: '完好', turn: 1 });
+  store.setCharState(sid, { branchId: 'main', who: '甲', field: 'condition', value: '重伤', turn: 5 });
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: '甲', path: 'mood',
+    op: 'set', value: '平静', turn: 1,
+  });
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'cast', entity_id: '甲', path: 'mood',
+    op: 'set', value: '暴怒', turn: 5,
+  });
+
+  // 从第 2 轮分叉（在「甲」失效之前）。
+  store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 2 });
+  store.copyBranchState(sid, { fromBranch: 'main', toBranch: 'b2', forkTurn: 2 });
+
+  const b2Assertions = store.getAssertions(sid, { branchId: 'b2' });
+  eq(b2Assertions.map((a) => a.object), ['甲地'], '分叉后仍能看到当时的事实（甲地被复制为有效）');
+  eq(b2Assertions[0].valid_to, null, '失效时刻没有被带过来');
+  eq(b2Assertions[0].status, 'active', '失效状态被重置为 active');
+
+  const b2At6 = store.getAssertions(sid, { branchId: 'b2', atTurn: 6 });
+  eq(b2At6.map((a) => a.object), ['甲地'], '新分支第 6 轮位置不凭空消失');
+
+  eq(store.getCharStateMap(sid, { branchId: 'b2', atTurn: 6 }).甲.condition, '完好',
+    '新分支人物状态不凭空失效');
+  const b2Mood = store.getWorldState(sid, { branchId: 'b2', atTurn: 6 })
+    .filter((d) => d.path === 'mood').map((d) => d.value);
+  eq(b2Mood, ['平静'], '新分支 world_state 不凭空失效');
+
+  // 旧线必须保持原样（失效仍然有效）。
+  const mainAt6 = store.getAssertions(sid, { branchId: 'main', atTurn: 6 });
+  eq(mainAt6.map((a) => a.object), ['乙地'], '旧分支的第 6 轮仍是新事实');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 会话遥测：按 Agent 分路累计（旁路不再是缺失的分母） ===');
+{
+  const sid = `usage-${Date.now()}`;
+  store.createSession({ id: sid, title: 'usage' });
+
+  store.accumulateUsage(sid, { prompt_tokens: 100, completion_tokens: 10, cached_tokens: 40, duration_ms: 5 }, 'narrator');
+  store.accumulateUsage(sid, { prompt_tokens: 50, completion_tokens: 5, cached_tokens: 0, duration_ms: 3 }, 'archivist');
+  store.accumulateUsage(sid, { prompt_tokens: 20, completion_tokens: 2, cached_tokens: 0, duration_ms: 1 }, 'branch');
+  const u = store.getSession(sid).usage;
+
+  eq(u.requests, 3, '三次调用全部计数');
+  eq(u.prompt_tokens, 170, '总额含旁路');
+  eq(u.cached_tokens, 40, '缓存命中累计');
+  eq(u.by_agent.narrator.prompt_tokens, 100, 'narrator 分路独立');
+  eq(u.by_agent.archivist.prompt_tokens, 50, 'archivist 分路独立');
+  eq(u.by_agent.branch.prompt_tokens, 20, 'branch 分路独立');
+  eq(Object.keys(u.by_agent).length, 3, '分路数是 3');
+
+  // 缺 usage 时不记一次请求（避免把空气泡算进成本）。
+  store.accumulateUsage(sid, null, 'world-tick');
+  eq(store.getSession(sid).usage.requests, 3, '空 usage 不增加请求数');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -709,6 +978,106 @@ console.log('\n=== 分支守卫：异步写入不落到旧分支 ===');
   orch.forkSession({ sessionId: sid, toTurn: 1, note: 'test fork' });
   ok(!guard.isBranchCurrent(snap2), '切分支后旧快照失效');
   ok(guard.isBranchCurrent(guard.branchSnapshot(sid)), '新分支快照成立');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 幂等回执：同一 effect_id 只落一次 ===');
+{
+  const guard = await import('../server/memory/branch-guard.js');
+  const sid = `effect-${Date.now()}`;
+  store.createSession({ id: sid, title: 'effect' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  const base = {
+    sessionId: sid, branchId: 'main', turnNo: 3, agent: 'archivist',
+    effectId: guard.makeEffectId('archivist', 't3'),
+    fingerprint: guard.hashFingerprint('archivist', 3, 'main', '行动', '正文'),
+  };
+  eq(base.effectId, 'archivist:t3', 'effect_id 稳定可读');
+  eq(base.fingerprint.length, 40, '指纹是 sha1 摘要，不把正文写进回执');
+
+  const c1 = store.claimEffect(base);
+  ok(c1.claimed, '首次认领拿到执行权');
+  eq(c1.status, 'pending', '首次落 pending');
+  ok(store.claimEffect(base).claimed, 'pending 同指纹可重试');
+
+  store.settleEffect(sid, base.effectId, { branchId: 'main', status: 'applied' });
+  const receipt = store.getEffectReceipt(sid, base.effectId, { branchId: 'main' });
+  eq(receipt.status, 'applied', '落库后回执 applied');
+  ok(receipt.applied_at > 0, '记录 applied_at');
+
+  const c2 = store.claimEffect(base);
+  ok(!c2.claimed, 'applied 后重复认领不再执行');
+  eq(c2.status, 'applied', '跳过原因是 applied');
+
+  const c3 = store.claimEffect({ ...base, fingerprint: 'changed-input' });
+  ok(!c3.claimed && c3.conflict, '同 effect_id 换输入 → 冲突拒绝，不静默覆盖');
+
+  let calls = 0;
+  const run = async () => { calls += 1; return { applied: 2 }; };
+  const runOnce = { sessionId: sid, branchId: 'main', turnNo: 4, agent: 'archivist', effectId: 'archivist:t4', fingerprint: 'fp4' };
+  const r1 = await guard.runEffectOnce(runOnce, run);
+  const r2 = await guard.runEffectOnce(runOnce, run);
+  eq(calls, 1, '同一 effect 只执行一次');
+  ok(!r1.skipped && r1.status === 'applied', '首次执行并落 applied');
+  ok(r2.skipped, '第二次直接跳过');
+  eq(store.getEffectReceipt(sid, 'archivist:t4', { branchId: 'main' }).status, 'applied', '执行后回执已落库');
+
+  const staleRun = await guard.runEffectOnce(
+    { sessionId: sid, branchId: 'main', turnNo: 5, agent: 'scene_keeper', effectId: 'scene:t5', fingerprint: 'fp5' },
+    async () => null,
+    { isStale: (r) => r === null },
+  );
+  eq(staleRun.status, 'stale', '守卫判定失效 → 回执 stale');
+  ok(!store.claimEffect({ sessionId: sid, branchId: 'main', turnNo: 5, agent: 'scene_keeper', effectId: 'scene:t5', fingerprint: 'fp5' }).claimed,
+    'stale 后不再重放（旧线丢弃不回写）');
+
+  let threw = false;
+  try {
+    await guard.runEffectOnce(
+      { sessionId: sid, branchId: 'main', turnNo: 6, agent: 'world_tick', effectId: 'world_tick:t6', fingerprint: 'fp6' },
+      async () => { throw new Error('boom'); },
+    );
+  } catch { threw = true; }
+  ok(threw, '失败向上抛');
+  eq(store.getEffectReceipt(sid, 'world_tick:t6', { branchId: 'main' }).status, 'failed', '失败回执 failed');
+  ok(store.claimEffect({ sessionId: sid, branchId: 'main', turnNo: 6, agent: 'world_tick', effectId: 'world_tick:t6', fingerprint: 'fp6' }).claimed,
+    'failed 回执可重试（供重放）');
+
+  // fork：分叉点之前已 applied 的回执随状态复制，之后的/失败的旧线回执不带过去。
+  store.createBranch(sid, { branchId: 'b2' });
+  store.copyBranchState(sid, { fromBranch: 'main', toBranch: 'b2', forkTurn: 3 });
+  eq(store.getEffectReceipt(sid, 'archivist:t3', { branchId: 'b2' })?.status, 'applied', '分叉点前 applied 回执复制到新分支');
+  ok(!store.getEffectReceipt(sid, 'archivist:t4', { branchId: 'b2' }), '分叉点之后的回执不带过去');
+  ok(!store.getEffectReceipt(sid, 'world_tick:t6', { branchId: 'b2' }), 'failed 回执不带过去');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 史官解析失败：严格判定与失败回灌 ===');
+{
+  const bad = arch.parseArchivistUpdateStrict('这一轮不是 JSON，只是一段解释。');
+  eq(bad.ok, false, '非 JSON 判定失败');
+  ok(bad.error.includes('JSON'), '失败原因可读');
+  eq(bad.update.assertions?.length, 0, '失败时返回空提案形状');
+
+  const empty = arch.parseArchivistUpdateStrict('   ');
+  eq(empty.ok, false, '空输出判定失败');
+
+  const good = arch.parseArchivistUpdateStrict('{"scene_change":{"changed":true},"assertions":[]}');
+  eq(good.ok, true, '合法 JSON 对象判定成功');
+  eq(good.update.scene_change.changed, true, '成功时返回归一后的 update');
+
+  const fenced = arch.parseArchivistUpdateStrict('```json\n{"scene_change":{"changed":true}}\n```');
+  eq(fenced.ok, true, '代码块包裹仍可打捞（沿用既有容错）');
+
+  const base = [{ role: 'system', content: '系统提示' }, { role: 'user', content: '本轮输入' }];
+  const retryMsgs = arch.buildArchivistRetryMessages(base, '坏输出'.repeat(800), '输出不是合法 JSON 对象');
+  eq(retryMsgs.length, 4, '回灌 = 原消息 + assistant 坏输出 + user 纠正');
+  eq(retryMsgs[0].role, 'system', 'system 仍在最前');
+  eq(retryMsgs.filter((m) => m.role === 'system').length, 1, '只有一条 system，不新增注入点');
+  ok(retryMsgs[2].role === 'assistant' && retryMsgs[2].content.length <= 2000, '坏输出作为 assistant 回灌且截断');
+  ok(retryMsgs[3].content.includes('JSON'), '纠正消息明确要求重发 JSON');
+  ok(retryMsgs[3].content.includes('不要代码块'), '要求只输出 JSON 对象');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

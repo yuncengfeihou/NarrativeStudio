@@ -467,6 +467,7 @@ export default {
             el('div.codex-item-head', {},
               el('span.codex-item-name', {}, e.name),
               e.pinned ? el('span.codex-item-pin', {}, '钉选') : null,
+              e.muted ? el('span.codex-item-muted', {}, '静音') : null,
               e.reveal === 'secret' ? el('span.codex-item-secret', {}, '未解') : null,
             ),
             e.summary ? el('div.codex-item-summary', {}, e.summary) : null,

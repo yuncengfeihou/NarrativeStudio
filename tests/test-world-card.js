@@ -206,6 +206,27 @@ console.log('\n=== 辞书挑选（无关键词）===');
   eq(lf.score, 80, '当前地点 +20');
   ok(lf.why.includes('当前地点'), '只给当前地点标注');
   ok(!sl.why.includes('当前地点'), '被提及但不是当前地点不加分');
+
+  // muted：作者显式静音 → 不进世界索引/场记候选（钉选也不豁免），但仍留在卡里可被检索。
+  const mutedCard = schema.normalizeCard({
+    title: 'm',
+    cast: [{ id: 'ling-yue', name: '凌玥' }],
+    codex: [
+      { id: 'silou', name: '司楼', type: 'institution', tags: ['制度'], links: ['cast:ling-yue'], muted: true },
+      { id: 'yupei', name: '玉佩', type: 'item', tags: ['杂物'] },
+    ],
+  });
+  eq(mutedCard.codex.find((e) => e.id === 'silou').muted, true, 'muted 归一为布尔');
+  const mutedSel = sheet.selectCodex(mutedCard, { presentIds: ['cast:ling-yue'], threadTags: ['制度'] });
+  ok(!mutedSel.some((x) => x.entry.id === 'silou'), '静音条目不进自动进场候选');
+  ok(!sheet.renderWorldIndex(mutedCard, 1200).includes('司楼'), '静音条目不进世界索引');
+  ok(!sheet.renderWorldTree(mutedCard, 1200).includes('司楼'), '静音条目不进树形索引');
+  ok(mutedCard.codex.find((e) => e.id === 'yupei').muted === false, '未静音条目保持 false');
+  const mutedPinned = schema.normalizeCard({
+    title: 'mp',
+    codex: [{ id: 'p', name: '钉选静音', type: 'concept', pinned: true, muted: true }],
+  });
+  eq(sheet.selectCodex(mutedPinned, {}).length, 0, '静音优先于钉选，不无条件进场');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

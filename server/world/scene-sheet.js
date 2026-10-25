@@ -31,7 +31,8 @@ const TYPE_GROUPS = [
  */
 export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}) {
   const cast = card.cast || [];
-  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
+  // muted 是作者显式静音：索引与场记候选都不再自动带出它（避免「我明明关了它还在」）。
+  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id) && !e.muted);
   if (!cast.length && !codex.length) return '';
 
   const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
@@ -91,7 +92,7 @@ export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}
  * @param {{skipIds?:Set<string>}} opts
  */
 export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {}) {
-  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id));
+  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id) && !e.muted);
   const hasParent = codex.some((e) => e.parent_id);
   if (!hasParent) return renderWorldIndex(card, capTokens, { skipIds });
 
@@ -126,9 +127,11 @@ export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {})
     const lines = [];
     const cast = (card.cast || []).slice().sort((a, b) => (b.weight || 0) - (a.weight || 0));
     if (cast.length) {
+      // 索引只承载 canon。c.status 是运行态（史官会写「左肩中箭」这类），
+      // 一旦渲染进 system，卡上有 parent_id 时 system 就每轮失效——而平铺卡不会，
+      // 于是「会不会破坏缓存」取决于卡的形状，比稳定地坏更糟。
       lines.push(`人物　${join(cast.map((c) => {
-        const bits = [c.role, c.status && c.status !== c.role ? c.status : ''].filter(Boolean);
-        const s = bits.join(' · ') || c.one_line || '';
+        const s = c.role || c.one_line || '';
         return withSummary && s ? `${c.name}（${s}）` : c.name;
       }), '｜')}`);
     }
@@ -179,6 +182,8 @@ export function selectCodex(card, {
   const out = [];
   for (const entry of card.codex || []) {
     if (skipIds?.has(entry.id)) continue;
+    // 静音优先于钉选：作者关掉自动进场后，不该再被「钉选无条件 +100」偷偷带回来。
+    if (entry.muted) continue;
     const why = [];
     let score = 0;
     if (entry.pinned) { score += 100; why.push('钉选'); }
@@ -217,6 +222,14 @@ function renderCastLine(c, ledgerChar, voices) {
   ].filter(Boolean);
   if (state.length) lines.push(`  状态：${join(state, '｜')}`);
   if (c.voice.rhythm) lines.push(`  口吻：${c.voice.rhythm}`);
+  // 称呼 + 绝不说：这是抗 OOC 最便宜的两条确定性约束。
+  // 「他绝不会叫她『夫人』」比一整段性格描写更能防止人物崩坏。
+  if (c.voice.address && Object.keys(c.voice.address).length) {
+    const addr = Object.entries(c.voice.address)
+      .map(([to, how]) => `${to}→${how}`).join('；');
+    if (addr) lines.push(`  称呼：${addr}`);
+  }
+  if (c.voice.never?.length) lines.push(`  绝不说：${join(c.voice.never, '／')}`);
   if (c.agenda?.length) {
     const ag = c.agenda
       .slice()
@@ -229,7 +242,9 @@ function renderCastLine(c, ledgerChar, voices) {
   if (c.knowledge.knows.length) know.push(`她知道/他知道：${join(c.knowledge.knows)}`);
   if (c.knowledge.does_not_know.length) know.push(`不知道：${join(c.knowledge.does_not_know)}`);
   if (know.length) lines.push(`  边界：${know.join('；')}`);
-  const v = voices?.[c.id];
+  // 原声按「规范名」存（voices.who 是 canon 名），但卡司条目可能是 id，
+  // 两个键都要查，否则原声永远匹配不到（旧实现只查 id，导致 voices 传了也白传）。
+  const v = voices?.[c.id] || voices?.[c.name];
   if (v?.length) lines.push(`  原声：${join(v.slice(0, 2), '／')}`);
   return lines.join('\n');
 }
@@ -315,7 +330,8 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  */
 export function renderSceneSheet({
   ledger = {}, present = [], relations = [], threads = [], codex = [], codexBrief = [],
-  voices = {}, echoes = [], facts = [], worldRuntime = {}, directive = '', capTokens = 2200,
+  voices = {}, echoes = [], facts = [], worldRuntime = {}, playerNow = null,
+  knowledgeMatrix = null, omens = null, directive = '', capTokens = 2200,
 } = {}) {
   const L = ledger || {};
   const meta = {
@@ -343,6 +359,22 @@ export function renderSceneSheet({
   const whenLine = bits.join('｜');
   const runtimeLine = str(worldRuntime.status) ? `局势 ${str(worldRuntime.status)}` : '';
 
+  // 主角的运行态放在这里，而不是 system：system 是 canon（他是谁），
+  // 这里才是「他此刻如何」。放在 system 会让缓存前缀每轮失效。
+  // 注意 situation 与 system 的「来路」是同名字段：system 用模板值讲出身，
+  // 这里用投影后的现值讲此刻，两者不会同时渲染同一份文本。
+  const playerBits = [];
+  if (playerNow) {
+    const p = playerNow;
+    if (p.status) playerBits.push(`处境 ${str(p.status)}`);
+    if (p.situation) playerBits.push(`眼下 ${str(p.situation)}`);
+    if (p.condition) playerBits.push(`身体 ${str(p.condition)}`);
+    if (p.mood) playerBits.push(`情绪 ${str(p.mood)}`);
+    if (p.location) playerBits.push(`所在 ${str(p.location)}`);
+    if (p.goal) playerBits.push(`当下想要 ${str(p.goal)}`);
+  }
+  const playerLine = playerBits.length ? `主角此刻：${playerBits.join('｜')}` : '';
+
   const castBlock = present.map((c) => renderCastLine(c, L.characters?.[c.id], voices)).join('\n');
 
   const relLines = (relations || [])
@@ -362,7 +394,7 @@ export function renderSceneSheet({
     .map((t) => `· ${t.title}${t.note ? `（${t.note}）` : ''}${t.weight >= 0.8 ? '［主线］' : ''}`);
 
   const factLines = (facts || [])
-    .slice(0, 6)
+    .slice(0, 24)
     .map((f) => `· ${f.subject} —${f.predicate}→ ${f.object}${f.visibility === 'secret' ? '［引擎掌握，不得说破］' : ''}`);
 
   const pressure = [];
@@ -371,17 +403,26 @@ export function renderSceneSheet({
     .filter((c) => c.agenda?.length)
     .sort((a, b) => (b.agenda[0]?.pressure || 0) - (a.agenda[0]?.pressure || 0))[0];
   if (hot) pressure.push(`此刻最绷紧的是${hot.name}：${hot.agenda[0].goal}`);
+  // 成长曲线的预兆：写「倾向」，不写「结局」。
+  // 它复用压力段（不新增注入通道），且只对已解锁阶段生效。
+  for (const o of (omens || []).slice(0, 2)) {
+    pressure.push(`${o.who}正在往「${o.text}」的方向变`);
+  }
   if ((threads || []).filter((t) => t.status === 'open').length) {
     pressure.push(`仍未回收的线索有 ${(threads || []).filter((t) => t.status === 'open').length} 条，本轮至少要动其中一条，或制造新的压力。`);
   }
 
-  const knowledgeLine = (present || [])
-    .filter((c) => c.knowledge.knows.length || c.knowledge.does_not_know.length)
-    .map((c) => {
-      const k = c.knowledge.knows.length ? `知道${join(c.knowledge.knows)}` : '';
-      const d = c.knowledge.does_not_know.length ? `不知道${join(c.knowledge.does_not_know)}` : '';
-      return `${c.name}${[k, d].filter(Boolean).join('，')}`;
-    });
+  // 知识边界优先用「按线索组织」的矩阵（谁知道/谁不知道同一件事），
+  // 退回按角色罗列。前者直接回答「这一拍谁不能说什么」。
+  const knowledgeLine = (knowledgeMatrix && knowledgeMatrix.length)
+    ? knowledgeMatrix
+    : (present || [])
+      .filter((c) => c.knowledge.knows.length || c.knowledge.does_not_know.length)
+      .map((c) => {
+        const k = c.knowledge.knows.length ? `知道${join(c.knowledge.knows)}` : '';
+        const d = c.knowledge.does_not_know.length ? `不知道${join(c.knowledge.does_not_know)}` : '';
+        return `${c.name}${[k, d].filter(Boolean).join('，')}`;
+      });
 
   const codexBlock = (codex || []).map((c) => renderCodexEntry(c.entry || c)).join('\n');
   const codexBriefBlock = (codexBrief || []).map((c) => renderCodexBrief(c.entry || c)).join('\n');
@@ -394,6 +435,7 @@ export function renderSceneSheet({
   const sections = [];
   if (whenLine) sections.push({ key: 'when', text: whenLine, need: true });
   if (runtimeLine) sections.push({ key: 'world', text: runtimeLine, need: true });
+  if (playerLine) sections.push({ key: 'player', text: playerLine, need: true });
   if (castBlock) sections.push({ key: 'cast', text: `在场\n${castBlock}`, need: true });
   if (relLines.length) sections.push({ key: 'relations', text: `关系\n${relLines.join('\n')}` });
   if (threadLines.length) sections.push({ key: 'threads', text: `未回收的线索\n${threadLines.join('\n')}` });
@@ -407,7 +449,8 @@ export function renderSceneSheet({
 
   const headerCost = estimateTokens(head.join('\n')) + 2;
   // directive 声明「优先级最高」，就必须排在可选设定之前；放不下时它还能靠尾注通道活下来。
-  const order = ['when', 'world', 'cast', 'directive', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'echoes'];
+  // 主角运行态必须紧跟时间地点（它是「此刻」的一部分），不能被裁掉。
+  const order = ['when', 'world', 'player', 'cast', 'directive', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'echoes'];
   const kept = [];
   let used = headerCost;
   for (const key of order) {
@@ -497,6 +540,108 @@ export function lookupCodex(card, queries, { limit = 3 } = {}) {
   }
   out.sort((a, b) => b.score - a.score || a.entry.name.localeCompare(b.entry.name));
   return out.slice(0, Math.max(1, limit));
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 5. 场次索引（长程记忆的载体）                                            */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/**
+ * 场次索引：一行一场，只追加，永不互相改写。
+ *
+ * 这是「滚动摘要」的替代品。摘要把全部历史摊薄成一份定长文本，
+ * 而场次索引给每条历史一个等宽的槽位：第 12 轮的事不会因为第 900 轮
+ * 又压了一次而变模糊。
+ *
+ * 渲染是**确定性的**：只按 importance 与位置决定粒度，不做语义打分。
+ *   major  → 编号｜轮次｜地点｜问题｜结果｜细节｜钩子
+ *   normal → 编号｜轮次｜地点｜问题｜结果
+ *   minor  → 编号｜轮次｜地点｜结果首句
+ *
+ * 超预算时从**最旧**端开始降级（老场的细节先让位给近场），而不是整段砍掉。
+ *
+ * @param {Array}  scenes   已按 turn_from 正序
+ * @param {number} capTokens
+ * @returns {{text:string, meta:{total:number, rendered:number, dropped:number, degraded:number}}}
+ */
+export function renderSceneIndex(scenes = [], capTokens = 1800) {
+  const list = (scenes || []).filter((s) => s && Number.isFinite(Number(s.turn_from)));
+  const meta = { total: list.length, rendered: 0, dropped: 0, degraded: 0 };
+  if (!list.length) return { text: '', meta };
+
+  const header = '【本局场次索引】下面是这一局已经发生过的每一场，按时间顺序。'
+    + '它是既定事实的目录：需要更早的细节时，先看这里的锚点，不要凭空补全，也不要改写已经写过的结果。';
+
+  const turnLabel = (s) => (s.turn_from === s.turn_to ? `${s.turn_from}` : `${s.turn_from}-${s.turn_to}`);
+  const firstSentence = (t) => {
+    const s = str(t);
+    const i = s.search(/[。；！？]/);
+    return i > 0 ? s.slice(0, i + 1) : s;
+  };
+
+  const renderOne = (s, level) => {
+    const head = `${s.scene_id || 'S?'}｜${turnLabel(s)}｜${str(s.place) || '（未记地点）'}`;
+    if (level === 'minor') return `${head}｜${firstSentence(s.outcome)}`;
+    const bits = [head];
+    if (str(s.question)) bits.push(str(s.question));
+    if (str(s.outcome)) bits.push(str(s.outcome));
+    if (level !== 'major') return bits.join('｜');
+    if (str(s.key_detail)) bits.push(`细节：${str(s.key_detail)}`);
+    if ((s.hooks || []).length) bits.push(`钩子：${s.hooks.join('；')}`);
+    return bits.join('｜');
+  };
+
+  // 先按「自然粒度」渲染；放不下就把最古老的降一级，直到装得下。
+  const levels = list.map((s) => (s.importance === 'minor' ? 'minor'
+    : s.importance === 'major' ? 'major' : 'normal'));
+  const build = () => `${header}\n${list.map((s, i) => renderOne(s, levels[i])).join('\n')}`;
+
+  let text = build();
+  let guard = 0;
+  const downgrade = { major: 'normal', normal: 'minor' };
+  while (estimateTokens(text) > capTokens && guard++ < list.length * 3) {
+    // 找最旧的一个还能降级的场次
+    const idx = levels.findIndex((lv) => downgrade[lv]);
+    if (idx < 0) break;
+    levels[idx] = downgrade[levels[idx]];
+    meta.degraded++;
+    text = build();
+  }
+
+  // 还放不下：从最旧端整行丢弃（保留头部的说明，让模型知道索引被截短了）。
+  if (estimateTokens(text) > capTokens) {
+    const lines = text.split('\n');
+    while (lines.length > 2 && estimateTokens(lines.join('\n')) > capTokens) {
+      lines.splice(1, 1);
+      meta.dropped++;
+    }
+    lines.splice(1, 0, `（更早的 ${meta.dropped} 场已省略）`);
+    text = lines.join('\n');
+  }
+
+  meta.rendered = list.length - meta.dropped;
+  return { text, meta };
+}
+
+/**
+ * 最近 1–2 场的细节块：放在原文窗口之后、场记单之前。
+ * 索引给「目录」，这里给「刚才那场到底怎么收的」，两者粒度不同、位置不同。
+ */
+export function renderRecentScenes(scenes = [], capTokens = 900) {
+  const list = (scenes || []).slice(-2);
+  if (!list.length) return { text: '', meta: { rendered: 0 } };
+  const blocks = list.map((s) => {
+    const lines = [`· ${s.scene_id || 'S?'}｜第 ${s.turn_from}-${s.turn_to} 轮｜${str(s.place)}`];
+    if (str(s.question)) lines.push(`  这一场在问：${str(s.question)}`);
+    if (str(s.outcome)) lines.push(`  结果：${str(s.outcome)}`);
+    if (str(s.key_detail)) lines.push(`  记住这个：${str(s.key_detail)}`);
+    if (str(s.causal)) lines.push(`  为什么走到这里：${str(s.causal)}`);
+    if ((s.hooks || []).length) lines.push(`  还悬着：${s.hooks.join('；')}`);
+    return lines.join('\n');
+  });
+  let text = `【刚才这一场怎么收的】作为接续的起点，不要复述。\n${blocks.join('\n')}`;
+  if (estimateTokens(text) > capTokens) text = truncateToTokens(text, capTokens);
+  return { text, meta: { rendered: list.length } };
 }
 
 /** 把一个辞书条目渲染成检索结果块（全文级，不是摘要）。 */
