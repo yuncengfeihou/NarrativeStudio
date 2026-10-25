@@ -10,10 +10,10 @@
  */
 import { chat } from '../llm.js';
 import {
-  CODEX_TYPES, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
+  ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
-  CODEX_CANON_PATHS, LIST_PATH_SET, ENTITY_KINDS, pathsFor,
+  ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, pathsFor,
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
@@ -57,8 +57,7 @@ export function buildDeclaredTargets({
     const s = str(v);
     if (s) out.add(s);
   };
-  for (const c of arr(card?.cast)) { add(c.id); add(c.name); add(c.aliases); }
-  for (const e of arr(card?.codex)) { add(e.id); add(e.name); add(e.aliases); }
+  for (const e of arr(card?.entities)) { add(e.id); add(e.name); add(e.aliases); }
   add(present); add(codex); add(ledgerCharacters); add(playerName); add('player');
   return [...out];
 }
@@ -131,9 +130,9 @@ const asCleanList = (v, max = 12) => arr(v)
 /** 新登场实体只收渲染需要的字段，并截断长度，避免模型塞进无限细节。 */
 function sanitizeIntroduce(kind, fields, name) {
   const f = obj(fields);
-  if (kind === 'cast') {
-    const out = { name: name.slice(0, 60) };
-    for (const k of ['role', 'one_line', 'status', 'condition', 'mood', 'location', 'goal']) {
+  if (kind === PERSON_TYPE) {
+    const out = { name: name.slice(0, 60), type: PERSON_TYPE };
+    for (const k of ['role', 'summary', 'status', 'condition', 'mood', 'location', 'goal']) {
       if (str(f[k])) out[k] = str(f[k]).slice(0, 200);
     }
     if (arr(f.aliases).length) out.aliases = asCleanList(f.aliases);
@@ -147,15 +146,16 @@ function sanitizeIntroduce(kind, fields, name) {
     const psyche = obj(f.psyche);
     if (Object.keys(psyche).length) {
       out.psyche = {};
-      for (const k of ['wants', 'fears', 'hides', 'values']) {
+      for (const k of ['traits', 'wants', 'fears', 'hides', 'values']) {
         if (arr(psyche[k]).length) out.psyche[k] = asCleanList(psyche[k]);
       }
     }
     return out;
   }
+  const type = ENTITY_TYPES.includes(kind) && kind !== PERSON_TYPE ? kind : 'custom';
   const out = {
     name: name.slice(0, 60),
-    type: CODEX_TYPES.includes(f.type) ? f.type : 'custom',
+    type,
   };
   for (const k of ['summary', 'detail', 'sensory', 'history', 'parent_id']) {
     if (str(f[k])) out[k] = str(f[k]).slice(0, 400);
@@ -191,7 +191,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
   if (!ENTITY_KINDS.includes(kind)) return null;
 
   if (op === 'introduce') {
-    if (kind !== 'cast' && kind !== 'codex') return null;
+    if (!ENTITY_TYPES.includes(kind)) return null;
     const fields = obj(o.fields || o.value);
     const name = str(fields.name || o.id);
     if (!name) return null;
@@ -217,15 +217,15 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
     entityId = 'player';
   } else {
     const resolved = resolveEntity(rawName, aliasIndex);
-    if (resolved.kind === 'cast' || resolved.kind === 'codex') {
-      kind = resolved.kind;
+    if (resolved.type) {
+      kind = resolved.type;
       entityId = resolved.id;
     }
   }
 
-  // 辞书定义（summary/detail/facets.history）是作者公理：已有条目只能写运行态，
-  // 想新增定义必须走 introduce（上面已返回）。
-  if (kind === 'codex' && CODEX_CANON_PATHS.has(path)) return null;
+  // 事实实体的定义（summary/detail/facets.history）是作者公理：已有条目只能写运行态，
+  // 想新增定义必须走 introduce（上面已返回）。人物没有这个限制。
+  if (kind !== PERSON_TYPE && FACT_CANON_PATHS.has(path)) return null;
 
   // 先按别名归一实体类型，再按最终类型校验路径。
   const allowed = pathsFor(kind);
@@ -236,7 +236,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
   if (op === 'set' && isList) return null;
 
   let value = o.value;
-  if (kind === 'codex' && path === 'reveal') {
+  if (kind !== PERSON_TYPE && path === 'reveal') {
     value = CODEX_REVEALS.includes(str(value)) ? str(value) : null;
     if (!value) return null;
   }
@@ -486,10 +486,12 @@ export async function runArchivist({
   const card = normalizeCard(world?.card || {});
   const aliasIndex = buildAliasIndex(card);
 
-  const castIndex = (card.cast || [])
+  const persons = (card.entities || []).filter((e) => e.type === PERSON_TYPE);
+  const facts = (card.entities || []).filter((e) => e.type !== PERSON_TYPE);
+  const castIndex = persons
     .map((c) => `· ${c.name}${c.aliases.length ? `（又称：${c.aliases.join('、')}）` : ''}${c.role ? `｜${c.role}` : ''}`)
     .join('\n');
-  const codexIndex = (card.codex || [])
+  const codexIndex = facts
     .slice(0, 60)
     .map((e) => `· ${e.name}${e.aliases.length ? `（${e.aliases.join('、')}）` : ''}${e.summary ? `｜${e.summary}` : ''}`)
     .join('\n');
@@ -658,10 +660,10 @@ export function applyArchivistUpdate({
   for (const s of stateItems) {
     setCharState(sessionId, { branchId, who: s.who, field: s.field, value: s.value, turn: turnNo });
     const ref = resolveEntity(s.who, aliasIndex);
-    const isPlayer = !ref.kind && playerName && s.who === playerName;
+    const isPlayer = !ref.type && playerName && s.who === playerName;
     addWorldState(sessionId, {
       branch_id: branchId,
-      entity_kind: isPlayer ? 'player' : (ref.kind || 'cast'),
+      entity_kind: isPlayer ? 'player' : (ref.type || PERSON_TYPE),
       entity_id: isPlayer ? 'player' : (ref.id || s.who),
       path: s.field,
       op: 'set',
@@ -768,17 +770,17 @@ export function applyArchivistUpdate({
   const delta = ledgerDelta;
   const scene = update.scene_change || {};
 
-  // 地点名能对上辞书里的 place 时，自动补 place_id；这让「当前地点」加分与
-  // 地点辞书进场不再依赖模型是否手写了 id。
+  // 地点名能对上卡里的 place 事实实体时，自动补 place_id；这让「当前地点」加分与
+  // 地点条目进场不再依赖模型是否手写了 id。
   let placeId = scene.place_id || '';
   if (!placeId && scene.place) {
     const resolved = resolveEntity(scene.place, aliasIndex);
-    if (resolved.kind === 'codex' && resolved.type === 'place') {
+    if (resolved.type === 'place') {
       placeId = resolved.id;
     } else {
       // 「凌府门口 → 凌府天井」这类复合地名：用实体链接取最长的 place 命中。
-      const hit = linkEntities(scene.place, aliasIndex).codex
-        .map((id) => aliasIndex.find((e) => e.kind === 'codex' && e.id === id && e.type === 'place'))
+      const hit = linkEntities(scene.place, aliasIndex).fact
+        .map((id) => aliasIndex.find((e) => e.type === 'place' && e.id === id))
         .find(Boolean);
       if (hit) placeId = hit.id;
     }

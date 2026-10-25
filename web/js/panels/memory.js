@@ -65,7 +65,7 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       body.appendChild(el('div.mem-world', {},
         el('h4', {}, `世界卡 · ${world.title}`),
         el('p.muted', {},
-          `角色 ${world.cast_count}｜设定集 ${world.codex_count}｜`
+          `角色 ${world.person_count}｜设定集 ${world.fact_count}｜`
           + `前史 ${world.timeline_past}｜参考走向 ${world.timeline_future}`),
         el('p.mem-world-note', {},
           world.timeline_future > 0

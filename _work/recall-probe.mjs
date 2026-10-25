@@ -63,14 +63,10 @@ function queriesFromCard(cardPath) {
   try {
     const root = JSON.parse(fs.readFileSync(cardPath, 'utf8'));
     const card = root.card || root;   // presets/*.json 是 DB 行包装（{id,title,card}）
-    for (const c of card.cast || []) {
+    for (const c of card.entities || []) {
       for (const n of [c.name, ...(c.aliases || [])]) {
-        if (str(n).length >= 2) queries.push(str(n));
+        if (str(n).length >= 2 && !queries.includes(str(n))) queries.push(str(n));
       }
-    }
-    for (const e of card.codex || []) {
-      const n = str(e.name);
-      if (n.length >= 2 && !queries.includes(n)) queries.push(n);
     }
   } catch (err) {
     console.warn(`[probe] 读卡失败（跳过真实查询）：${err.message}`);

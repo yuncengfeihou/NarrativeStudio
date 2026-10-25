@@ -1,14 +1,18 @@
 #!/usr/bin/env node
 /**
- * tests/test-world-card.js — 世界卡 v4：schema / 索引 / 辞书挑选 / 场记单（无网络）
+ * tests/test-world-card.js — 世界卡 v5：schema / 索引 / 辞书挑选 / 场记单（无网络）
+ *
+ * v5 起人物与事实统一在 card.entities（type 区分 person / 其余类型），
+ * 没有 cast / codex 双数组，也没有 type='character' 的辞书条目。
  *
  * 覆盖：
  *   - normalizeCard 的归一与默认值
- *   - beta 约定：旧格式字段不被读取（没有隐式迁移）
+ *   - beta 约定：旧格式字段（含 v4 的 cast / codex）不被读取（没有隐式迁移）
  *   - 别名索引与实体链接（最长匹配、不重叠计数）
  *   - 世界索引渲染与降级
  *   - 辞书挑选：实体连接 / 主题标签 / 钉选
  *   - 场记单渲染：字段、优先级、配额裁剪
+ *   - 图谱 / 卡级 lint / 导出 / 检索 / 制卡
  */
 import './load-env.js';
 import path from 'node:path';
@@ -35,6 +39,10 @@ function eq(a, b, label) {
   ok(JSON.stringify(a) === JSON.stringify(b), label, `expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
 }
 
+/** v5：人物 / 事实都是 entities 里的条目，只按 type 分流。 */
+const personsOf = (card) => card.entities.filter((e) => e.type === 'person');
+const factsOf = (card) => card.entities.filter((e) => e.type !== 'person');
+
 /* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== normalizeCard ===');
 {
@@ -42,33 +50,36 @@ console.log('\n=== normalizeCard ===');
     title: '女尊世界',
     premise: '一个被丢掉的人被重新捡起来',
     charter: ['女子主外', { rule: '枪与凤椅共存' }],
-    cast: [{ name: '凌玥', aliases: ['玥姐姐'], voice: { rhythm: '短句' }, agenda: [{ goal: '带走他', pressure: 2 }] }],
-    codex: [{ name: '司楼', type: 'institution', tags: ['制度'] }],
+    entities: [
+      { type: 'person', name: '凌玥', aliases: ['玥姐姐'], voice: { rhythm: '短句' }, agenda: [{ goal: '带走他', pressure: 2 }] },
+      { type: 'institution', name: '司楼', tags: ['制度'] },
+    ],
     timeline: [{ what: '母亲丢下他', canon: 'past' }],
     anchors: [{ label: '序章', snapshot: { place: '雨街' }, opening_seed: '雨落下来' }],
     player: { name: '伍卿' },
   });
-  ok(card.version === 4, 'version 归一为 4');
+  ok(card.version === 5, 'version 归一为 5');
   ok(card.kind === 'original', '默认 original');
   eq(card.charter.length, 2, '宪章兼容字符串与对象两种写法');
   eq(card.charter[1], { rule: '枪与凤椅共存', kind: 'law' }, '宪章补 kind 默认值');
-  eq(card.cast[0].agenda[0].pressure, 1, 'agenda.pressure 被 clamp 到 0-1');
-  eq(card.cast[0].id, '凌玥', 'cast id 默认取名字 slug');
-  ok(Array.isArray(card.cast[0].voice.exemplars), 'voice.exemplars 有默认值');
+  eq(personsOf(card)[0].agenda[0].pressure, 1, 'agenda.pressure 被 clamp 到 0-1');
+  eq(personsOf(card)[0].id, '凌玥', 'person id 默认取名字 slug');
+  ok(Array.isArray(personsOf(card)[0].voice.exemplars), 'voice.exemplars 有默认值');
   eq(card.timeline[0].canon, 'past', 'timeline canon 保留');
   ok(card.anchors.length === 1, 'anchor 归一');
-  ok(card.player.mode === 'original', '玩家未匹配卡司时是 original');
+  ok(card.player.mode === 'original', '玩家未匹配人物时是 original');
+  eq(card.entities.length, 2, '人物与事实都收在 entities 里');
 }
 
 {
   const card = schema.normalizeCard({
     title: 'x', source: { title: '某小说' },
-    cast: [{ name: '伍卿' }],
+    entities: [{ type: 'person', name: '伍卿' }],
     player: { name: '伍卿', mode: 'canon' },
   });
   ok(card.kind === 'adapted', '有 source.title 时是 adapted');
-  eq(card.player.mode, 'canon', '玩家名字命中卡司时是 canon');
-  ok(card.player.canon_character === '伍卿', 'canon_character 解析成 cast id');
+  eq(card.player.mode, 'canon', '玩家名字命中人物时是 canon');
+  ok(card.player.canon_character === '伍卿', 'canon_character 解析成人物 id');
 }
 
 {
@@ -76,13 +87,15 @@ console.log('\n=== normalizeCard ===');
   eq(card.prompt.pov, '第三人称限知，镜头贴在主角身上', 'prompt 有默认值');
   eq(card.charter, [], '空宪章');
   eq(card.anchors, [], '无锚点');
+  eq(card.entities, [], '空卡没有实体');
   ok(card.player.name === '主角', '玩家名有兜底');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== beta：旧格式字段不被读取 ===');
 {
-  // beta 阶段不做隐式迁移。旧字段传进来只会被忽略，不会变成 v4 数据。
+  // beta 阶段不做隐式迁移。旧字段传进来只会被忽略，不会变成 v5 数据；
+  // 包括 v4 的 cast / codex 双数组：v5 只读 entities。
   const card = schema.normalizeCard({
     title: '旧卡',
     style: { pov: '第三人称', voice: '短句' },
@@ -92,17 +105,18 @@ console.log('\n=== beta：旧格式字段不被读取 ===');
     lore: [{ title: '司楼', content: '官营青楼', category: 'institution' }],
     arcs: [{ title: '第一幕', goal: '目标', beats: ['节拍'] }],
     cast: [{ name: '凌玥', alias: ['玥姐姐'], secret: '七年前', always: true }],
+    codex: [{ name: '司楼', type: 'institution', summary: '官营青楼' }],
   });
   eq(card.prompt.pov, '第三人称限知，镜头贴在主角身上', '不读取旧 style.pov');
   eq(card.prompt.style_guide, '', '不读取旧 style.voice');
   eq(card.prompt.bans, [], '不读取旧顶层 bans');
-  eq(card.codex, [], '不读取旧 lore');
+  eq(card.entities, [], '不读取旧 cast / codex / lore');
+  ok(!('cast' in card) && !('codex' in card), '输出不含 v4 的 cast / codex 字段');
   eq(card.timeline, [], '不读取旧 arcs');
   eq(card.anchors, [], '不读取旧 opening_state / opening_seed');
-  eq(card.cast[0].aliases, [], '不读取旧 cast.alias');
-  eq(card.cast[0].psyche.hides, [], '不读取旧 cast.secret');
-  eq(card.cast[0].psyche.traits, [], 'psyche.traits 缺省为空数组');
-  eq(card.cast[0].always_present, false, '不读取旧 cast.always');
+  ok(card.version === 5, '旧卡输出也标 v5 形状');
+  ok(!JSON.stringify(card).includes('七年前'), '不读取旧 cast.secret');
+  ok(!JSON.stringify(card).includes('第一幕'), '不读取旧 arcs 内容');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -110,27 +124,31 @@ console.log('\n=== 别名索引与实体链接 ===');
 {
   const card = schema.normalizeCard({
     title: 't',
-    cast: [{ name: '凌玥', aliases: ['玥姐姐', '姐姐'] }, { name: '伍卿' }],
-    codex: [{ name: '司楼', aliases: ['青楼'] }],
+    entities: [
+      { type: 'person', name: '凌玥', aliases: ['玥姐姐', '姐姐'] },
+      { type: 'person', name: '伍卿' },
+      { type: 'institution', name: '司楼', aliases: ['青楼'] },
+    ],
   });
   const idx = schema.buildAliasIndex(card);
   eq(idx[0].alias, '玥姐姐', '长别名排在前面');
 
   const l1 = schema.linkEntities('玥姐姐站在青楼门口', idx);
-  ok(l1.cast.includes('凌玥'), '命中别名「玥姐姐」→ 凌玥');
-  ok(l1.codex.includes('司楼'), '命中别名「青楼」→ 司楼');
+  ok(l1.person.includes('凌玥'), '命中别名「玥姐姐」→ 凌玥');
+  ok(l1.fact.includes('司楼'), '命中别名「青楼」→ 司楼');
 
   const l2 = schema.linkEntities('姐姐来了', idx);
-  eq(l2.cast, ['凌玥'], '短别名「姐姐」单独出现也能命中');
+  eq(l2.person, ['凌玥'], '短别名「姐姐」单独出现也能命中');
 
   const l3 = schema.linkEntities('凌乱的风', idx);
-  eq(l3.cast, [], '「凌」不是别名，不误命中');
+  eq(l3.person, [], '「凌」不是别名，不误命中');
 
   const l4 = schema.linkEntities('凌玥和玥姐姐', idx);
-  eq(l4.cast, ['凌玥'], '同一实体的多个别名只计一次');
+  eq(l4.person, ['凌玥'], '同一实体的多个别名只计一次');
 
   const l5 = schema.linkEntities('', idx);
-  eq(l5.cast, [], '空文本返回空');
+  eq(l5.person, [], '空文本返回空人物');
+  eq(l5.fact, [], '空文本返回空事实');
   eq(schema.resolveWho('玥姐姐', idx), '凌玥', 'resolveWho 归一别名');
   eq(schema.resolveWho('张三是谁', idx), '张三是谁', '未知名原样返回');
 }
@@ -140,15 +158,13 @@ console.log('\n=== 世界索引 ===');
 {
   const card = schema.normalizeCard({
     title: 't',
-    cast: [
-      { name: '凌玥', role: '凌家家主', status: '左肩中箭', weight: 1 },
-      { name: '张兰', role: '保安', weight: 0.3 },
-      { name: '龙套甲' },
-    ],
-    codex: [
-      { name: '司楼', type: 'institution', summary: '官营青楼' },
-      { name: '玉佩', type: 'item', summary: '来路不明' },
-      { name: '女尊', type: 'concept', summary: '女子为尊' },
+    entities: [
+      { type: 'person', name: '凌玥', role: '凌家家主', status: '左肩中箭', weight: 1 },
+      { type: 'person', name: '张兰', role: '保安', weight: 0.3 },
+      { type: 'person', name: '龙套甲' },
+      { type: 'institution', name: '司楼', summary: '官营青楼' },
+      { type: 'item', name: '玉佩', summary: '来路不明' },
+      { type: 'concept', name: '女尊', summary: '女子为尊' },
     ],
   });
   const index = sheet.renderWorldIndex(card, 1200);
@@ -170,16 +186,16 @@ console.log('\n=== 辞书挑选（无关键词）===');
 {
   const card = schema.normalizeCard({
     title: 't',
-    cast: [{ id: 'ling-yue', name: '凌玥' }],
-    codex: [
-      { id: 'silou', name: '司楼', type: 'institution', tags: ['制度', '交易'], links: ['cast:ling-yue'] },
-      { id: 'jiajie', name: '称呼礼法', type: 'concept', tags: ['制度'], pinned: true },
-      { id: 'wujia', name: '无关之物', type: 'item', tags: ['杂物'] },
-      { id: 'mai', name: '买卖规矩', type: 'concept', tags: ['交易'] },
+    entities: [
+      { id: 'ling-yue', type: 'person', name: '凌玥' },
+      { id: 'silou', type: 'institution', name: '司楼', tags: ['制度', '交易'], links: ['ling-yue'] },
+      { id: 'jiajie', type: 'concept', name: '称呼礼法', tags: ['制度'], pinned: true },
+      { id: 'wujia', type: 'item', name: '无关之物', tags: ['杂物'] },
+      { id: 'mai', type: 'concept', name: '买卖规矩', tags: ['交易'] },
     ],
   });
 
-  const a = sheet.selectCodex(card, { presentIds: ['cast:ling-yue'], threadTags: [] });
+  const a = sheet.selectCodex(card, { presentIds: ['ling-yue'], threadTags: [] });
   const names = a.map((x) => x.entry.name);
   ok(names.includes('司楼'), '实体连接命中');
   ok(names.includes('称呼礼法'), '钉选项无条件进候选');
@@ -195,9 +211,9 @@ console.log('\n=== 辞书挑选（无关键词）===');
   // 「当前地点」只认账本 place_id，不把所有被提及的地点都标成当前地点。
   const places = schema.normalizeCard({
     title: 'p',
-    codex: [
-      { id: 'ling-fu', name: '凌府', type: 'place' },
-      { id: 'silou', name: '司楼', type: 'place' },
+    entities: [
+      { id: 'ling-fu', type: 'place', name: '凌府' },
+      { id: 'silou', type: 'place', name: '司楼' },
     ],
   });
   const d = sheet.selectCodex(places, {
@@ -212,21 +228,21 @@ console.log('\n=== 辞书挑选（无关键词）===');
   // muted：作者显式静音 → 不进世界索引/场记候选（钉选也不豁免），但仍留在卡里可被检索。
   const mutedCard = schema.normalizeCard({
     title: 'm',
-    cast: [{ id: 'ling-yue', name: '凌玥' }],
-    codex: [
-      { id: 'silou', name: '司楼', type: 'institution', tags: ['制度'], links: ['cast:ling-yue'], muted: true },
-      { id: 'yupei', name: '玉佩', type: 'item', tags: ['杂物'] },
+    entities: [
+      { id: 'ling-yue', type: 'person', name: '凌玥' },
+      { id: 'silou', type: 'institution', name: '司楼', tags: ['制度'], links: ['ling-yue'], muted: true },
+      { id: 'yupei', type: 'item', name: '玉佩', tags: ['杂物'] },
     ],
   });
-  eq(mutedCard.codex.find((e) => e.id === 'silou').muted, true, 'muted 归一为布尔');
-  const mutedSel = sheet.selectCodex(mutedCard, { presentIds: ['cast:ling-yue'], threadTags: ['制度'] });
+  eq(mutedCard.entities.find((e) => e.id === 'silou').muted, true, 'muted 归一为布尔');
+  const mutedSel = sheet.selectCodex(mutedCard, { presentIds: ['ling-yue'], threadTags: ['制度'] });
   ok(!mutedSel.some((x) => x.entry.id === 'silou'), '静音条目不进自动进场候选');
   ok(!sheet.renderWorldIndex(mutedCard, 1200).includes('司楼'), '静音条目不进世界索引');
   ok(!sheet.renderWorldTree(mutedCard, 1200).includes('司楼'), '静音条目不进树形索引');
-  ok(mutedCard.codex.find((e) => e.id === 'yupei').muted === false, '未静音条目保持 false');
+  eq(mutedCard.entities.find((e) => e.id === 'yupei').muted, false, '未静音条目保持 false');
   const mutedPinned = schema.normalizeCard({
     title: 'mp',
-    codex: [{ id: 'p', name: '钉选静音', type: 'concept', pinned: true, muted: true }],
+    entities: [{ id: 'p', type: 'concept', name: '钉选静音', pinned: true, muted: true }],
   });
   eq(sheet.selectCodex(mutedPinned, {}).length, 0, '静音优先于钉选，不无条件进场');
 }
@@ -236,8 +252,8 @@ console.log('\n=== 场记单 ===');
 {
   const card = schema.normalizeCard({
     title: 't',
-    cast: [{
-      id: 'ling-yue', name: '凌玥', role: '凌家家主',
+    entities: [{
+      id: 'ling-yue', type: 'person', name: '凌玥', role: '凌家家主',
       identity: { appearance: '窄袖玄色长衫，左手一枚旧玉扳指', station: '凌家家主' },
       voice: { rhythm: '短句，笑着说的狠话' },
       psyche: { traits: ['笑着说话，下手极快', '护短'], wants: ['带走他'], hides: ['七年前'] },
@@ -248,7 +264,7 @@ console.log('\n=== 场记单 ===');
 
   const out = sheet.renderSceneSheet({
     ledger: { time: '初冬 · 黄昏', place: '商务大厦门口', weather: '冷雨', tension: 0.7, characters: { 'ling-yue': { mood: '克制', location: '台阶上' } } },
-    present: card.cast,
+    present: personsOf(card),
     relations: [{ from_name: '凌玥', to_name: '伍卿', kind: '旧识·执念', sentiment: 0.8, note: '未说破' }],
     threads: [{ title: '七年前的雨夜', status: 'open', weight: 0.9, note: '凌玥知情' }],
     codex: [{ entry: { name: '司楼', summary: '官营青楼', reveal: 'public', facets: { rules: ['入内即除籍'] } }, why: ['实体在场'] }],
@@ -262,9 +278,9 @@ console.log('\n=== 场记单 ===');
   ok(out.text.includes('时间 初冬 · 黄昏｜地点 商务大厦门口'), '时空行');
   ok(out.text.includes('在场'), '在场段');
   ok(out.text.includes('私心：今天必须把他带走——不能用施舍的方式'), '私心段（动机，不是节拍）');
-  ok(out.text.includes('外形：窄袖玄色长衫'), '外形来自 cast.identity.appearance');
-  ok(out.text.includes('身份：凌家家主'), '身份来自 cast.identity.station');
-  ok(out.text.includes('性格：笑着说话，下手极快'), '性格来自 cast.psyche.traits');
+  ok(out.text.includes('外形：窄袖玄色长衫'), '外形来自 person.identity.appearance');
+  ok(out.text.includes('身份：凌家家主'), '身份来自 person.identity.station');
+  ok(out.text.includes('性格：笑着说话，下手极快'), '性格来自 person.psyche.traits');
   ok(out.text.includes('边界：'), '知识边界段');
   ok(out.text.includes('原声：「卿儿，过来。」'), '原声回声');
   ok(out.text.includes('未回收的线索'), '线索段');
@@ -283,7 +299,7 @@ console.log('\n=== 场记单 ===');
   // 极小配额：保留必要段，砍掉可选段
   const tiny = sheet.renderSceneSheet({
     ledger: { place: '雨街' },
-    present: card.cast,
+    present: personsOf(card),
     relations: [{ from_name: '凌玥', to_name: '伍卿', kind: 'x', sentiment: 0 }],
     threads: [{ title: '线索一', status: 'open' }],
     codex: [{ entry: { name: '司楼', summary: '很长很长的设定内容'.repeat(50), facets: {} }, why: [] }],
@@ -299,42 +315,38 @@ function estimate(s) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-console.log('\n=== 辞书图谱：去重 / 关系 / 包含 ===');
+console.log('\n=== 辞书图谱：别名 / 关系 / 包含 ===');
 {
   const card = schema.normalizeCard({
     title: '图',
-    cast: [
-      { id: 'ling-yue', name: '凌玥', aliases: ['玥姐姐'], relations: [{ to: 'wu-qing', kind: '旧识', sentiment: 0.8 }] },
-      { id: 'wu-qing', name: '伍卿' },
-      { id: 'zhang-lan', name: '张兰', role: '保安' },
-    ],
-    codex: [
-      { id: 'ling-fu', name: '凌府', type: 'place', summary: '凌家主宅' },
-      { id: 'tianjing', name: '天井', type: 'place', parent_id: 'ling-fu' },
-      { id: 'yupei', name: '玉佩', type: 'item', summary: '无纹', links: ['cast:ling-yue'] },
-      // 与 cast 同名：应合并为同一实体，索引/场记单不重复
-      { id: 'zhang-lan-codex', name: '张兰', type: 'character', summary: '保安' },
+    entities: [
+      { id: 'ling-yue', type: 'person', name: '凌玥', aliases: ['玥姐姐'], relations: [{ to: 'wu-qing', kind: '旧识', sentiment: 0.8 }] },
+      { id: 'wu-qing', type: 'person', name: '伍卿' },
+      { id: 'zhang-lan', type: 'person', name: '张兰', role: '保安' },
+      { id: 'ling-fu', type: 'place', name: '凌府', summary: '凌家主宅' },
+      { id: 'tianjing', type: 'place', name: '天井', parent_id: 'ling-fu' },
+      { id: 'yupei', type: 'item', name: '玉佩', summary: '无纹', links: ['ling-yue'] },
     ],
     edges: [{ from: 'wu-qing', to: 'ling-fu', kind: 'located_in' }],
   });
   const g = graphLib.buildWorldGraph(card);
 
-  ok(g.mergedCodexIds.has('zhang-lan-codex'), '同名 cast/codex 标记为合并');
-  eq(g.resolve('zhang-lan-codex'), 'zhang-lan', 'codex id 解析到人物节点');
+  eq(g.resolve('玥姐姐'), 'ling-yue', '别名解析到人物节点');
+  eq(g.resolve('ling-fu'), 'ling-fu', 'id 解析到自身');
   ok(g.entities.has('ling-fu'), '地点是独立节点');
-  ok(g.edges.some((e) => e.from === 'ling-yue' && e.to === 'wu-qing' && e.kind === '旧识'), 'cast.relations → 关系边');
+  ok(g.edges.some((e) => e.from === 'ling-yue' && e.to === 'wu-qing' && e.kind === '旧识'), 'person.relations → 关系边');
   ok(g.edges.some((e) => (e.from === 'ling-yue' && e.to === 'yupei')
-    || (e.from === 'yupei' && e.to === 'ling-yue')), 'codex.links → 关系边（cast: 前缀被剥掉）');
+    || (e.from === 'yupei' && e.to === 'ling-yue')), 'entity.links → 关系边');
   ok(g.edges.some((e) => e.from === 'tianjing' && e.to === 'ling-fu' && e.kind === 'located_in'), 'parent_id → located_in 边');
   ok(g.edges.some((e) => e.from === 'wu-qing' && e.to === 'ling-fu' && e.kind === 'located_in'), '显式 edges 进入图');
 
   ok([...graphLib.graphNeighbors(g, ['ling-yue'], { depth: 1 })].includes('yupei'), '1 跳邻域包含玉佩');
   eq(graphLib.graphAncestors(g, 'tianjing'), ['ling-fu'], '包含关系可回溯祖先');
 
-  const tree = sheet.renderWorldTree(card, 1200, { skipIds: g.mergedCodexIds });
+  const tree = sheet.renderWorldTree(card, 1200);
   ok(!tree.includes('（当前）'), '树形索引不标注当前地点（运行态归场记单）');
   ok(tree.includes('└ 天井'), '子地点缩进在父地点下');
-  eq((tree.match(/张兰/g) || []).length, 1, '同名实体只出现一次');
+  eq((tree.match(/张兰/g) || []).length, 1, '同一人物只出现一次');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -342,18 +354,15 @@ console.log('\n=== 卡级 lint ===');
 {
   const card = schema.normalizeCard({
     title: 'lint',
-    cast: [
-      { id: 'wu-qing', name: '伍卿', aliases: ['阿卿'] },
-      { id: 'ling-yue', name: '凌玥' },
-      { id: 'zhang-lan', name: '张兰' },
-    ],
-    codex: [
-      { id: 'zhang-lan', name: '张兰', type: 'character' },
-      { id: 'broken', name: '断链', type: 'item', links: ['不存在'] },
-      { id: 'bad-parent', name: '断父', type: 'place', parent_id: '没有这个地方' },
-      { id: 'a', name: '环A', type: 'place', parent_id: 'b' },
-      { id: 'b', name: '环B', type: 'place', parent_id: 'a' },
-      { id: 'collide', name: '别名冲突', type: 'concept', aliases: ['阿卿'] },
+    entities: [
+      { id: 'wu-qing', type: 'person', name: '伍卿', aliases: ['阿卿'] },
+      { id: 'ling-yue', type: 'person', name: '凌玥' },
+      { id: 'zhang-lan', type: 'person', name: '张兰' },
+      { id: 'broken', type: 'item', name: '断链', links: ['不存在'] },
+      { id: 'bad-parent', type: 'place', name: '断父', parent_id: '没有这个地方' },
+      { id: 'a', type: 'place', name: '环A', parent_id: 'b' },
+      { id: 'b', type: 'place', name: '环B', parent_id: 'a' },
+      { id: 'collide', type: 'concept', name: '别名冲突', aliases: ['阿卿'] },
     ],
     claims: [
       { subject: '伍卿', predicate: '位于', cardinality: 'one', object: { kind: 'entity', id: 'a' }, validity: { from_turn: 1 } },
@@ -362,13 +371,22 @@ console.log('\n=== 卡级 lint ===');
   });
   const report = lintLib.lintCard(card);
   const codes = new Set(report.issues.map((i) => i.code));
-  ok(codes.has('duplicate_identity'), '报告同名 cast/codex');
   ok(codes.has('alias_collision'), '报告别名冲突');
   ok(codes.has('broken_link'), '报告断链');
   ok(codes.has('broken_parent'), '报告断父');
   ok(codes.has('parent_cycle'), '报告包含环');
   ok(codes.has('claim_conflict'), '报告单值声明冲突');
-  ok(report.counts.entities >= 4, '报告实体计数');
+  ok(report.counts.entities >= 7, '报告实体计数');
+
+  // normalizeCard 会直接丢掉重复 id 的条目，所以 duplicate_id 只能对裸卡对象检查。
+  const dup = lintLib.lintCard({
+    entities: [
+      { id: 'dup', type: 'person', name: '重复甲' },
+      { id: 'dup', type: 'person', name: '重复乙' },
+    ],
+    timeline: [], claims: [], edges: [], anchors: [],
+  });
+  ok(new Set(dup.issues.map((i) => i.code)).has('duplicate_id'), '报告重复 id');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -378,8 +396,16 @@ console.log('\n=== renderCardText（导出）===');
     title: '女尊世界', subtitle: '捡破烂',
     premise: '被丢掉的人被重新捡起来',
     charter: ['女子主外'],
-    cast: [{ name: '凌玥', role: '家主', identity: { appearance: '玄色长衫', station: '凌家家主' }, voice: { rhythm: '短句' }, psyche: { traits: ['笑里藏刀'], wants: ['带走他'] }, agenda: [{ goal: '今天带走他' }] }],
-    codex: [{ name: '司楼', summary: '官营青楼', facets: { rules: ['入内即除籍'] } }],
+    entities: [
+      {
+        type: 'person', name: '凌玥', role: '家主',
+        identity: { appearance: '玄色长衫', station: '凌家家主' },
+        voice: { rhythm: '短句' },
+        psyche: { traits: ['笑里藏刀'], wants: ['带走他'] },
+        agenda: [{ goal: '今天带走他' }],
+      },
+      { type: 'institution', name: '司楼', summary: '官营青楼', facets: { rules: ['入内即除籍'] } },
+    ],
     timeline: [{ what: '母亲丢下他', canon: 'past' }, { what: '黎婆确诊', canon: 'future' }],
     anchors: [{ label: '序章' }],
   });
@@ -401,7 +427,7 @@ console.log('\n=== 辞书检索（模型主动取证） ===');
 {
   const card = schema.normalizeCard({
     title: '检索测试',
-    codex: [
+    entities: [
       {
         id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'],
         summary: '官营青楼', tags: ['制度'], facets: { rules: ['入内即除籍'] },
@@ -427,7 +453,7 @@ console.log('\n=== 辞书检索（模型主动取证） ===');
   );
   eq(sheet.lookupCodex(card, '不存在'), [], '无命中返回空');
 
-  const text = sheet.renderCodexHit(card.codex[0]);
+  const text = sheet.renderCodexHit(card.entities[0]);
   ok(text.includes('入内即除籍'), '检索结果渲染规则');
   ok(text.includes('官营青楼'), '检索结果渲染摘要');
 
@@ -506,10 +532,11 @@ console.log('\n=== 制卡：逐章抽取字段 + cutoff 定格（A-1） ===');
     chapters: [chapter1, chapter2, chapter3],
     title: '女尊世界', premise: '被丢掉的人被重新捡起来', startAt: 2, sourceTexts,
   });
-  const lingYue = card.cast.find((c) => c.name === '凌玥');
+  const lingYue = personsOf(card).find((c) => c.name === '凌玥');
 
-  ok(!!lingYue, '卡司含主角');
+  ok(!!lingYue, '人物实体含主角');
   eq(card.kind, 'adapted', 'kind=adapted');
+  ok(card.entities.every((e) => e.type !== 'character'), '不产出 character 类型（抽取契约的 character 落成 person）');
   ok(lingYue.identity.appearance.length > 0 && lingYue.identity.appearance.length <= 60, 'appearance 抽到且 ≤60 字');
   eq(lingYue.identity.station, '凌家家主', 'station 抽到');
   ok(lingYue.identity.background.length > 0 && lingYue.identity.background.length <= 160, 'background 裁到 ≤160 字');
@@ -547,14 +574,16 @@ console.log('\n=== 制卡：逐章抽取字段 + cutoff 定格（A-1） ===');
   ok('凌玥' in snapshot.characters && '伍卿' in snapshot.characters, '快照含起点时已登场的人');
   ok(!('黎婆' in snapshot.characters), '快照不含 cutoff 之后才登场的人');
   eq(snapshot.place, '天井', '快照地点取起点章节的地点');
+  eq(snapshot.place_id, '天井', '快照 place_id 是地点实体的裸 id');
   eq(snapshot.last_hook, '凌玥在司楼遇见伍卿', '快照 last_hook 取最后一条 past 事件');
 
-  eq(card.codex.map((e) => e.name).sort(), ['天井', '司楼', '无纹玉佩'].sort(), '辞书收非角色实体');
+  eq(factsOf(card).map((e) => e.name).sort(), ['天井', '司楼', '无纹玉佩'].sort(), '事实实体收非人物条目');
   const known = new Set();
-  for (const c of card.cast) { known.add(c.id); known.add(c.name); for (const a of c.aliases) known.add(a); }
-  for (const e of card.codex) { known.add(e.id); known.add(e.name); for (const a of e.aliases) known.add(a); }
-  ok(card.codex.every((e) => (e.links || []).every((l) => known.has(l))), '同章共现 links 都是已知实体');
-  const linkOf = (name) => card.codex.find((e) => e.name === name).links;
+  const factIds = new Set(factsOf(card).map((e) => e.id));
+  for (const e of card.entities) { known.add(e.id); known.add(e.name); for (const a of e.aliases) known.add(a); }
+  ok(card.entities.every((e) => (e.links || []).every((l) => known.has(l))), '同章共现 links 都是已知实体');
+  ok(card.entities.every((e) => e.type === 'person' || (e.links || []).every((l) => factIds.has(l))), '同章共现 links 只连事实实体');
+  const linkOf = (name) => card.entities.find((e) => e.name === name).links;
   ok(linkOf('司楼').includes('无纹玉佩') && linkOf('无纹玉佩').includes('司楼'), '同章共现：司楼 ↔ 无纹玉佩');
   ok(linkOf('天井').includes('司楼'), '同章共现：天井 ↔ 司楼');
 }
@@ -582,38 +611,33 @@ console.log('\n=== 制卡：同章共现 links 确定性 ===');
   const build = () => smithLib.buildCardFromExtracts({ chapters: extracts, title: 'links', startAt: 1 });
   const a = build();
   const b = build();
-  eq(a.codex.map((e) => e.links), b.codex.map((e) => e.links), '同一输入两次定格，links 完全一致');
-  const byName = (card, name) => card.codex.find((e) => e.name === name);
+  eq(factsOf(a).map((e) => e.links), factsOf(b).map((e) => e.links), '同一输入两次定格，links 完全一致');
+  const byName = (card, name) => card.entities.find((e) => e.name === name);
   ok(byName(a, '甲地').links.includes('乙物'), '同章两实体互链（甲地 → 乙物）');
   ok(byName(a, '乙物').links.includes('甲地'), 'links 双向');
   ok(byName(a, '甲地').links.includes('丁理'), '跨章共现也补链（甲地 ↔ 丁理）');
   ok(!byName(a, '乙物').links.includes('戊地'), '不同章不共现 → 不补链');
-  ok(!a.codex.some((e) => e.name === '丙人'), '角色不进辞书');
+  ok(byName(a, '丙人').type === 'person', '抽取里的 character 落成人物实体，不进事实候选');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-console.log('\n=== 制卡：定格 pass（codex.character 归位） ===');
+console.log('\n=== 制卡：定格 pass（引用归一） ===');
 {
   const card = schema.normalizeCard({
     title: '归位',
-    cast: [
-      { id: 'ling-yue', name: '凌玥', identity: { background: '家主' }, relations: [{ to: '阿卿', kind: '旧识' }] },
-      { id: 'wu-qing', name: '伍卿', aliases: ['阿卿'] },
-    ],
-    codex: [
-      { id: 'wu-qing-codex', name: '伍卿', type: 'character', aliases: ['阿卿'], detail: '被凌玥母亲丢在司楼' },
-      { id: 'ling-yue-codex', name: '凌玥', type: 'character', detail: '辞书版家主' },
-      { id: 'yupei', name: '无纹玉佩', type: 'item', summary: '遇暗发绿光' },
-      { id: 'orphan-char', name: '孤儿角色', type: 'character' },
+    entities: [
+      { id: 'ling-yue', type: 'person', name: '凌玥', identity: { background: '家主' }, relations: [{ to: '阿卿', kind: '旧识' }] },
+      { id: 'wu-qing', type: 'person', name: '伍卿', aliases: ['阿卿'] },
+      { id: 'yupei', type: 'item', name: '无纹玉佩', summary: '遇暗发绿光', links: ['ling-yue'] },
     ],
   });
   const fixed = smithLib.finalizeCard(card);
-  eq(fixed.codex.map((e) => e.id), ['yupei', 'orphan-char'], '有卡司对应的 character 辞书被归位，孤儿保留');
-  const ling = fixed.cast.find((c) => c.name === '凌玥');
-  const wu = fixed.cast.find((c) => c.name === '伍卿');
-  ok(ling.identity.background.includes('辞书版家主'), '归位：detail 并进 identity.background');
-  ok(wu.identity.background.includes('被凌玥母亲丢在司楼'), '归位：按别名匹配到卡司');
-  eq(ling.relations[0].to, 'wu-qing', '关系里指向别名的 to 归一为卡司 id');
+  eq(fixed.entities.map((e) => e.id), ['ling-yue', 'wu-qing', 'yupei'], '人物与事实都在 entities 里，不需要归位');
+  ok(fixed.entities.every((e) => e.type !== 'character'), '定格后没有 character 类型');
+  eq(personsOf(fixed).map((e) => e.id), ['ling-yue', 'wu-qing'], '人物仍是人物');
+  const ling = fixed.entities.find((e) => e.id === 'ling-yue');
+  eq(ling.relations[0].to, 'wu-qing', '关系里指向别名的 to 归一为人物 id');
+  eq(fixed.entities.find((e) => e.id === 'yupei').links, [], 'links 只连事实实体，指向人物的链接被丢弃');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -640,6 +664,8 @@ console.log('\n=== 制卡：断点续跑（按章缓存） ===');
   eq(firstCounter.n, 2, '首次运行：两章都调模型');
   eq(first.stats.cached, 0, '首次运行：无缓存命中');
   eq(first.stats.chapters, 2, 'stats 报告章数');
+  eq(first.stats.entities, 2, 'stats 报告实体数');
+  eq(first.stats.persons, 2, 'stats 报告人物数');
   eq(first.card.source?.canon_cutoff, 'ch1', 'smithCard 写入 canon_cutoff（缺省 = 起点章）');
   eq(first.card.source?.chapters, 2, 'source.chapters 记整本素材章数，不是本次抽取章数');
   ok(!lintLib.lintCard(first.card).issues.some((i) => i.code === 'future_leak'), '续跑产出的卡不触发 future 泄漏');
@@ -696,7 +722,7 @@ console.log('\n=== 制卡：断点续跑（按章缓存） ===');
     const c1 = { n: 0 };
     const r1 = await smithLib.smithCard({ dir: failDir, title: '失败重试', concurrency: 1, extract: boom(c1), cacheDir: failCache });
     eq(c1.n, 2, '失败章不中断整卡，另一章照常抽');
-    eq(r1.card.cast.length, 1, '失败章不产出空壳角色');
+    eq(personsOf(r1.card).length, 1, '失败章不产出空壳人物');
     const c2 = { n: 0 };
     const r2 = await smithLib.smithCard({ dir: failDir, title: '失败重试', concurrency: 1, extract: boom(c2), cacheDir: failCache });
     eq(c2.n, 1, '断点续跑：只重试失败章');
@@ -711,28 +737,28 @@ console.log('\n=== 卡级 lint：内容充分性 + id 冲突 blocker（A-2） ==
 {
   const card = schema.normalizeCard({
     title: 'lint 内容',
-    cast: [
-      { id: 'wu-qing', name: '伍卿' },
-      { id: 'dup', name: '重复甲' },
-      { id: 'dup', name: '重复乙' },
-      { id: 'cross', name: '跨界' },
-    ],
-    codex: [
-      { id: 'c1', name: '素条', type: 'item' },
-      { id: 'cross', name: '同名跨界', type: 'place' },
-      { id: 'orphan-char', name: '孤儿角色', type: 'character', summary: '孤儿' },
-      { id: 'ok', name: '有内容', type: 'place', summary: '有摘要', facets: { rules: ['规矩'] } },
+    entities: [
+      { id: 'wu-qing', type: 'person', name: '伍卿' },
+      { id: 'c1', type: 'item', name: '素条' },
+      { id: 'ok', type: 'place', name: '有内容', summary: '有摘要', facets: { rules: ['规矩'] } },
     ],
   });
   const report = lintLib.lintCard(card);
   const codes = new Set(report.issues.map((i) => i.code));
-  ok(codes.has('cast_incomplete'), '内容充分性：缺 appearance/one_line/rhythm');
-  ok(report.issues.some((i) => i.code === 'cast_incomplete' && i.missing.includes('appearance')), 'cast_incomplete 带 missing 明细');
-  ok(codes.has('cast_hollow'), '内容充分性：既无欲望又无秘密');
-  ok(codes.has('codex_incomplete'), '内容充分性：辞书缺 summary/facets');
-  ok(codes.has('character_codex_orphan'), '内容充分性：孤儿 character 辞书');
-  ok(codes.has('duplicate_id'), 'blocker：id 冲突');
-  ok(report.counts.bySeverity.blocker >= 2, 'counts.bySeverity 统计 blocker');
+  ok(codes.has('person_incomplete'), '内容充分性：缺 appearance/summary/rhythm');
+  ok(report.issues.some((i) => i.code === 'person_incomplete' && i.missing.includes('appearance')), 'person_incomplete 带 missing 明细');
+  ok(codes.has('person_hollow'), '内容充分性：既无欲望又无秘密');
+  ok(codes.has('fact_incomplete'), '内容充分性：事实缺 summary/facets');
+
+  const dup = lintLib.lintCard({
+    entities: [
+      { id: 'dup', type: 'person', name: '重复甲' },
+      { id: 'dup', type: 'person', name: '重复乙' },
+    ],
+    timeline: [], claims: [], edges: [], anchors: [],
+  });
+  ok(new Set(dup.issues.map((i) => i.code)).has('duplicate_id'), 'blocker：id 冲突');
+  ok(report.counts.bySeverity.blocker === 0, '纯内容问题不产生 blocker（不拦保存）');
   eq(
     Object.values(report.counts.bySeverity).reduce((a, b) => a + b, 0),
     report.issues.length,
@@ -740,11 +766,13 @@ console.log('\n=== 卡级 lint：内容充分性 + id 冲突 blocker（A-2） ==
   );
 
   const soft = lintLib.lintCard(schema.normalizeCard({
-    cast: [{ name: '空壳甲' }],
-    codex: [{ name: '素辞', type: 'item' }],
+    entities: [
+      { type: 'person', name: '空壳甲' },
+      { type: 'item', name: '素辞' },
+    ],
   }));
   eq(soft.counts.bySeverity.blocker, 0, '纯内容问题不产生 blocker（不拦保存）');
-  ok(soft.issues.some((i) => i.code === 'cast_incomplete' && i.severity === 'info'), '内容问题只报 info');
+  ok(soft.issues.some((i) => i.code === 'person_incomplete' && i.severity === 'info'), '内容问题只报 info');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

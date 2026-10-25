@@ -2,12 +2,14 @@
  * server/world/lint.js — 世界卡静态体检（纯函数，不调模型）
  *
  * 只报告、不修改。检查的是「结构能不能被渲染/遍历」与「设定之间有没有硬矛盾」：
- * - cast 与 codex 同名（同一实体两套身份）
- * - 别名冲突、断链、断父、包含环、id 冲突
- * - 从未进入任何关系的孤立辞书
+ * - 实体 id 冲突、别名冲突、断链、断父、包含环
+ * - 从未进入任何关系的孤立实体
  * - future 信息泄漏：标成 past 的事件实际发生在 canon 截止章之后
  * - 单值声明在有效期上重叠且对象不同
  * - 内容充分性：进运行时会不会是空壳（只报 info，不拦保存）
+ *
+ * v5 是单一实体命名空间（persons + facts），不再有 cast/codex 同名合并，
+ * 也不再有 type='character' 的重复分类。
  *
  * 严重度约定：blocker 只给「运行时会出错/身份会打架/后文会漏进前史」的问题
  * （id 冲突、包含环、future 泄漏）；其余一律 info / minor / major。
@@ -16,7 +18,8 @@
 
 import { buildWorldGraph } from './graph.js';
 
-const stripRef = (v) => String(v || '').trim().replace(/^(cast|codex):/, '');
+const stripRef = (v) => String(v || '').trim().replace(/^(?:cast|codex|entity):/, '');
+const isPerson = (e) => e?.type === 'person';
 
 /**
  * 从 `ch5` / `ch.5` / `第5章` / 裸数字里取章节号。
@@ -43,29 +46,14 @@ export function lintCard(card) {
     issues.push({ severity, code, message, ...extra });
   };
 
-  const cast = card.cast || [];
-  const codex = card.codex || [];
+  const entities = card.entities || [];
+  const persons = entities.filter(isPerson);
+  const facts = entities.filter((e) => !isPerson(e));
   const graph = buildWorldGraph(card);
-
-  /* ---- 同名 cast/codex：会被 graph 合并，但仍提示作者整理 ---- */
-  const castByAlias = new Map();
-  for (const c of cast) {
-    for (const name of [c.name, ...(c.aliases || [])]) {
-      if (name) castByAlias.set(name, c);
-    }
-  }
-  for (const e of codex) {
-    const hit = [e.name, ...(e.aliases || [])].map((n) => castByAlias.get(n)).find(Boolean);
-    if (hit) {
-      push('info', 'duplicate_identity', `辞书「${e.name}」与人物「${hit.name}」同名，运行时会按同一实体合并`, {
-        ids: [e.id, hit.id],
-      });
-    }
-  }
 
   /* ---- 别名冲突：同一别名指向不同实体 ---- */
   const aliasOwner = new Map();
-  const addAlias = (alias, id, kind) => {
+  const addAlias = (alias, id) => {
     const key = String(alias || '').trim();
     if (!key) return;
     const prev = aliasOwner.get(key);
@@ -74,40 +62,32 @@ export function lintCard(card) {
         ids: [prev.id, id],
       });
     } else {
-      aliasOwner.set(key, { id, kind });
+      aliasOwner.set(key, { id });
     }
   };
-  for (const c of cast) {
-    addAlias(c.name, c.id, 'cast');
-    for (const a of c.aliases || []) addAlias(a, c.id, 'cast');
-  }
-  for (const e of codex) {
-    addAlias(e.name, e.id, 'codex');
-    for (const a of e.aliases || []) addAlias(a, e.id, 'codex');
+  for (const e of entities) {
+    addAlias(e.name, e.id);
+    for (const a of e.aliases || []) addAlias(a, e.id);
   }
 
-  /* ---- 断链 / 断父 ---- */
+  /* ---- 断链 / 断父 / 断关系 ---- */
   const known = new Set();
-  for (const c of cast) {
-    known.add(c.id); known.add(c.name);
-    for (const a of c.aliases || []) known.add(a);
-  }
-  for (const e of codex) {
+  for (const e of entities) {
     known.add(e.id); known.add(e.name);
     for (const a of e.aliases || []) known.add(a);
   }
 
-  for (const e of codex) {
+  for (const e of entities) {
     for (const link of e.links || []) {
       if (!known.has(stripRef(link))) {
-        push('major', 'broken_link', `辞书「${e.name}」的 links 指向不存在的实体「${link}」`, { ids: [e.id] });
+        push('major', 'broken_link', `「${e.name}」的 links 指向不存在的实体「${link}」`, { ids: [e.id] });
       }
     }
     if (e.parent_id && !known.has(stripRef(e.parent_id))) {
-      push('major', 'broken_parent', `辞书「${e.name}」的 parent_id 指向不存在的实体「${e.parent_id}」`, { ids: [e.id] });
+      push('major', 'broken_parent', `「${e.name}」的 parent_id 指向不存在的实体「${e.parent_id}」`, { ids: [e.id] });
     }
   }
-  for (const c of cast) {
+  for (const c of persons) {
     for (const r of c.relations || []) {
       if (r.to && !known.has(stripRef(r.to))) {
         push('minor', 'broken_relation', `人物「${c.name}」的关系指向不存在的实体「${r.to}」`, { ids: [c.id] });
@@ -116,9 +96,9 @@ export function lintCard(card) {
   }
 
   /* ---- 包含环 ---- */
-  const parentOf = new Map(codex.map((e) => [e.id, stripRef(e.parent_id)]));
+  const parentOf = new Map(entities.map((e) => [e.id, stripRef(e.parent_id)]));
   const reported = new Set();
-  for (const e of codex) {
+  for (const e of entities) {
     const path = [];
     let cur = e.id;
     const seen = new Set();
@@ -136,78 +116,55 @@ export function lintCard(card) {
     }
   }
 
-  /* ---- 孤立辞书：没有边、没钉选、没标签 ---- */
+  /* ---- 孤立事实实体：没有边、没钉选、没标签 ---- */
   const incoming = new Set(graph.edges.map((e) => e.to));
-  for (const e of codex) {
+  for (const e of facts) {
     if (e.pinned) continue;
     if ((e.links || []).length) continue;
     if (incoming.has(e.id)) continue;
     if ((e.tags || []).length) continue;
-    push('info', 'orphan_codex', `辞书「${e.name}」没有任何连接、标签或钉选，可能永远不会自动进场`, { ids: [e.id] });
+    push('info', 'orphan_entity', `「${e.name}」没有任何连接、标签或钉选，可能永远不会自动进场`, { ids: [e.id] });
   }
 
-  /* ---- 内容充分性（info）：进运行时会是空壳的卡司/辞书，只提示不拦保存 ---- */
-  for (const c of cast) {
+  /* ---- 内容充分性（info）：进运行时会是空壳的人物/事实，只提示不拦保存 ---- */
+  for (const c of persons) {
     const missing = [];
     if (!String(c.identity?.appearance || '').trim()) missing.push('appearance');
-    if (!String(c.one_line || '').trim()) missing.push('one_line');
+    if (!String(c.summary || '').trim()) missing.push('summary');
     if (!String(c.voice?.rhythm || '').trim()) missing.push('rhythm');
     if (missing.length) {
-      push('info', 'cast_incomplete', `人物「${c.name}」缺少 ${missing.join(' / ')}，进运行时容易变成空壳`, {
+      push('info', 'person_incomplete', `人物「${c.name}」缺少 ${missing.join(' / ')}，进运行时容易变成空壳`, {
         ids: [c.id], missing,
       });
     }
     const wants = c.psyche?.wants || [];
     const hides = c.psyche?.hides || [];
     if (!wants.length && !hides.length) {
-      push('info', 'cast_hollow', `人物「${c.name}」既没有欲望也没有秘密，演绎时缺少内在驱动`, { ids: [c.id] });
+      push('info', 'person_hollow', `人物「${c.name}」既没有欲望也没有秘密，演绎时缺少内在驱动`, { ids: [c.id] });
     }
   }
-  for (const e of codex) {
+  for (const e of facts) {
     const summary = String(e.summary || '').trim();
     const facets = e.facets || {};
     const hasFacet = [facets.sensory, facets.history].some((v) => String(v || '').trim())
       || (facets.rules || []).length > 0
       || (facets.consequences || []).length > 0;
     if (!summary || !hasFacet) {
-      push('info', 'codex_incomplete', `辞书「${e.name}」缺少${summary ? '' : ' summary'}${hasFacet ? '' : ' 细节（facets 全空）'}`, {
+      push('info', 'fact_incomplete', `「${e.name}」缺少${summary ? '' : ' summary'}${hasFacet ? '' : ' 细节（facets 全空）'}`, {
         ids: [e.id],
       });
-    }
-    if (e.type === 'character') {
-      const matched = [e.name, ...(e.aliases || [])].some((n) => castByAlias.has(n));
-      if (!matched) {
-        push('info', 'character_codex_orphan', `辞书「${e.name}」是 character 类型，但卡司里没有同名/同别名角色，建议归位（转 identity.background）或删除`, {
-          ids: [e.id],
-        });
-      }
     }
   }
 
   /* ---- id 冲突（blocker）：graph 用 id 建 Map，重复会互相覆盖 ---- */
-  const castIdOwner = new Map();
-  for (const c of cast) {
-    const id = String(c.id || '').trim();
-    if (!id) continue;
-    if (castIdOwner.has(id)) {
-      push('blocker', 'duplicate_id', `卡司 id 重复：「${id}」同时属于「${castIdOwner.get(id)}」与「${c.name}」，运行时身份会互相覆盖`, { ids: [id] });
-    } else {
-      castIdOwner.set(id, c.name);
-    }
-  }
-  const codexIdOwner = new Map();
-  for (const e of codex) {
+  const idOwner = new Map();
+  for (const e of entities) {
     const id = String(e.id || '').trim();
     if (!id) continue;
-    if (codexIdOwner.has(id)) {
-      push('blocker', 'duplicate_id', `辞书 id 重复：「${id}」同时属于「${codexIdOwner.get(id)}」与「${e.name}」，运行时身份会互相覆盖`, { ids: [id] });
+    if (idOwner.has(id)) {
+      push('blocker', 'duplicate_id', `实体 id 重复：「${id}」同时属于「${idOwner.get(id)}」与「${e.name}」，运行时身份会互相覆盖`, { ids: [id] });
     } else {
-      codexIdOwner.set(id, e.name);
-    }
-  }
-  for (const [id, name] of codexIdOwner) {
-    if (castIdOwner.has(id)) {
-      push('blocker', 'duplicate_id', `cast 与 codex 共用 id「${id}」（${castIdOwner.get(id)} / ${name}），运行时身份会互相覆盖`, { ids: [id] });
+      idOwner.set(id, e.name);
     }
   }
 
@@ -249,8 +206,9 @@ export function lintCard(card) {
 
   const counts = {
     entities: graph.entities.size,
+    persons: persons.length,
+    facts: facts.length,
     edges: graph.edges.length,
-    merged_codex: graph.mergedCodexIds.size,
     issues: issues.length,
     bySeverity,
   };

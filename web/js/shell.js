@@ -142,11 +142,12 @@ function buildWorldSubbar(worldId) {
   ));
 
   if (world) {
+    const stats = entityStats(world);
     subbarEl.appendChild(el('div.subbar-world-info', {},
       el('div.subbar-world-meta', {},
         el('span.chip.is-plain', {}, `${world.card?.charter_count || 0} 条世界规则`),
-        el('span.chip.is-plain', {}, `${world.card?.cast?.length || 0} 人`),
-        el('span.chip.is-plain', {}, `${world.card?.codex_count || 0} 条设定集`),
+        el('span.chip.is-plain', {}, `${stats.persons} 人`),
+        el('span.chip.is-plain', {}, `${stats.facts} 条设定集`),
       ),
     ));
   }
@@ -186,6 +187,7 @@ function paintWorlds() {
   }
 
   for (const w of items) {
+    const stats = entityStats(w);
     listEl.appendChild(el('button.sb-item', {
       type: 'button',
       class: w.id === activeWorldId ? 'is-active' : '',
@@ -196,12 +198,24 @@ function paintWorlds() {
         el('div.sb-item-title', {}, w.title),
         el('div.sb-item-meta', {},
           el('span', {}, `${w.session_count || 0} 段`),
-          w.card?.codex_count ? el('span.dot') : null,
-          w.card?.codex_count ? el('span', {}, `${w.card.codex_count} 条设定集`) : null,
+          stats.facts ? el('span.dot') : null,
+          stats.facts ? el('span', {}, `${stats.facts} 条设定集`) : null,
         ),
       ),
     ));
   }
+}
+
+/**
+ * v5 列表计数：GET /api/worlds 顶层带 persons[] / entity_count / fact_count。
+ * 字段缺失时按 0 显示，不读旧 cast/codex（v5 卡不再有它们）。
+ */
+function entityStats(w) {
+  const persons = Array.isArray(w.persons) ? w.persons.length : 0;
+  const facts = Number.isFinite(w.fact_count)
+    ? w.fact_count
+    : Number.isFinite(w.entity_count) ? Math.max(0, w.entity_count - persons) : 0;
+  return { persons, facts };
 }
 
 function paintSessions() {

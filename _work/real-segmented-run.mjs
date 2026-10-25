@@ -133,7 +133,8 @@ try {
   if (imp.status !== 201) throw new Error(`导入失败 ${imp.status}: ${imp.text}`);
   const world = imp.json;
 
-  console.log(`· 世界卡：${world.title}（卡司 ${world.card?.cast?.length || '?'}，辞书 ${world.codex?.length || '?'}）`);
+  const persons = (world.card?.entities || []).filter((e) => e.type === 'person').length;
+  console.log(`· 世界卡：${world.title}（角色 ${persons}，设定集 ${(world.card?.entities || []).length - persons}）`);
 
   console.log('\n=== 分段演绎：3 轮 ===');
   const segSession = await req('POST', '/api/sessions', {

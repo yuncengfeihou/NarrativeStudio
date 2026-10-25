@@ -8,45 +8,15 @@
  * 纯函数：不碰存储、不调 LLM。
  */
 
-import {
-  CAST_PATHS, CODEX_PATHS, PLAYER_PATHS, WORLD_PATHS, LIST_PATH_SET as LIST_PATHS,
-} from './state-paths.js';
+import { pathsFor, LIST_PATH_SET as LIST_PATHS } from './state-paths.js';
+import { isPerson, PERSON_TYPE } from './schema.js';
 import { applyFates } from './fates.js';
 
 const isObj = (v) => v != null && typeof v === 'object' && !Array.isArray(v);
 const asArray = (v) => (Array.isArray(v) ? v : []);
 
-function cloneCast(c) {
-  return {
-    ...c,
-    aliases: [...(c.aliases || [])],
-    identity: { ...(c.identity || {}) },
-    voice: {
-      ...(c.voice || {}),
-      address: { ...(c.voice?.address || {}) },
-      lexicon: [...(c.voice?.lexicon || [])],
-      never: [...(c.voice?.never || [])],
-      exemplars: [...(c.voice?.exemplars || [])],
-    },
-    psyche: {
-      traits: [...(c.psyche?.traits || [])],
-      wants: [...(c.psyche?.wants || [])],
-      fears: [...(c.psyche?.fears || [])],
-      hides: [...(c.psyche?.hides || [])],
-      values: [...(c.psyche?.values || [])],
-    },
-    knowledge: {
-      knows: [...(c.knowledge?.knows || [])],
-      does_not_know: [...(c.knowledge?.does_not_know || [])],
-      believes_falsely: [...(c.knowledge?.believes_falsely || [])],
-    },
-    agenda: (c.agenda || []).map((a) => ({ ...a })),
-    relations: (c.relations || []).map((r) => ({ ...r })),
-  };
-}
-
-function cloneCodex(e) {
-  return {
+function cloneEntity(e) {
+  const base = {
     ...e,
     aliases: [...(e.aliases || [])],
     tags: [...(e.tags || [])],
@@ -56,16 +26,49 @@ function cloneCodex(e) {
       rules: [...(e.facets?.rules || [])],
       consequences: [...(e.facets?.consequences || [])],
     },
+    sources: asArray(e.sources).map((s) => ({ ...s })),
+  };
+  if (!isPerson(e)) return base;
+  return {
+    ...base,
+    identity: { ...(e.identity || {}) },
+    voice: {
+      ...(e.voice || {}),
+      address: { ...(e.voice?.address || {}) },
+      lexicon: [...(e.voice?.lexicon || [])],
+      never: [...(e.voice?.never || [])],
+      exemplars: [...(e.voice?.exemplars || [])],
+    },
+    psyche: {
+      traits: [...(e.psyche?.traits || [])],
+      wants: [...(e.psyche?.wants || [])],
+      fears: [...(e.psyche?.fears || [])],
+      hides: [...(e.psyche?.hides || [])],
+      values: [...(e.psyche?.values || [])],
+    },
+    knowledge: {
+      knows: [...(e.knowledge?.knows || [])],
+      does_not_know: [...(e.knowledge?.does_not_know || [])],
+      believes_falsely: [...(e.knowledge?.believes_falsely || [])],
+    },
+    agenda: (e.agenda || []).map((a) => ({ ...a })),
+    relations: (e.relations || []).map((r) => ({ ...r })),
   };
 }
 
 /** 剧情里第一次出现的人物：只保证渲染所需的字段齐全，身份根保持空白。 */
-export function emptyCastEntry(id, name = id) {
+export function emptyPersonEntry(id, name = id) {
   return {
-    id, name,
+    id,
+    type: PERSON_TYPE,
+    name,
     aliases: [],
+    tags: [],
+    links: [],
+    summary: '',
+    detail: '',
+    facets: { sensory: '', rules: [], consequences: [], history: '' },
     role: '临时登场',
-    one_line: '',
     status: '临时登场',
     condition: '',
     mood: '',
@@ -77,22 +80,32 @@ export function emptyCastEntry(id, name = id) {
     knowledge: { knows: [], does_not_know: [], believes_falsely: [] },
     agenda: [],
     relations: [],
+    reveal: 'public',
+    canon_from: 'session',
+    sources: [],
+    pinned: false,
+    muted: false,
+    parent_id: '',
     always_present: false,
     weight: 0.3,
     improvised: true,
   };
 }
 
-/** 剧情里第一次出现的地点/物件/机构。 */
-function emptyCodexEntry(id, fields = {}) {
+/** 剧情里第一次出现的地点/物件/机构/概念。 */
+function emptyFactEntry(id, fields = {}) {
   const facets = isObj(fields.facets) ? fields.facets : {};
+  const type = ['place', 'institution', 'item', 'faction', 'concept', 'custom'].includes(fields.type)
+    ? fields.type
+    : 'custom';
   return {
     id,
-    type: fields.type || 'custom',
+    type,
     name: fields.name || id,
     aliases: asArray(fields.aliases),
     tags: asArray(fields.tags),
     summary: String(fields.summary || ''),
+    detail: String(fields.detail || ''),
     facets: {
       sensory: String(facets.sensory || ''),
       rules: asArray(facets.rules).map(String),
@@ -102,10 +115,16 @@ function emptyCodexEntry(id, fields = {}) {
     links: asArray(fields.links),
     reveal: ['public', 'rumor', 'secret'].includes(fields.reveal) ? fields.reveal : 'public',
     canon_from: String(fields.canon_from || 'session'),
-    detail: String(fields.detail || ''),
-    pinned: false,
-    parent_id: String(fields.parent_id || ''),
     sources: asArray(fields.sources),
+    pinned: false,
+    muted: false,
+    parent_id: String(fields.parent_id || ''),
+    status: String(fields.status || ''),
+    condition: String(fields.condition || ''),
+    access: String(fields.access || ''),
+    open_to: String(fields.open_to || ''),
+    owner_id: String(fields.owner_id || ''),
+    location_id: String(fields.location_id || ''),
     improvised: true,
   };
 }
@@ -150,6 +169,8 @@ function removeList(obj, path, value) {
 /**
  * 把一条增量应用到实体上。
  * set 写标量；add/remove 写列表；introduce 创建会话内的新实体。
+ * entity_kind 是 v5 的实体类型值（person / place / …），不再有 cast/codex 两套。
+ * player / world 不是卡里的实体：前者投影到 world.player，后者投影到 world.runtime。
  */
 function applyDelta(world, delta) {
   const kind = String(delta.entity_kind || '');
@@ -157,86 +178,58 @@ function applyDelta(world, delta) {
   const path = String(delta.path || '');
   const op = delta.op || 'set';
   const value = delta.value;
+  const allowed = pathsFor(kind);
+  if (!allowed) return;
 
-  if (kind === 'cast') {
-    const introduceName = op === 'introduce' && isObj(value) ? String(value.name || '') : '';
-    let c = world.cast.find((x) => x.id === id || x.name === id
-      || (introduceName && x.name === introduceName));
-    if (!c && op === 'introduce') {
-      c = emptyCastEntry(id, introduceName || id);
-      world.cast.push(c);
-    }
-    if (!c && op !== 'introduce') {
-      c = emptyCastEntry(id, id);
-      world.cast.push(c);
-    }
-    if (!c) return;
-    if (op === 'introduce') {
-      if (!isObj(value)) return;
-      for (const [k, v] of Object.entries(value)) {
-        if (k === 'id' || k === 'name') continue;
-        if (LIST_PATHS.has(k)) c[k] = asArray(v).map(String);
-        else if (CAST_PATHS.has(k)) c[k] = String(v ?? '');
-        else if (k === 'knowledge' || k === 'psyche' || k === 'voice' || k === 'identity') {
-          c[k] = { ...(c[k] || {}), ...(isObj(v) ? v : {}) };
-        }
+  if (kind === 'player' || kind === 'world') {
+    const target = kind === 'player' ? world.player : world.runtime;
+    if (!isObj(target) || !allowed.has(path)) return;
+    if (op === 'add') addList(target, path, value);
+    else if (op === 'remove') removeList(target, path, value);
+    else if (path.includes('.')) setAt(target, path, value);
+    else target[path] = String(value ?? '');
+    return;
+  }
+
+  const person = kind === PERSON_TYPE;
+  const introduceName = op === 'introduce' && isObj(value) ? String(value.name || '') : '';
+  let entity = world.entities.find((x) => x.id === id || x.name === id
+    || (introduceName && x.name === introduceName));
+  if (!entity && op === 'introduce') {
+    entity = person
+      ? emptyPersonEntry(id, introduceName || id)
+      : emptyFactEntry(id, { ...(isObj(value) ? value : {}), name: introduceName || id });
+    world.entities.push(entity);
+    if (!person) return;
+  }
+  if (!entity) {
+    entity = person ? emptyPersonEntry(id, id) : emptyFactEntry(id, { name: id });
+    world.entities.push(entity);
+  }
+  if (op === 'introduce') {
+    if (!isObj(value)) return;
+    for (const [k, v] of Object.entries(value)) {
+      if (k === 'id') continue;
+      if (k === 'type') continue;
+      if (k === 'name') {
+        entity.name = String(v || entity.name);
+      } else if (k === 'facets' && isObj(v)) {
+        entity.facets = { ...entity.facets, ...v };
+      } else if (LIST_PATHS.has(k)) {
+        entity[k] = asArray(v).map(String);
+      } else if (allowed.has(k)) {
+        entity[k] = String(v ?? '');
+      } else if (['knowledge', 'psyche', 'voice', 'identity'].includes(k)) {
+        entity[k] = { ...(entity[k] || {}), ...(isObj(v) ? v : {}) };
       }
-      if (String(value.name || '').trim()) c.name = String(value.name).trim();
-      return;
     }
-    if (!CAST_PATHS.has(path)) return;
-    if (op === 'add') addList(c, path, value);
-    else if (op === 'remove') removeList(c, path, value);
-    else if (path.includes('.')) setAt(c, path, value);
-    else c[path] = String(value ?? '');
     return;
   }
-
-  if (kind === 'codex') {
-    const introduceName = op === 'introduce' && isObj(value) ? String(value.name || '') : '';
-    let e = world.codex.find((x) => x.id === id || x.name === id
-      || (introduceName && x.name === introduceName));
-    if (!e && op === 'introduce') {
-      e = emptyCodexEntry(id, isObj(value) ? value : {});
-      world.codex.push(e);
-      return;
-    }
-    if (!e) {
-      e = emptyCodexEntry(id, { name: id });
-      world.codex.push(e);
-    }
-    if (op === 'introduce') {
-      if (!isObj(value)) return;
-      for (const [k, v] of Object.entries(value)) {
-        if (k === 'id') continue;
-        if (k === 'name') e.name = String(v || e.name);
-        else if (LIST_PATHS.has(k)) e[k] = asArray(v).map(String);
-        else if (k === 'facets' && isObj(v)) e.facets = { ...e.facets, ...v };
-        else if (CODEX_PATHS.has(k)) e[k] = String(v ?? '');
-      }
-      return;
-    }
-    if (!CODEX_PATHS.has(path)) return;
-    if (op === 'add') addList(e, path, value);
-    else if (op === 'remove') removeList(e, path, value);
-    else if (path.includes('.')) setAt(e, path, value);
-    else e[path] = String(value ?? '');
-    return;
-  }
-
-  if (kind === 'player') {
-    if (!PLAYER_PATHS.has(path)) return;
-    if (op === 'add') addList(world.player, path, value);
-    else if (op === 'remove') removeList(world.player, path, value);
-    else if (path.includes('.')) setAt(world.player, path, value);
-    else world.player[path] = String(value ?? '');
-    return;
-  }
-
-  if (kind === 'world') {
-    if (!WORLD_PATHS.has(path)) return;
-    world.runtime[path] = path === 'tension' ? Number(value) : value;
-  }
+  if (!allowed.has(path)) return;
+  if (op === 'add') addList(entity, path, value);
+  else if (op === 'remove') removeList(entity, path, value);
+  else if (path.includes('.')) setAt(entity, path, value);
+  else entity[path] = String(value ?? '');
 }
 
 /**
@@ -249,8 +242,7 @@ function applyDelta(world, delta) {
 export function buildEffectiveWorld(card, deltas = [], fates = []) {
   const world = {
     ...card,
-    cast: (card.cast || []).map(cloneCast),
-    codex: (card.codex || []).map(cloneCodex),
+    entities: (card.entities || []).map(cloneEntity),
     player: {
       ...(card.player || {}),
       knowledge: {
@@ -271,7 +263,7 @@ export function buildEffectiveWorld(card, deltas = [], fates = []) {
 
   // 优先级：运行期 world_state > fates > 卡初始值。
   // fates 代表「按条件解锁的预置增量」，语义上就是 valid_from 由条件表达式决定的
-  // world_state delta。运行期已经显式写过的路径，fates 不得覆盖——否则玩家/史官
+  // world_state delta。运行期已经显式写过的路径，fates 不得覆盖——否则玩家/记忆整理
   // 在剧情里造就的变化会被卡里的预设轨迹抹掉。
   if (fates && fates.length) {
     const touched = new Set();

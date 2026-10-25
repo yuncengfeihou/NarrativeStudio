@@ -12,7 +12,7 @@
  */
 import { config } from '../config.js';
 import { chat } from '../llm.js';
-import { buildAliasIndex, normalizeCard, resolveEntity } from '../world/schema.js';
+import { buildAliasIndex, normalizeCard, PERSON_TYPE, resolveEntity } from '../world/schema.js';
 import { pathsFor } from '../world/state-paths.js';
 import {
   addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getRelations, getScenes,
@@ -290,7 +290,7 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
       setCharState(sessionId, { branchId, who, field, value, turn: turnNo });
       const ref = resolveEntity(who, aliasIndex);
       const isPlayer = who === playerName;
-      const kind = isPlayer ? 'player' : (ref.kind || 'cast');
+      const kind = isPlayer ? 'player' : (ref.type || PERSON_TYPE);
       // 校勘模型可能给出任意字段；只有投影器认识的路径才写进世界状态。
       if (pathsFor(kind)?.has(field)) {
         addWorldState(sessionId, {
@@ -438,9 +438,10 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const presentIds = new Set(Object.keys(ledger.characters || {}));
   const playerName = card.player?.name || '';
-  const offstage = (card.cast || [])
+  const offstage = (card.entities || [])
+    .filter((c) => c.type === PERSON_TYPE)
     .filter((c) => !c.always_present && !presentIds.has(c.id) && !presentIds.has(c.name) && c.name !== playerName)
-    .filter((c) => (c.agenda?.length || c.psyche.wants?.length || c.psyche.hides?.length))
+    .filter((c) => (c.agenda?.length || c.psyche?.wants?.length || c.psyche?.hides?.length))
     .slice(0, 6);
   if (!offstage.length) return { events: [] };
 

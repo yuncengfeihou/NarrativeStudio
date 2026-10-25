@@ -101,7 +101,6 @@ export default {
       }
 
       const card = world.card || {};
-      const codex = world.codex || [];
       const sessions = world.sessions || [];
 
       const grid = el('div.wk');
@@ -118,13 +117,31 @@ export default {
       panes.appendChild(pane('charter', charterPane(card)));
       panes.appendChild(pane('cast', castPane(card)));
       panes.appendChild(pane('timeline', timelinePane(card)));
-      panes.appendChild(pane('codex', codexPane(card, codex)));
+      panes.appendChild(pane('codex', codexPane()));
       main.appendChild(panes);
 
-      side.appendChild(statsCard(world, card, codex, sessions));
+      side.appendChild(statsCard(world, card, sessions));
       side.appendChild(healthCard(lintReport));
       side.appendChild(sessionsCard(sessions));
       side.appendChild(sourceCard(world));
+    }
+
+    /**
+     * v5 只有一个实体数组：person 与事实实体靠 type 区分，人物=person，设定集=其余类型。
+     * 详情接口顶层返回 entities（已合并 pinned/muted），缺失时退回卡片内同一份。
+     */
+    function allEntities() {
+      const card = world?.card || {};
+      return Array.isArray(world?.entities) ? world.entities
+        : Array.isArray(card.entities) ? card.entities : [];
+    }
+
+    function personEntities() {
+      return allEntities().filter((e) => e.type === 'person');
+    }
+
+    function factEntities() {
+      return allEntities().filter((e) => e.type !== 'person');
     }
 
     function hero(w, card) {
@@ -151,12 +168,11 @@ export default {
     }
 
     function tabBar() {
-      const card = world.card || {};
       const items = [
         ['charter', '世界规则', 'scroll'],
-        ['cast', `人物 ${(card.cast || []).length}`, 'users'],
-        ['timeline', `时间线 ${(card.timeline || []).length}`, 'layers'],
-        ['codex', `设定集 ${(world.codex || []).length}`, 'book'],
+        ['cast', `人物 ${personEntities().length}`, 'users'],
+        ['timeline', `时间线 ${(world?.card?.timeline || []).length}`, 'layers'],
+        ['codex', `设定集 ${factEntities().length}`, 'book'],
       ];
       const bar = el('div.editor-tabs');
       for (const [key, label, iconName] of items) {
@@ -256,8 +272,8 @@ export default {
 
     /* ---- 人物 ---- */
     function castPane(card) {
-      const cast = card.cast || [];
-      if (!cast.length) {
+      const persons = personEntities();
+      if (!persons.length) {
         return el('div.empty', {},
           el('div.empty-icon', {}, icon('users', { size: 20 })),
           el('div.empty-title', {}, '还没有人物'),
@@ -265,7 +281,7 @@ export default {
         );
       }
       const grid = el('div.cast-grid');
-      cast.forEach((c) => grid.appendChild(castCell(c)));
+      persons.forEach((c) => grid.appendChild(castCell(c)));
 
       // 开局种子（v4：每个开局点各有一份，这里显示默认开局点的）
       const anchor = (card.anchors || [])[0];
@@ -305,7 +321,7 @@ export default {
             c.always_present ? el('span.chip.is-accent', { style: 'font-size:9px;padding:0 4px;' }, '常驻') : null,
           ),
           el('div.cast-role', {}, c.role || ''),
-          c.one_line ? el('div.cast-line', {}, c.one_line) : null,
+          c.summary ? el('div.cast-line', {}, c.summary) : null,
           c.psyche?.traits?.length
             ? el('div.cast-traits', {}, ...c.psyche.traits.slice(0, 3)
               .map((t) => el('span.chip.is-plain', { style: 'font-size:9px;padding:0 4px;' }, t)))
@@ -349,15 +365,21 @@ export default {
         .map((r) => [`${r.to}`, r.kind, r.note].filter(Boolean).join('｜'))
         .filter(Boolean);
       push('关系', relations.join('；'));
+      // 运行期初始值：由记忆 Agent 在会话里改写，卡片这里只是开局值。
+      push('初始状态', c.status);
+      push('初始处境', c.condition);
+      push('初始心境', c.mood);
+      push('初始所在', c.location);
+      push('初始目标', c.goal);
 
       openSheet({
         title: c.name,
         cancelText: '关闭',
         render(body) {
           body.appendChild(el('div', {},
-            c.one_line ? el('div', {
+            c.summary ? el('div', {
               style: 'padding:11px 13px;border-radius:8px;background:var(--paper-sunken);border-left:2px solid var(--line-strong);font-size:var(--fs-label);line-height:1.75;color:var(--ink-2);margin-bottom:16px;',
-            }, c.one_line) : null,
+            }, c.summary) : null,
             ...rows.map(([k, v]) => el('div', {
               style: 'display:flex;gap:12px;padding:10px 0;border-bottom:1px solid var(--line-soft);align-items:flex-start;',
             },
@@ -436,29 +458,33 @@ export default {
       return wrap;
     }
 
-    /* ---- 设定集 ---- */
-    const CODEX_TYPE_LABEL = {
+    /* ---- 设定集（非 person 的事实实体） ---- */
+    const FACT_TYPE_LABEL = {
       place: '地点', institution: '机构', item: '物品',
-      faction: '势力', concept: '概念', character: '角色', custom: '其他',
+      faction: '势力', concept: '概念', custom: '其他',
     };
+    // 分组顺序固定，未知 type 追加在末尾（后端 normalize 之外的脏值也不能吞掉）。
+    const FACT_TYPE_ORDER = ['place', 'institution', 'faction', 'item', 'concept', 'custom'];
 
-    function codexPane(card, codex) {
-      const q = codexQuery.trim();
+    function codexPane() {
+      const facts = factEntities();
+      const q = codexQuery.trim().toLowerCase();
       const list = q
-        ? codex.filter((e) => (e.name + ' ' + (e.aliases || []).join(' ') + ' ' + (e.summary || '')).includes(q))
-        : codex;
+        ? facts.filter((e) => [e.name, e.summary, ...(e.aliases || [])]
+          .some((s) => String(s || '').toLowerCase().includes(q)))
+        : facts;
 
       const wrap = el('div', {});
       wrap.appendChild(el('div.sect-head', {},
         el('h3.sect-title', {}, '设定集'),
-        el('span.sect-action', {}, `${codex.length} 条`),
+        el('span.sect-action', {}, `${facts.length} 条`),
       ));
       wrap.appendChild(el('p.sect-desc', {},
         '类型化的世界实体。它们不靠关键词触发——进场靠「实体在场 / 主题匹配 / 你固定带出」，由引擎按当前场景渲染。'),
       );
 
       const searchInput = el('input.field', {
-        type: 'text', placeholder: '搜索名称或别名…', value: codexQuery,
+        type: 'text', placeholder: '搜索名称、别名或摘要…', value: codexQuery,
         oninput: (e) => { codexQuery = e.target.value; render(); },
       });
       wrap.appendChild(el('div.sect-search', {}, searchInput));
@@ -468,16 +494,17 @@ export default {
         return wrap;
       }
 
-      const grouped = {};
+      const groups = new Map(FACT_TYPE_ORDER.map((t) => [t, []]));
       for (const e of list) {
         const t = e.type || 'custom';
-        grouped[t] = grouped[t] || [];
-        grouped[t].push(e);
+        if (!groups.has(t)) groups.set(t, []);
+        groups.get(t).push(e);
       }
 
-      for (const [type, items] of Object.entries(grouped)) {
+      for (const [type, items] of groups) {
+        if (!items.length) continue;
         wrap.appendChild(el('div.codex-group', {},
-          el('div.codex-group-head', {}, CODEX_TYPE_LABEL[type] || type, el('span', {}, `${items.length}`)),
+          el('div.codex-group-head', {}, FACT_TYPE_LABEL[type] || type, el('span', {}, `${items.length}`)),
           ...items.map((e) => el('div.codex-item', {},
             el('div.codex-item-head', {},
               el('span.codex-item-name', {}, e.name),
@@ -486,7 +513,7 @@ export default {
               e.reveal === 'secret' ? el('span.codex-item-secret', {}, '秘密') : null,
             ),
             e.summary ? el('div.codex-item-summary', {}, e.summary) : null,
-            (e.facets && (e.facets.rules || e.facets.consequences))
+            (e.facets && ((e.facets.rules || []).length || (e.facets.consequences || []).length))
               ? el('div.codex-item-facets', {},
                   e.facets.rules?.length ? el('span', {}, `规则：${e.facets.rules.join('；')}`) : null,
                   e.facets.consequences?.length ? el('span', {}, `后果：${e.facets.consequences.join('；')}`) : null,
@@ -502,17 +529,19 @@ export default {
 
 
     /* ---- 侧栏 ---- */
-    function statsCard(w, card, codex, sessions) {
+    function statsCard(w, card, sessions) {
       const turns = sessions.reduce((s, x) => s + (x.turn_count || 0), 0);
       const past = (card.timeline || []).filter((e) => e.canon !== 'future').length;
       const future = (card.timeline || []).filter((e) => e.canon === 'future').length;
+      const entities = allEntities();
+      const persons = entities.filter((e) => e.type === 'person').length;
       return el('div.side-card', {},
         el('div.side-card-head', {}, '概览'),
         el('div.side-card-body', {},
           el('div.side-stats', {},
-            stat(`${card.cast?.length || 0}`, '人物'),
-            stat(`${codex.length}`, '设定集'),
-            stat(`${codex.filter((e) => e.pinned).length}`, '固定带出'),
+            stat(`${persons}`, '人物'),
+            stat(`${entities.length - persons}`, '设定集'),
+            stat(`${entities.filter((e) => e.pinned).length}`, '固定带出'),
             stat(`${past}`, '前史'),
             stat(`${future}`, '参考走向'),
             stat(`${sessions.length}`, '剧情'),

@@ -143,17 +143,16 @@ const CARD = {
   subtitle: '一个小卡',
   premise: '两个人被关在一间屋子里，只有一个能出去。',
   charter: [{ rule: '门在午夜打开一次。' }],
-  cast: [{
-    id: 'a', name: '阿砚', aliases: ['砚哥'], role: '囚犯',
+  entities: [{
+    id: 'a', type: 'person', name: '阿砚', aliases: ['砚哥'], role: '囚犯',
     voice: { rhythm: '短句', exemplars: ['「别信他。」'] },
     psyche: { wants: ['出去'], hides: ['钥匙在他鞋里'] },
     knowledge: { knows: ['钥匙的位置'], does_not_know: ['对方也知道'] },
     agenda: [{ goal: '拿到钥匙', method: '装睡', pressure: 0.8 }],
-  }],
-  codex: [{
+  }, {
     id: 'room', type: 'place', name: '屋子', tags: ['封闭'],
     summary: '没有窗，一张桌，两把椅子。', facets: { sensory: '石灰味' },
-    links: ['cast:a'],
+    links: ['a'],
   }],
   timeline: [
     { id: 'e1', when: '三日前', what: '两人被抓进来', canon: 'past' },
@@ -170,18 +169,18 @@ const CARD = {
 {
   const { status, data } = await req('POST', '/api/worlds', { id: WORLD_ID, card: CARD });
   ok(status === 201, '创建世界卡');
-  ok(data.card?.version === 4, '落库的是 v4 形状');
-  ok(data.codex?.length === 1, '辞书投影表同步');
+  ok(data.card?.version === 5, '落库的是 v5 形状');
+  ok(data.entities?.length === 2 && data.entities.some((e) => e.type === 'place'), '实体投影表同步');
 
   const list = await req('GET', '/api/worlds');
   const found = list.data.find((w) => w.id === WORLD_ID);
   ok(!!found, '列表里能查到');
-  ok(found.card.codex_count === 1, '摘要里有辞书数');
+  ok(found.entity_count === 2 && found.fact_count === 1 && found.persons.length === 1, '摘要里有实体/人物/事实数');
   ok(found.card.anchors?.[0]?.label === '开局 · 屋内', '摘要里有可玩时间点');
 
   const one = await req('GET', `/api/worlds/${WORLD_ID}`);
   ok(one.data.card.timeline.length === 2, '详情含时间线');
-  ok(one.data.card.cast[0].psyche.hides[0] === '钥匙在他鞋里', '详情含卡司私心');
+  ok(one.data.card.entities.find((e) => e.type === 'person').psyche.hides[0] === '钥匙在他鞋里', '详情含人物私心');
 
   const lint = await req('GET', `/api/worlds/${WORLD_ID}/lint`);
   ok(lint.status === 200 && Array.isArray(lint.data.issues), '卡级 lint 接口可达');
@@ -194,12 +193,12 @@ const CARD = {
 
   const patch = await req('PATCH', `/api/worlds/${WORLD_ID}`, { card: { prompt: { premise: '改过的命题' } } });
   ok(patch.data.card.prompt.premise === '改过的命题', '局部更新');
-  ok(patch.data.card.cast.length === 1, '局部更新不丢卡司');
+  ok(patch.data.card.entities.filter((e) => e.type === 'person').length === 1, '局部更新不丢人物');
 }
 
 {
-  const { status, data } = await req('POST', `/api/worlds/${WORLD_ID}/codex/room/pin`, { pinned: true });
-  ok(status === 200 && data.codex.find((c) => c.codex_id === 'room')?.pinned === true, '钉选辞书');
+  const { status, data } = await req('POST', `/api/worlds/${WORLD_ID}/entities/room/pin`, { pinned: true });
+  ok(status === 200 && data.entities.find((e) => e.id === 'room')?.pinned === true, '钉选实体');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

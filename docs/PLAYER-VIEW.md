@@ -38,7 +38,7 @@
 
 ```js
 // server/memory/player-view.js（纯函数，不读库、不调模型）
-buildPlayerView(ledger, { cast }) -> { time, place, weather, present: string[] }
+buildPlayerView(ledger, { persons }) -> { time, place, weather, present: string[] }
 ```
 
 - `time/place/weather`：字符串，空值归一为 `''`。

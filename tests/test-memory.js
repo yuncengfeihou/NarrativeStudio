@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * tests/test-memory.js — 记忆系统 v4 的确定性逻辑（无网络）
+ * tests/test-memory.js — 记忆系统 v5 的确定性逻辑（无网络）
  *
  * 覆盖：
  *   - 断言：冲突失效不删除、有效期查询、撤回
@@ -256,7 +256,7 @@ console.log('\n=== 史官：净化与合并 ===');
 {
   const card = schema.normalizeCard({
     title: 't',
-    cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }],
+    entities: [{ type: 'person', name: '凌玥', aliases: ['玥姐姐'] }, { type: 'person', name: '伍卿' }],
   });
   const idx = schema.buildAliasIndex(card);
 
@@ -288,7 +288,7 @@ console.log('\n=== 史官：净化与合并 ===');
     last_hook: '她说出「以前认识」',
     tension: 0.72,
   };
-  const card = schema.normalizeCard({ title: 't', cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }] });
+  const card = schema.normalizeCard({ title: 't', entities: [{ type: 'person', name: '凌玥', aliases: ['玥姐姐'] }, { type: 'person', name: '伍卿' }] });
   const next = arch.mergeLedger(old, delta, { aliasIndex: schema.buildAliasIndex(card) });
 
   eq(next.tension, 0.72, '标量覆盖');
@@ -316,9 +316,9 @@ console.log('\n=== 史官：净化与合并 ===');
 /* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 玩家视图：状态条只拿场景字段 ===');
 {
-  const cast = [
-    { id: 'c-lingyue', name: '凌玥', aliases: ['玥姐姐'] },
-    { id: 'c-wuqing', name: '伍卿' },
+  const persons = [
+    { id: 'c-lingyue', type: 'person', name: '凌玥', aliases: ['玥姐姐'] },
+    { id: 'c-wuqing', type: 'person', name: '伍卿' },
   ];
   const full = {
     time: '辰时', place: '凌府天井', weather: '细雨',
@@ -329,7 +329,7 @@ console.log('\n=== 玩家视图：状态条只拿场景字段 ===');
     quests: [{ goal: '弄清玉佩来历', status: 'active' }],
     theme_tags: ['雨', '秘密'],
   };
-  const view = playerView.buildPlayerView(full, { cast });
+  const view = playerView.buildPlayerView(full, { persons });
 
   eq(Object.keys(view).sort(), ['place', 'present', 'time', 'weather'], '字段白名单只有四个');
   eq(view.time, '辰时', '时间进视图');
@@ -389,7 +389,7 @@ console.log('\n=== 史官：确定性落库 ===');
     id: `w-${Date.now()}`, title: 't',
     card: schema.normalizeCard({
       title: 't',
-      cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }],
+      entities: [{ type: 'person', name: '凌玥', aliases: ['玥姐姐'] }, { type: 'person', name: '伍卿' }],
     }),
   };
   store.saveWorld(world);
@@ -478,7 +478,7 @@ console.log('\n=== 提案白名单：越界目标拒写并留痕 ===');
     id: `w-${Date.now()}`, title: 't',
     card: schema.normalizeCard({
       title: 't',
-      cast: [{ name: '凌玥', aliases: ['玥姐姐'] }, { name: '伍卿' }],
+      entities: [{ type: 'person', name: '凌玥', aliases: ['玥姐姐'] }, { type: 'person', name: '伍卿' }],
     }),
   };
   store.saveWorld(world);
@@ -489,7 +489,7 @@ console.log('\n=== 提案白名单：越界目标拒写并留痕 ===');
   const declaredTargets = arch.buildDeclaredTargets({
     card: world.card, present: ['凌玥'], codex: [], ledgerCharacters: [], playerName: '',
   });
-  ok(declaredTargets.includes('凌玥') && declaredTargets.includes('伍卿'), '声明集合包含卡司');
+  ok(declaredTargets.includes('凌玥') && declaredTargets.includes('伍卿'), '声明集合包含人物实体');
   ok(declaredTargets.includes('玥姐姐'), '声明集合包含别名');
   ok(declaredTargets.includes('player'), '玩家永远允许');
 
@@ -550,7 +550,7 @@ console.log('\n=== 提案白名单：越界目标拒写并留痕 ===');
       ledger: { characters: { 新面孔: { mood: '警觉' } } },
       assertions: [{ subject: '新面孔', predicate: '效忠', object: '凌玥', confidence: 1 }],
       relations: [{ from: '新面孔', to: '凌玥', kind: '主仆' }],
-      changes: [{ kind: 'cast', op: 'introduce', id: '新面孔', fields: { name: '新面孔', role: '探子' } }],
+      changes: [{ kind: 'person', op: 'introduce', id: '新面孔', fields: { name: '新面孔', role: '探子' } }],
     },
   });
   eq(introR.skipped, 0, '同批 introduce 的实体不被自己的提案拒掉');
@@ -579,43 +579,45 @@ console.log('\n=== 世界状态：变更校验 ===');
 {
   const card = schema.normalizeCard({
     title: 't',
-    cast: [{ name: '凌玥', aliases: ['玥姐姐'] }],
-    codex: [{ name: '玉佩' }],
+    entities: [
+      { type: 'person', name: '凌玥', aliases: ['玥姐姐'] },
+      { type: 'item', name: '玉佩' },
+    ],
   });
   const idx = schema.buildAliasIndex(card);
 
   const add = arch.sanitizeChange(
-    { kind: 'cast', id: '玥姐姐', path: 'knowledge.knows', op: 'add', value: '七年前的真相' },
+    { kind: 'person', id: '玥姐姐', path: 'knowledge.knows', op: 'add', value: '七年前的真相' },
     { aliasIndex: idx },
   );
   eq(add.entity_id, '凌玥', '实体变更按别名归一到 id');
   eq(add.path, 'knowledge.knows', '知识路径放行');
   ok(arch.sanitizeChange(
-    { kind: 'cast', id: '凌玥', path: 'identity.age', op: 'set', value: '18' },
+    { kind: 'person', id: '凌玥', path: 'identity.age', op: 'set', value: '18' },
     { aliasIndex: idx },
   ) === null, '身份根不可写');
   ok(arch.sanitizeChange(
-    { kind: 'cast', id: '凌玥', path: 'knowledge.knows', op: 'set', value: 'x' },
+    { kind: 'person', id: '凌玥', path: 'knowledge.knows', op: 'set', value: 'x' },
     { aliasIndex: idx },
   ) === null, '列表路径不能用 set');
   ok(arch.sanitizeChange(
-    { kind: 'cast', id: '凌玥', path: 'mood', op: 'add', value: 'x' },
+    { kind: 'person', id: '凌玥', path: 'mood', op: 'add', value: 'x' },
     { aliasIndex: idx },
   ) === null, '标量路径不能用 add');
 
   const introCodex = arch.sanitizeChange(
-    { kind: 'codex', fields: { type: 'place', name: '听雨楼', summary: '城南暗线' } },
+    { kind: 'place', fields: { name: '听雨楼', summary: '城南暗线' } },
     { aliasIndex: idx },
   );
   eq(introCodex.op, 'introduce', 'introduce 放行新实体');
   eq(introCodex.entity_id, '听雨楼', '新实体 id 由名字生成');
 
   ok(arch.sanitizeChange(
-    { kind: 'codex', id: '玉佩', path: 'summary', op: 'set', value: '改写定义' },
+    { kind: 'item', id: '玉佩', path: 'summary', op: 'set', value: '改写定义' },
     { aliasIndex: idx },
   ) === null, '已有辞书定义不可改写');
   const codexRuntime = arch.sanitizeChange(
-    { kind: 'codex', id: '玉佩', path: 'status', op: 'set', value: '发绿光' },
+    { kind: 'item', id: '玉佩', path: 'status', op: 'set', value: '发绿光' },
     { aliasIndex: idx },
   );
   eq(codexRuntime.path, 'status', '辞书运行态可写');
@@ -641,9 +643,9 @@ console.log('\n=== 世界状态：落库与投影 ===');
     update: {
       scene_change: {}, ledger: {},
       changes: [
-        { kind: 'cast', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: '听雨楼在城南' },
-        { kind: 'codex', op: 'introduce', fields: { type: 'place', name: '听雨楼', summary: '暗线据点' } },
-        { kind: 'cast', id: 'a-jiu', op: 'introduce', fields: { name: '阿九', role: '跑堂' } },
+        { kind: 'person', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: '听雨楼在城南' },
+        { kind: 'place', op: 'introduce', fields: { name: '听雨楼', summary: '暗线据点' } },
+        { kind: 'person', id: 'a-jiu', op: 'introduce', fields: { name: '阿九', role: '跑堂' } },
       ],
     },
   });
@@ -662,27 +664,27 @@ console.log('\n=== 世界状态：落库与投影 ===');
     sessionId: sid, branchId: 'main', turnNo: 4,
     aliasIndex: [], playerName: '伍卿',
     update: {
-      changes: [{ kind: 'cast', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: ['A', 'B'] }],
+      changes: [{ kind: 'person', id: 'a-jiu', path: 'knowledge.knows', op: 'add', value: ['A', 'B'] }],
     },
   });
   const eff = effective.buildEffectiveWorld(schema.normalizeCard({ title: 't' }), store.getWorldState(sid, {
     branchId: 'main', atTurn: 4,
   }));
-  const ajiu = eff.cast.find((c) => c.id === 'a-jiu');
+  const ajiu = eff.entities.find((c) => c.id === 'a-jiu' && c.type === 'person');
   ok(ajiu.knowledge.knows.includes('A'), '数组 add 逐项写入');
   ok(ajiu.knowledge.knows.includes('B'), '数组 add 不拼成一个字符串');
 
   // 辞书运行态进入 effective world，而不是改写定义。
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'codex', entity_id: 'ling-fu',
+    branch_id: 'main', entity_kind: 'place', entity_id: 'ling-fu',
     path: 'status', op: 'set', value: '全府戒严', turn: 5,
   });
   const effCodex = effective.buildEffectiveWorld(
-    schema.normalizeCard({ title: 't', codex: [{ id: 'ling-fu', name: '凌府', type: 'place', summary: '主宅' }] }),
+    schema.normalizeCard({ title: 't', entities: [{ id: 'ling-fu', name: '凌府', type: 'place', summary: '主宅' }] }),
     store.getWorldState(sid, { branchId: 'main', atTurn: 5 }),
   );
-  eq(effCodex.codex.find((e) => e.id === 'ling-fu').status, '全府戒严', '辞书运行态进入投影');
-  eq(effCodex.codex.find((e) => e.id === 'ling-fu').summary, '主宅', '定义不被运行态覆盖');
+  eq(effCodex.entities.find((e) => e.id === 'ling-fu').status, '全府戒严', '事实运行态进入投影');
+  eq(effCodex.entities.find((e) => e.id === 'ling-fu').summary, '主宅', '定义不被运行态覆盖');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -782,7 +784,7 @@ console.log('\n=== 定稿：世界线 → 新世界卡 ===');
 {
   const baseCard = schema.normalizeCard({
     title: '定稿测试',
-    cast: [{ id: 'ling-yue', name: '凌玥', role: '家主', knowledge: { knows: ['旧事'] } }],
+    entities: [{ id: 'ling-yue', type: 'person', name: '凌玥', role: '家主', knowledge: { knows: ['旧事'] } }],
     anchors: [{ id: 'prologue', label: '序章', snapshot: { place: '雨街' }, opening_seed: '雨落下来。' }],
     player: { name: '伍卿' },
   });
@@ -798,11 +800,11 @@ console.log('\n=== 定稿：世界线 → 新世界卡 ===');
   store.addTurn(sid, { turn_no: 1, kind: 'narrator', content: '雨更大了。', branch_id: 'main' });
   store.setState(sid, 1, { place: '凌家院子', time: '当夜', turn_no: 1 }, 'main');
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
     path: 'knowledge.knows', op: 'add', value: '她后来才知道的事', turn: 1,
   });
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'codex', entity_id: 'tingyu-lou',
+    branch_id: 'main', entity_kind: 'place', entity_id: 'tingyu-lou',
     op: 'introduce', value: { type: 'place', name: '听雨楼', summary: '暗线据点' }, turn: 1,
   });
   store.upsertThread(sid, { branch_id: 'main', title: '玉佩还在发绿光', status: 'open', planted_turn: 1 });
@@ -812,9 +814,9 @@ console.log('\n=== 定稿：世界线 → 新世界卡 ===');
 
   const out = orch.canonizeSession({ sessionId: sid, title: '定稿后的世界', anchorLabel: '从雨夜继续' });
   ok(!!out.world.id && out.world.id !== wid, '定稿生成独立的新世界卡');
-  const newCast = out.card.cast.find((c) => c.id === 'ling-yue');
+  const newCast = out.card.entities.find((c) => c.id === 'ling-yue' && c.type === 'person');
   ok(newCast.knowledge.knows.includes('她后来才知道的事'), '人物知识被固化进新卡');
-  ok(out.card.codex.some((c) => c.name === '听雨楼'), '剧情新增地点被固化进新卡');
+  ok(out.card.entities.some((c) => c.type !== 'person' && c.name === '听雨楼'), '剧情新增地点被固化进新卡');
   ok(out.card.anchors.some((a) => a.id === 'line-1' && a.snapshot.place === '凌家院子'), '当前账本成为新锚点');
   ok(out.card.author_notes.some((n) => n.text.includes('玉佩还在发绿光')), '未回收线索写进作者笔记');
   ok(newCast.relations.some((r) => r.to === '伍卿' && r.kind === '旧识·执念'), '关系账本并回人物卡');
@@ -826,7 +828,7 @@ console.log('\n=== 定稿：世界线 → 新世界卡 ===');
     .some((r) => r.from_name === '凌玥' && r.to_name === '伍卿'), '新会话从卡片关系初始化账本');
 
   const oldCard = store.getWorld(wid).card;
-  ok(!oldCard.cast.find((c) => c.id === 'ling-yue').knowledge.knows.includes('她后来才知道的事'), '原世界卡不被改写');
+  ok(!oldCard.entities.find((c) => c.id === 'ling-yue' && c.type === 'person').knowledge.knows.includes('她后来才知道的事'), '原世界卡不被改写');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -948,11 +950,11 @@ console.log('\n=== 分支复制：不把旧线「分叉之后才发生的失效�
   store.setCharState(sid, { branchId: 'main', who: '甲', field: 'condition', value: '完好', turn: 1 });
   store.setCharState(sid, { branchId: 'main', who: '甲', field: 'condition', value: '重伤', turn: 5 });
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: '甲', path: 'mood',
+    branch_id: 'main', entity_kind: 'person', entity_id: '甲', path: 'mood',
     op: 'set', value: '平静', turn: 1,
   });
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: '甲', path: 'mood',
+    branch_id: 'main', entity_kind: 'person', entity_id: '甲', path: 'mood',
     op: 'set', value: '暴怒', turn: 5,
   });
 

@@ -5,7 +5,7 @@
  *   node _work/seed-worlds.mjs            # 导入全部预设
  *   node _work/seed-worlds.mjs --reset    # 先清空世界卡与剧情会话，再导入
  *
- * 幂等：同 id 的卡被覆盖更新。只接受 v4 形状的卡。
+ * 幂等：同 id 的卡被覆盖更新。只接受 v5 形状的卡（v4 预设先跑 _work/migrate-v5.mjs）。
  */
 import '../server/load-env.js';
 import fs from 'node:fs';
@@ -18,10 +18,18 @@ const PRESETS_DIR = path.join(ROOT, 'presets');
 
 const reset = process.argv.includes('--reset');
 
-const { getDb, listSessions, listWorlds, saveWorld, getCodex } = await import('../server/memory/store.js');
-const { normalizeCard } = await import('../server/world/schema.js');
+const { getDb, listSessions, listWorlds, saveWorld } = await import('../server/memory/store.js');
+const { normalizeCard, isPerson } = await import('../server/world/schema.js');
 
 const db = getDb();
+
+// 世界卡投影表由 store.js 维护：按 world_id 列动态清理，表改名/新增都不必回来改这里
+const worldTables = db
+  .prepare("SELECT name FROM sqlite_master WHERE type='table'")
+  .all()
+  .map((row) => row.name)
+  .filter((name) => name !== 'worlds'
+    && db.prepare('SELECT name FROM pragma_table_info(?)').all(name).some((col) => col.name === 'world_id'));
 
 if (reset) {
   console.log('· 清空剧情会话与世界卡…');
@@ -32,9 +40,7 @@ if (reset) {
     db.prepare(`DELETE FROM sessions WHERE id=?`).run(s.id);
   }
   for (const w of listWorlds()) {
-    db.prepare(`DELETE FROM codex_entries WHERE world_id=?`).run(w.id);
-    db.prepare(`DELETE FROM timeline_events WHERE world_id=?`).run(w.id);
-    db.prepare(`DELETE FROM anchors WHERE world_id=?`).run(w.id);
+    for (const table of worldTables) db.prepare(`DELETE FROM ${table} WHERE world_id=?`).run(w.id);
     db.prepare(`DELETE FROM worlds WHERE id=?`).run(w.id);
   }
 }
@@ -54,8 +60,8 @@ for (const file of fs.readdirSync(PRESETS_DIR)) {
       card,
       source: raw.source || card.source || null,
     });
-    const codex = getCodex(id);
-    console.log(`  ✓ ${id} — ${card.title}｜卡司 ${card.cast.length}｜辞书 ${codex.length}｜`
+    const persons = card.entities.filter(isPerson).length;
+    console.log(`  ✓ ${id} — ${card.title}｜实体 ${card.entities.length}（人物 ${persons} / 事实 ${card.entities.length - persons}）｜`
       + `时间线 ${card.timeline.length}｜锚点 ${card.anchors.length}`);
     count++;
   } catch (err) {

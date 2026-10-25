@@ -19,10 +19,16 @@ export default {
     const worldId = params.id || null;
     const isEdit = !!worldId;
 
-    const CODEX_TYPES = [
+    // v5 只有一个 entities 数组：人物（type:'person'）在「角色」页维护，
+    // 其余类型是设定集的事实实体。两页只是同一数组的两个视图，保存时整卡提交。
+    const FACT_TYPES = [
       ['place', '地点'], ['institution', '机构'], ['item', '物品'],
-      ['faction', '势力'], ['concept', '概念'], ['character', '角色'], ['custom', '其他'],
+      ['faction', '势力'], ['concept', '概念'], ['custom', '其他'],
     ];
+    const FACT_TYPE_LABEL = {
+      place: '地点', institution: '机构', item: '物品',
+      faction: '势力', concept: '概念', custom: '其他',
+    };
 
     /* ---------------- 模型 ---------------- */
     const model = {
@@ -37,8 +43,7 @@ export default {
         },
         charter: [],
         player: { name: '', age: '', identity: '', situation: '', capability: '', inner_voice: '', wants: '', afraid: '' },
-        cast: [],
-        codex: [],
+        entities: [],
         timeline: [],
         anchors: [{
           id: 'prologue', label: '序章', after_event: '',
@@ -112,7 +117,15 @@ export default {
         const w = await api.getWorld(worldId);
         model.coverHue = w.cover_hue ?? 220;
         model.tags = w.tags || [];
-        model.card = normalizeCard(w.card || {});
+        // 详情接口顶层实体是合并过 pinned/muted 的权威视图；卡片里缺失时以它为准，
+        // 否则编辑页会显示成空卡并把 entities 一起覆盖掉。
+        const rawCard = w.card || {};
+        model.card = normalizeCard({
+          ...rawCard,
+          entities: Array.isArray(rawCard.entities) && rawCard.entities.length
+            ? rawCard.entities
+            : Array.isArray(w.entities) ? w.entities : [],
+        });
       } catch (err) {
         toast(`加载失败：${err.message}`, { type: 'error' });
       } finally {
@@ -273,11 +286,35 @@ export default {
       }
     }
 
+    /** 人物与设定集共享 model.card.entities，两个 tab 只是按 type 过滤的视图。 */
+    function personEntities() {
+      return model.card.entities.filter((e) => e.type === 'person');
+    }
+
+    function factEntities() {
+      return model.card.entities.filter((e) => e.type !== 'person');
+    }
+
+    /** 在单一 entities 数组里交换两个实体的位置，用于人物上移/下移。 */
+    function swapEntities(a, b) {
+      const arr = model.card.entities;
+      const ia = arr.indexOf(a);
+      const ib = arr.indexOf(b);
+      if (ia < 0 || ib < 0) return;
+      [arr[ia], arr[ib]] = [arr[ib], arr[ia]];
+    }
+
+    function removeEntity(entity) {
+      const arr = model.card.entities;
+      const at = arr.indexOf(entity);
+      if (at >= 0) arr.splice(at, 1);
+    }
+
     function tabCount(key) {
       const c = model.card;
       if (key === 'charter') return c.charter.length;
-      if (key === 'cast') return c.cast.length;
-      if (key === 'codex') return c.codex.length;
+      if (key === 'cast') return c.entities.filter((e) => e.type === 'person').length;
+      if (key === 'codex') return c.entities.filter((e) => e.type !== 'person').length;
       if (key === 'timeline') return c.timeline.length;
       return '';
     }
@@ -488,14 +525,15 @@ export default {
 
       function paintCast() {
         clear(list);
-        if (!model.card.cast.length) {
+        const persons = personEntities();
+        if (!persons.length) {
           list.appendChild(el('div.empty', { style: 'padding:28px 20px;' },
             el('div.empty-icon', {}, icon('users', { size: 18 })),
             el('div.empty-title', {}, '还没有人物'),
             el('div.empty-sub', {}, '至少添加一位，故事才有人可寻。'),
           ));
         } else {
-          model.card.cast.forEach((c, i) => list.appendChild(castCard(c, i)));
+          persons.forEach((c, i) => list.appendChild(castCard(c, i, persons)));
         }
         list.appendChild(el('button.cast-add', {
           type: 'button', onclick: addCharacter,
@@ -505,14 +543,21 @@ export default {
 
       function addCharacter() {
         markDirty();
-        model.card.cast.push({
-          id: '', name: '', aliases: [], role: '', one_line: '',
+        model.card.entities.push({
+          id: '', type: 'person', name: '', aliases: [], tags: [],
+          summary: '', detail: '',
+          facets: { sensory: '', rules: [], consequences: [], history: '' },
+          links: [], reveal: 'public', canon_from: '', sources: [],
+          pinned: false, muted: false, parent_id: '',
+          role: '',
           identity: { age: '', appearance: '', background: '', station: '' },
           voice: { address: {}, rhythm: '', lexicon: [], never: [], exemplars: [] },
           psyche: { traits: [], wants: [], fears: [], hides: [], values: [] },
           knowledge: { knows: [], does_not_know: [], believes_falsely: [] },
           agenda: [], relations: [],
           always_present: false, weight: 0.5,
+          // 运行期初始值：编辑器不单独编辑，但开局时要用；保存必须原样带回。
+          status: '', condition: '', mood: '', location: '', goal: '',
         });
         paintCast();
         requestAnimationFrame(() => {
@@ -521,7 +566,7 @@ export default {
         });
       }
 
-      function castCard(c, index) {
+      function castCard(c, index, persons) {
         c.identity = c.identity || {};
         c.voice = c.voice || {};
         c.psyche = c.psyche || {};
@@ -581,15 +626,15 @@ export default {
               ],
             });
             if (action === 'up' && index > 0) {
-              [model.card.cast[index - 1], model.card.cast[index]] = [model.card.cast[index], model.card.cast[index - 1]];
+              swapEntities(persons[index - 1], persons[index]);
               markDirty();
               paintCast();
-            } else if (action === 'down' && index < model.card.cast.length - 1) {
-              [model.card.cast[index + 1], model.card.cast[index]] = [model.card.cast[index], model.card.cast[index + 1]];
+            } else if (action === 'down' && index < persons.length - 1) {
+              swapEntities(persons[index], persons[index + 1]);
               markDirty();
               paintCast();
             } else if (action === 'delete') {
-              model.card.cast.splice(index, 1);
+              removeEntity(c);
               markDirty();
               paintCast();
             }
@@ -608,7 +653,7 @@ export default {
             ),
           ),
           el('div.cast-body', {},
-            row('一句话', '一句话能概括这个人（显示在角色网格里）', c.one_line, (v) => { c.one_line = v; }, true),
+            row('一句话', '一句话能概括这个人（显示在角色网格里）', c.summary, (v) => { c.summary = v; }, true),
             row('别名', '顿号分隔，如：玥姐姐、凌家主', c.aliases, (v) => { c.aliases = v; }, false, true),
             row('年龄', '十七岁 / 二十出头…', c.identity.age, (v) => { c.identity.age = v; }),
             row('外貌', '体态、穿着、显眼的特征', c.identity.appearance, (v) => { c.identity.appearance = v; }, true),
@@ -713,9 +758,9 @@ export default {
       return wrap;
     }
 
-    /* ---- 设定集（codex）---- */
+    /* ---- 设定集（非 person 的事实实体）---- */
     function codexPane() {
-      const list = model.card.codex;
+      const list = factEntities();
       const wrap = el('div', {});
       wrap.appendChild(paneHead('设定集', '类型化的世界实体，按实体链接、主题与固定带出进场。'));
       wrap.appendChild(el('p.field-hint', {},
@@ -746,7 +791,7 @@ export default {
       search.addEventListener('input', paintItems);
 
       function typeLabel(type) {
-        return (CODEX_TYPES.find((t) => t[0] === type) || ['custom', '其他'])[1];
+        return FACT_TYPE_LABEL[type] || '其他';
       }
 
       function itemNode(e) {
@@ -782,9 +827,13 @@ export default {
           items.appendChild(el('div.codex-edit-empty', {}, '没有匹配的条目。'));
           return;
         }
-        const groups = CODEX_TYPES
+        const groups = FACT_TYPES
           .map(([type, label]) => ({ label, rows: matched.filter((e) => (e.type || 'custom') === type) }))
           .filter((g) => g.rows.length);
+        // 后端 normalize 之外的未知 type 也不能被吞掉，统一落到「其他」组。
+        const known = new Set(FACT_TYPES.map(([type]) => type));
+        const extra = matched.filter((e) => !known.has(e.type || 'custom'));
+        if (extra.length) groups.push({ label: '其他', rows: extra });
         for (const g of groups) {
           items.appendChild(el('div.codex-edit-group', {},
             el('div.codex-edit-group-head', {}, g.label, el('span', {}, `· ${g.rows.length} 条`)),
@@ -809,6 +858,7 @@ export default {
           id: '', type: 'concept', name: '', aliases: [], tags: [],
           summary: '', facets: { sensory: '', rules: [], consequences: [], history: '' },
           links: [], reveal: 'public', detail: '', parent_id: '', muted: false,
+          pinned: false, canon_from: '', sources: [],
         };
 
       const nameInput = el('input.field', { value: draft.name || '', placeholder: '名称（如「司楼」）' });
@@ -833,7 +883,7 @@ export default {
       }, draft.facets?.history || draft.detail || '');
       const linksInput = el('input.field', {
         value: (draft.links || []).join('、'),
-        placeholder: '关联到哪些实体（cast:凌玥 / codex:司楼）',
+        placeholder: '关联到哪些实体 id（如：凌玥、司楼）',
       });
       const tagsInput = el('input.field', {
         value: (draft.tags || []).join('、'),
@@ -844,8 +894,10 @@ export default {
         placeholder: '上级地点/机构 id（可选，如「帝都」；用于世界索引树）',
       });
 
-      const typeSelect = el('select.field', {}, ...CODEX_TYPES.map(([v, l]) =>
-        el('option', { value: v, selected: draft.type === v }, l)));
+      // 人物由「角色」页的实体维护，设定集下拉不出现 person；旧的 character 值已废弃。
+      const draftType = FACT_TYPES.some(([v]) => v === draft.type) ? draft.type : 'custom';
+      const typeSelect = el('select.field', {}, ...FACT_TYPES.map(([v, l]) =>
+        el('option', { value: v, selected: draftType === v }, l)));
       const revealSelect = el('select.field', {},
         el('option', { value: 'public', selected: draft.reveal !== 'secret' && draft.reveal !== 'rumor' }, '公开'),
         el('option', { value: 'rumor', selected: draft.reveal === 'rumor' }, '流言'),
@@ -911,7 +963,7 @@ export default {
             detail: historyInput.value.trim(),
           };
           if (entry) Object.assign(entry, payload);
-          else model.card.codex.push(payload);
+          else model.card.entities.push(payload);
           markDirty();
           render(true);
           return true;
@@ -1135,6 +1187,10 @@ export default {
 function normalizeCard(card) {
   const prompt = card.prompt || {};
   return {
+    // 前端不编辑的顶层字段（kind / source / author_notes / edges / claims / fates /
+    // seeds / canon_arc / divergence …）必须原样带回，否则整卡保存会丢内容。
+    ...card,
+    version: 5,
     title: card.title || '',
     subtitle: card.subtitle || '',
     genre: card.genre || [],
@@ -1156,26 +1212,8 @@ function normalizeCard(card) {
       inner_voice: '', wants: '', afraid: '',
       ...(card.player || {}),
     },
-    // 角色是运行态与作者态共用的形状：status/condition/mood/location/goal 由
-    // 记忆 Agent 在会话里写入，编辑器不单独编辑，但保存时必须原样带回去，
-    // 否则每点一次保存就会把这些运行态字段清空。
-    cast: (card.cast || []).map((c) => ({
-      ...c,
-      id: c.id || c.name || '',
-      name: c.name || '',
-      aliases: c.aliases || [],
-      role: c.role || '',
-      one_line: c.one_line || '',
-      identity: c.identity || {},
-      voice: c.voice || {},
-      psyche: c.psyche || {},
-      knowledge: c.knowledge || {},
-      agenda: c.agenda || [],
-      relations: c.relations || [],
-      always_present: !!c.always_present,
-      weight: c.weight ?? 0.5,
-    })),
-    codex: (card.codex || []).map((e) => ({ ...e })),
+    // v5：人物与事实实体共用一个数组；类型专属字段靠 ...e 原样保留。
+    entities: (card.entities || []).map(normalizeEntity),
     timeline: (card.timeline || []).map((e) => ({ ...e })),
     anchors: (card.anchors && card.anchors.length)
       ? card.anchors.map((a) => ({ ...a }))
@@ -1186,15 +1224,59 @@ function normalizeCard(card) {
   };
 }
 
-function cleanCard(card) {
+/**
+ * v5 实体补默认值。运行期初始值（person 的 status/condition/mood/location/goal、
+ * 事实实体的 access/open_to/owner_id/location_id）不在编辑器里编辑，
+ * 保存时必须原样带回——所以先展开 ...e，再只覆盖编辑器真正接管的字段。
+ */
+function normalizeEntity(e) {
+  const type = e.type || 'custom';
+  const base = {
+    ...e,
+    id: e.id || e.name || '',
+    type,
+    name: e.name || '',
+    aliases: e.aliases || [],
+    tags: e.tags || [],
+    summary: e.summary || '',
+    detail: e.detail || '',
+    facets: e.facets || {},
+    links: e.links || [],
+    reveal: e.reveal || 'public',
+    canon_from: e.canon_from || '',
+    sources: e.sources || [],
+    pinned: !!e.pinned,
+    muted: !!e.muted,
+    parent_id: e.parent_id || '',
+  };
+  if (type !== 'person') return base;
   return {
+    ...base,
+    role: e.role || '',
+    identity: e.identity || {},
+    voice: e.voice || {},
+    psyche: e.psyche || {},
+    knowledge: e.knowledge || {},
+    agenda: e.agenda || [],
+    relations: e.relations || [],
+    always_present: !!e.always_present,
+    weight: e.weight ?? 0.5,
+  };
+}
+
+function cleanCard(card) {
+  const next = {
     ...card,
+    version: 5,
     charter: card.charter.filter((c) => c.rule && c.rule.trim()),
-    cast: card.cast.filter((c) => c.name && c.name.trim()),
-    codex: card.codex.filter((e) => e.name && e.name.trim()),
+    entities: card.entities.filter((e) => e.name && e.name.trim()),
     timeline: card.timeline.filter((e) => e.what && e.what.trim()),
     anchors: card.anchors.filter((a) => a.label && a.label.trim()),
   };
+  // v4 字段已废弃：旧响应带回来也不让它们进入 v5 payload。
+  delete next.cast;
+  delete next.codex;
+  return next;
 }
 
 /** 「顿号/逗号」分隔的列表。 */

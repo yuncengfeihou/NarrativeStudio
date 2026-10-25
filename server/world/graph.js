@@ -1,19 +1,19 @@
 /**
- * server/world/graph.js — 辞书图谱（v5 核心，纯函数）
+ * server/world/graph.js — 实体图谱（v5 核心，纯函数）
  *
- * 把世界卡里的 cast / codex / relations / links / parent_id / edges 投影成
- * 统一的实体图：实体（节点）+ 类型化关系（边）+ 别名解析 + 去重。
+ * 把世界卡里的 entities / relations / links / parent_id / edges 投影成
+ * 统一的实体图：实体（节点）+ 类型化关系（边）+ 别名解析。
  *
  * 三条硬约束：
  * - 不按关键词触发；图只回答「谁和谁有关系」与「包含关系是什么」。
  * - 卡是唯一真源；这里只做只读投影，不写库。
- * - 没有显式 edges 的 v4 卡也能用：从 cast.relations / codex.links / parent_id 推导。
+ * - 人物与事实在同一张图里；人物用 relations，事实用 links/parent_id。
  */
 
-const stripRef = (v) => String(v || '').trim().replace(/^(cast|codex):/, '');
+const stripRef = (v) => String(v || '').trim().replace(/^(?:cast|codex|entity):/, '');
 
-/** codex 条目的分层视图：public 给所有人，engine 给引擎。 */
-function codexLayers(e) {
+/** 实体的分层视图：public 给所有人，engine 给引擎。 */
+function entityLayers(e) {
   const f = e.facets || {};
   const engine = {};
   if (e.reveal === 'secret' || e.reveal === 'rumor') engine.truth = e.detail || f.history || '';
@@ -27,25 +27,24 @@ function codexLayers(e) {
 /**
  * 建立实体图。
  *
- * - cast 与 codex 同名/同别名时合并为一个节点（mergedCodexIds），索引与场记单不再重复；
- * - cast.relations → 无向关系边；
- * - codex.links → 无向关系边；
- * - codex.parent_id → located_in 有向边；
+ * - 节点直接来自 card.entities（单一命名空间，不需要 cast/codex 合并）；
+ * - person.relations → 无向关系边；
+ * - 任意实体的 links → 无向关系边；
+ * - parent_id → located_in 有向边；
  * - card.edges → 显式类型化边（可覆盖/补充推导边）。
  *
  * @returns {{
  *   entities: Map<string, object>, edges: Array<object>,
- *   aliasToId: Map<string, string>, mergedCodexIds: Set<string>,
- *   codexById: Map<string, object>, castById: Map<string, object>,
- *   adjacency: Map<string, Set<string>>, resolve: (ref:string)=>string,
+ *   aliasToId: Map<string, string>, entityById: Map<string, object>,
+ *   personById: Map<string, object>, adjacency: Map<string, Set<string>>,
+ *   resolve: (ref:string)=>string,
  * }}
  */
 export function buildWorldGraph(card) {
   const entities = new Map();
   const aliasToId = new Map();
-  const mergedCodexIds = new Set();
-  const codexById = new Map((card.codex || []).map((e) => [e.id, e]));
-  const castById = new Map((card.cast || []).map((c) => [c.id, c]));
+  const entityById = new Map((card.entities || []).map((e) => [e.id, e]));
+  const personById = new Map((card.entities || []).filter((e) => e.type === 'person').map((e) => [e.id, e]));
 
   const bindAliases = (id, names) => {
     for (const raw of names) {
@@ -54,52 +53,18 @@ export function buildWorldGraph(card) {
     }
   };
 
-  for (const c of card.cast || []) {
-    entities.set(c.id, {
-      id: c.id,
-      kind: 'character',
-      name: c.name,
-      aliases: c.aliases || [],
-      tags: [],
-      parent_id: '',
-      cast: c,
-      codex: null,
-      definition: c,
-      layers: {},
-      sources: [],
-    });
-    bindAliases(c.id, [c.name, ...(c.aliases || [])]);
-  }
-
-  for (const e of card.codex || []) {
-    const names = [e.name, ...(e.aliases || [])].filter(Boolean);
-    const hitId = names.map((n) => aliasToId.get(n)).find(Boolean);
-    if (hitId && entities.get(hitId)?.kind === 'character') {
-      // 同名 cast/codex：合并到人物节点，codex 只作为该人物的附加层。
-      mergedCodexIds.add(e.id);
-      const node = entities.get(hitId);
-      node.codex = e;
-      node.layers = { ...node.layers, ...codexLayers(e) };
-      node.sources = [...(node.sources || []), ...(e.sources || [])];
-      aliasToId.set(e.id, hitId);
-      for (const n of names) if (!aliasToId.has(n)) aliasToId.set(n, hitId);
-      continue;
-    }
-
+  for (const e of card.entities || []) {
     entities.set(e.id, {
       id: e.id,
-      kind: e.type,
+      type: e.type,
       name: e.name,
       aliases: e.aliases || [],
       tags: e.tags || [],
       parent_id: e.parent_id || '',
-      cast: null,
-      codex: e,
-      definition: e,
-      layers: codexLayers(e),
-      sources: e.sources || [],
+      entity: e,
+      layers: entityLayers(e),
     });
-    bindAliases(e.id, names);
+    bindAliases(e.id, [e.name, ...(e.aliases || [])]);
   }
 
   const resolve = (ref) => {
@@ -129,17 +94,16 @@ export function buildWorldGraph(card) {
     });
   };
 
-  for (const c of card.cast || []) {
-    for (const r of c.relations || []) {
-      addEdge(c.id, r.to, r.kind || 'related_to', {
+  for (const e of card.entities || []) {
+    for (const r of e.relations || []) {
+      addEdge(e.id, r.to, r.kind || 'related_to', {
         weight: r.sentiment, note: r.note, directed: false,
       });
     }
   }
 
-  for (const e of card.codex || []) {
-    const nodeId = mergedCodexIds.has(e.id) ? aliasToId.get(e.id) : e.id;
-    for (const l of e.links || []) addEdge(nodeId, l, 'related_to', { directed: false });
+  for (const e of card.entities || []) {
+    for (const l of e.links || []) addEdge(e.id, l, 'related_to', { directed: false });
     if (e.parent_id) addEdge(e.id, e.parent_id, 'located_in', { directed: true });
   }
 
@@ -155,7 +119,7 @@ export function buildWorldGraph(card) {
     adjacency.get(e.to).add(e.from);
   }
 
-  return { entities, edges, aliasToId, mergedCodexIds, codexById, castById, adjacency, resolve };
+  return { entities, edges, aliasToId, entityById, personById, adjacency, resolve };
 }
 
 /** 1 跳（或 N 跳）邻域。只用于场景视图的候选扩展，不写库。 */

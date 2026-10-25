@@ -18,8 +18,11 @@ export function branchSystemPrompt(world) {
   const card = world?.card || {};
   const title = card.title || '未命名剧情';
   const genre = Array.isArray(card.genre) && card.genre.length ? card.genre.join('、') : '';
-  const cast = Array.isArray(card.cast) && card.cast.length
-    ? card.cast.slice(0, 10).map((c) => `${c.name}（${c.role || '身份不明'}）`).join('；')
+  const persons = Array.isArray(card.entities)
+    ? card.entities.filter((e) => e.type === 'person')
+    : [];
+  const cast = persons.length
+    ? persons.slice(0, 10).map((c) => `${c.name}（${c.summary || c.role || '身份不明'}）`).join('；')
     : '';
 
   return `# 身份

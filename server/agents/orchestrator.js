@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { estimateTokens } from '../tokens.js';
-import { normalizeCard } from '../world/schema.js';
+import { isPerson, normalizeCard } from '../world/schema.js';
 import { buildEffectiveWorld } from '../world/effective.js';
 import { resolveAgent } from '../model-registry.js';
 import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId, runEffectOnce } from '../memory/branch-guard.js';
@@ -122,16 +122,16 @@ async function runTurnInner({
     });
   }
 
-  // 2) 辞书检索预检（模型主动取证；不是关键词触发）。
+  // 2) 设定集检索预检（模型主动取证；不是关键词触发）。
   // auto = 只在大卡上开；会话 settings.codex_retrieval 可强制 on/off。
   let retrieval = null;
   const retrievalMode = session.settings?.codex_retrieval || 'auto';
-  const codexCount = (world?.card?.codex || []).length;
+  const factCount = (world?.card?.entities || []).filter((e) => !isPerson(e)).length;
   // 分段模式自带 codex_lookup，不再额外跑检索预检，避免同一拍查两次。
   const wantRetrieval = narrationMode !== 'segmented' && !isOpening
     && shouldPrecheckRetrieval({
       mode: retrievalMode,
-      codexCount,
+      codexCount: factCount,
       minCodex: config.context.retrievalMinCodex,
       playerText,
       branchChoice,
@@ -337,7 +337,7 @@ async function runTurnInner({
     if (st) {
       emit({
         type: 'state', state: st.state, turn_no: st.turn_no,
-        player_view: buildPlayerView(st.state, { cast: context.card?.cast }),
+        player_view: buildPlayerView(st.state, { persons: (context.card?.entities || []).filter(isPerson) }),
       });
     }
     sceneChanged = !arch.stale && detectSceneChange(session, arch, turnNo);
@@ -562,7 +562,7 @@ export function createSessionWithSettings({ title, settings, worldId = null, anc
   createBranch(id, { branchId: 'main', parentBranch: '', forkTurn: 0, note: '开局主线' });
 
   // 卡片里的初始关系进入本分支账本，之后由剧情继续演化。
-  for (const c of card?.cast || []) {
+  for (const c of (card?.entities || []).filter(isPerson)) {
     for (const r of c.relations || []) {
       if (!r.to) continue;
       upsertRelation(id, {
@@ -642,7 +642,7 @@ export function getSessionSnapshot(sessionId) {
     } : null,
     turns,
     state: stateEntry?.state || null,
-    playerView: buildPlayerView(stateEntry?.state, { cast: card.cast }),
+    playerView: buildPlayerView(stateEntry?.state, { persons: (card.entities || []).filter(isPerson) }),
     usage,
     memoryStats: getMemoryStats(sessionId),
   };
@@ -686,8 +686,9 @@ export function getMemoryStats(sessionId) {
     world_version: session.world_version ?? world?.version ?? null,
     world: world ? {
       id: world.id, title: world.title,
-      codex_count: card.codex.length,
-      cast_count: card.cast.length,
+      entity_count: card.entities.length,
+      fact_count: card.entities.filter((e) => !isPerson(e)).length,
+      person_count: card.entities.filter(isPerson).length,
       timeline_past: card.timeline.filter((t) => t.canon === 'past').length,
       timeline_future: card.timeline.filter((t) => t.canon === 'future').length,
       anchors: card.anchors.map((a) => ({ id: a.id, label: a.label })),
@@ -727,9 +728,9 @@ export function canonizeSession({
   const threads = getThreads(sessionId, { branchId, status: 'open', limit: 20 });
   const label = anchorLabel || `第 ${turnNo} 轮 · 定稿`;
 
-  // 关系账本不是卡片字段；定稿时并回 cast.relations，新会话才能接着用。
+  // 关系账本不是卡片字段；定稿时并回人物实体的 relations，新会话才能接着用。
   for (const r of relations) {
-    const c = effective.cast.find((x) => x.name === r.from_name || x.id === r.from_name);
+    const c = (effective.entities || []).find((x) => isPerson(x) && (x.name === r.from_name || x.id === r.from_name));
     if (!c) continue;
     const rel = { to: r.to_name, kind: r.kind, sentiment: r.sentiment, note: r.note };
     const idx = c.relations.findIndex((x) => x.to === r.to_name);

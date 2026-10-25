@@ -2,9 +2,9 @@
  * server/routes/presets.js — 世界卡种子
  *
  * presets/*.json 承载的是**世界卡**（world card）：
- *   { id, title, subtitle, cover_hue, tags, card: {…v4 形状…}, source: {…} }
+ *   { id, title, subtitle, cover_hue, tags, card: {…v5 形状（entities[]）…}, source: {…} }
  *
- * beta 阶段只认 v4 形状：旧格式不会自动迁移，导入前请按 v4 重写。
+ * beta 阶段只认 v5 形状：旧格式不会自动迁移，导入前请按 v5 重写。
  *
  *   GET  /api/presets              -> 磁盘上的卡摘要
  *   GET  /api/presets/:id          -> 完整卡
@@ -15,7 +15,7 @@ import { Router } from 'express';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { getCodex, saveWorld } from '../memory/store.js';
+import { getEntities, saveWorld } from '../memory/store.js';
 import { normalizeCard } from '../world/schema.js';
 
 export const presetsRouter = Router();
@@ -45,10 +45,11 @@ export function loadPresets() {
         cover_hue: data.cover_hue ?? null,
         kind: card.kind,
         premise: card.prompt.premise,
-        cast: card.cast.map((c) => ({ id: c.id, name: c.name, role: c.role, one_line: c.one_line })),
+        persons: card.entities.filter((e) => e.type === 'person').map((p) => ({ id: p.id, name: p.name, role: p.role, summary: p.summary })),
+        entity_count: card.entities.length,
+        fact_count: card.entities.filter((e) => e.type !== 'person').length,
         player: card.player.name ? { name: card.player.name, identity: card.player.identity, mode: card.player.mode } : null,
         charter_count: card.charter.length,
-        codex_count: card.codex.length,
         timeline_past: card.timeline.filter((t) => t.canon === 'past').length,
         timeline_future: card.timeline.filter((t) => t.canon === 'future').length,
         anchors: card.anchors.map((a) => ({ id: a.id, label: a.label })),
@@ -87,7 +88,7 @@ export function importPreset(data) {
     card,
     source: data.source || card.source || null,
   });
-  return { ...world, codex: getCodex(world.id) };
+  return { ...world, entities: getEntities(world.id) };
 }
 
 presetsRouter.get('/presets', (req, res) => {

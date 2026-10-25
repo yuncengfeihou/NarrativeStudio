@@ -5,7 +5,7 @@
  *
  *   世界卡（worlds + 三张投影表）
  *     worlds            card_json 是唯一真源（命题/宪章/卡司/辞书/时间线/锚点）
- *     codex_entries     类型化辞书：靠 links/tags 进场，不靠关键词触发
+ *     entities          统一实体表（人物 + 世界事实）：靠 links/tags 进场，不靠关键词触发
  *     timeline_events   past = 既定事实；future = 原著参考，默认不注入
  *     anchors           可玩时间点，每个带一份世界快照
  *
@@ -174,28 +174,30 @@ export function getDb() {
       ON thread_events(session_id, branch_id, turn_no);
 
     /* ══════════════════════════════════════════════════════════════════ */
-    /* v4：世界卡（类型化辞书 / 时间线 / 可玩时间点）                        */
+    /* v5：世界卡（统一实体 / 时间线 / 开局点）                              */
     /* ══════════════════════════════════════════════════════════════════ */
 
-    -- 辞书：类型化实体。靠 links/tags 进场，不靠关键词触发。
-    CREATE TABLE IF NOT EXISTS codex_entries (
+    -- 实体：人物与事实共表。靠 links/tags 进场，不靠关键词触发。
+    CREATE TABLE IF NOT EXISTS entities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
-      codex_id TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'custom',
       name TEXT NOT NULL,
       aliases_json TEXT NOT NULL DEFAULT '[]',
       tags_json TEXT NOT NULL DEFAULT '[]',
       summary TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
       facets_json TEXT NOT NULL DEFAULT '{}',
       links_json TEXT NOT NULL DEFAULT '[]',
       reveal TEXT NOT NULL DEFAULT 'public',
       canon_from TEXT NOT NULL DEFAULT '',
-      detail TEXT NOT NULL DEFAULT '',
       pinned INTEGER NOT NULL DEFAULT 0,
+      muted INTEGER NOT NULL DEFAULT 0,
+      parent_id TEXT NOT NULL DEFAULT '',
       sort INTEGER NOT NULL DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_codex_world ON codex_entries(world_id, pinned DESC, sort ASC);
+    CREATE INDEX IF NOT EXISTS idx_entities_world ON entities(world_id, pinned DESC, sort ASC);
 
     -- 时间线：past 是既定事实，future 只是原著参考（默认不注入）。
     CREATE TABLE IF NOT EXISTS timeline_events (
@@ -311,7 +313,7 @@ export function getDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       branch_id TEXT NOT NULL DEFAULT 'main',
-      entity_kind TEXT NOT NULL,            -- cast | codex | player | world
+      entity_kind TEXT NOT NULL,            -- person | place | ... | player | world
       entity_id TEXT NOT NULL,
       path TEXT NOT NULL DEFAULT '',
       op TEXT NOT NULL DEFAULT 'set',       -- set | add | remove | introduce
@@ -951,29 +953,30 @@ export function saveWorld(world) {
   const card = world.card || {};
   upsertWorld(world);
   const w = getWorld(world.id);
-  replaceCodex(w.id, card.codex || []);
+  replaceEntities(w.id, card.entities || []);
   replaceTimeline(w.id, card.timeline || []);
   replaceAnchors(w.id, card.anchors || []);
   return w;
 }
 
-function replaceCodex(worldId, entries = []) {
+function replaceEntities(worldId, entries = []) {
   const d = getDb();
   d.exec('BEGIN');
   try {
-    d.prepare(`DELETE FROM codex_entries WHERE world_id=?`).run(worldId);
+    d.prepare(`DELETE FROM entities WHERE world_id=?`).run(worldId);
     const stmt = d.prepare(`
-      INSERT INTO codex_entries (world_id, codex_id, type, name, aliases_json, tags_json, summary,
-        facets_json, links_json, reveal, canon_from, detail, pinned, sort)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (world_id, entity_id, type, name, aliases_json, tags_json, summary,
+        detail, facets_json, links_json, reveal, canon_from, pinned, muted, parent_id, sort)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     entries.forEach((e, i) => {
       if (!e?.name && !e?.summary) return;
       stmt.run(
         worldId, String(e.id || ''), String(e.type || 'custom'), String(e.name || ''),
-        jsonOf(e.aliases), jsonOf(e.tags), String(e.summary || ''),
+        jsonOf(e.aliases), jsonOf(e.tags), String(e.summary || ''), String(e.detail || ''),
         jsonOf(e.facets || {}), jsonOf(e.links), String(e.reveal || 'public'),
-        String(e.canon_from || ''), String(e.detail || ''), e.pinned ? 1 : 0, i,
+        String(e.canon_from || ''), e.pinned ? 1 : 0, e.muted ? 1 : 0,
+        String(e.parent_id || ''), i,
       );
     });
     d.exec('COMMIT');
@@ -981,25 +984,27 @@ function replaceCodex(worldId, entries = []) {
     d.exec('ROLLBACK');
     throw err;
   }
-  return getCodex(worldId);
+  return getEntities(worldId);
 }
 
-export function getCodex(worldId) {
-  return getDb().prepare(`SELECT * FROM codex_entries WHERE world_id=? ORDER BY pinned DESC, sort ASC, id ASC`)
+export function getEntities(worldId) {
+  return getDb().prepare(`SELECT * FROM entities WHERE world_id=? ORDER BY pinned DESC, sort ASC, id ASC`)
     .all(worldId)
     .map((r) => ({
       ...r,
+      id: r.entity_id,
       aliases: JSON.parse(r.aliases_json || '[]'),
       tags: JSON.parse(r.tags_json || '[]'),
       facets: JSON.parse(r.facets_json || '{}'),
       links: JSON.parse(r.links_json || '[]'),
       pinned: !!r.pinned,
+      muted: !!r.muted,
     }));
 }
 
-export function setCodexPinned(worldId, codexId, pinned) {
-  const info = getDb().prepare(`UPDATE codex_entries SET pinned=? WHERE world_id=? AND codex_id=?`)
-    .run(pinned ? 1 : 0, worldId, codexId);
+export function setEntityPinned(worldId, entityId, pinned) {
+  const info = getDb().prepare(`UPDATE entities SET pinned=? WHERE world_id=? AND entity_id=?`)
+    .run(pinned ? 1 : 0, worldId, entityId);
   if (Number(info.changes) > 0) {
     // 钉选属于模板变更：已开的会话继续用旧快照，新会话才看到新版本。
     getDb().prepare(`UPDATE worlds SET version=version+1, updated_at=? WHERE id=?`).run(Date.now(), worldId);

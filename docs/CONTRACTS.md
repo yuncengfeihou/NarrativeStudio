@@ -13,28 +13,28 @@ NarrativeStudio/
 │   ├── tokens.js           CJK 感知的 token 估算
 │   ├── llm.js              OpenAI 兼容客户端 + usage 归一化
 │   ├── world/
-│   │   ├── schema.js       v4 卡形状归一 + 实体链接
+│   │   ├── schema.js       v5 卡形状归一（entities 单命名空间）+ 实体链接
 │   │   ├── scene-sheet.js  世界索引 / 辞书挑选 / 场记单渲染 / 辞书检索（纯函数）
 │   │   ├── effective.js    EffectiveWorld 投影（模板 + world_state）
 │   │   └── state-paths.js  world_state 路径白名单
 │   ├── agents/
 │   │   ├── orchestrator.js    回合管线（会话级串行锁、分支感知）
 │   │   ├── narrator.js        剧情演绎（流式，永不输出 JSON）
-│   │   ├── narrator-loop.js   分段演绎：草稿工作区 + codex_lookup（默认关）
+│   │   ├── narrator-loop.js   分段演绎：草稿工作区 + codex_lookup / recall_history（默认关）
 │   │   ├── archivist.js       史官：类型化抽取 + 确定性落库
 │   │   ├── retrieval.js       辞书检索预检（模型主动取证）
 │   │   ├── memory-pipeline.js 场记 / 校勘 / 检索 / 世界呼吸
 │   │   ├── branch.js          走向生成
 │   │   └── card-smith.js      小说 → 世界卡制卡流水线
 │   ├── memory/
-│   │   ├── store.js        SQLite CRUD（世界卡/会话/记忆/分支/提案/摘要）
+│   │   ├── store.js        SQLite CRUD（世界卡/会话/记忆/分支/提案/实体投影）
 │   │   ├── branch-guard.js 异步写入的分支/叶守卫
 │   │   ├── player-view.js  玩家可见状态投影（纯函数；场景信息条唯一数据源）
 │   │   └── context-engine.js 上下文装配（核心）
 │   ├── routes/
 │   │   ├── worlds.js       世界卡 + 辞书钉选 + 导出
 │   │   ├── sessions.js     会话 + 回合 + 记忆六表 + 分支 + 校勘 + 回忆
-│   │   ├── presets.js      世界卡种子（磁盘 ⇄ 数据库，只接受 v4 卡）
+│   │   ├── presets.js      世界卡种子（磁盘 ⇄ 数据库，只接受 v5 卡）
 │   │   ├── smith.js        制卡流水线
 │   │   ├── openai.js       /v1 兼容层
 │   │   └── static.js       web 静态托管
@@ -57,7 +57,7 @@ NarrativeStudio/
 │       ├── util.js         el / clear / 格式化
 │       ├── views/          worlds · world · world-edit · play · settings
 │       └── panels/         memory
-├── presets/                世界卡种子（v4 形状）
+├── presets/                世界卡种子（v5 形状，entities[]）
 ├── tests/                  test-world-card · test-memory · test-context · test-api
 ├── _work/                  开发期脚本（不参与运行时；清单见 _work/README.md）
 └── data/                   SQLite（运行时生成）
@@ -71,30 +71,29 @@ NarrativeStudio/
 
 ```js
 {
-  version: 4,
+  version: 5,
   kind: 'original' | 'adapted' | 'remix',
   title, subtitle, genre[], tags[],
   source: { kind, title, chapters, canon_cutoff, path } | null,
   prompt: { premise, tone[], style_guide, narrator_notes, bans[], pov, length, tense },
   charter: [{ rule, kind }],
-  cast: [{
-    id, name, aliases[], role, one_line,
+  entities: [{           // 单一命名空间：人物与设定集条目同表，id 在整卡内唯一
+    id, type: 'person|place|institution|item|faction|concept|custom',
+    name, aliases[], tags[], summary, detail,
+    facets: { sensory, rules[], consequences[], history },
+    links[], reveal: 'public|rumor|secret', canon_from, pinned, muted, parent_id,
+    sources: [{ kind, ref, title, chapter, offset, quote, turn_no }],
+    // type === 'person'：有声音与动机的角色
+    role, status, condition, mood, location, goal,
     identity: { age, appearance, background, station },
     voice: { address, rhythm, lexicon[], never[], exemplars[] },
-    psyche: { wants[], fears[], hides[], values[] },
+    psyche: { traits[], wants[], fears[], hides[], values[] },
     knowledge: { knows[], does_not_know[], believes_falsely[] },
     agenda: [{ goal, method, pressure, deadline }],
     relations: [{ to, kind, sentiment, note }],
     always_present, weight,
-  }],
-  codex: [{
-    id, type: 'place|institution|item|faction|concept|character|custom',
-    name, aliases[], tags[], summary,
-    facets: { sensory, rules[], consequences, history },
-    links[], reveal: 'public|rumor|secret', canon_from, detail, pinned,
-    muted,               // 作者静音：不进世界索引/场记候选（钉选不豁免），仍可被主动检索
-    parent_id,           // v5：地点/机构包含关系（可选）
-    sources: [{ kind, ref, title, chapter, offset, quote, turn_no }],
+    // type !== 'person'：世界事实的运行期可写字段
+    access, open_to, owner_id, location_id,
   }],
   timeline: [{ id, when, where, what, who[], source, canon: 'past|future|branch' }],
   anchors: [{ id, label, after_event, snapshot, opening_seed, note }],
@@ -106,9 +105,9 @@ NarrativeStudio/
 }
 ```
 
-**辞书图谱**：`buildWorldGraph(card)` 把 cast/codex 投影成统一实体图；同名 cast/codex 合并为
-一个节点（`mergedCodexIds`），索引与场记单不再重复。边来自 `cast.relations`、`codex.links`、
-`codex.parent_id` 与显式 `card.edges`。图只读、纯函数，不写库。
+**实体图**：`buildWorldGraph(card)` 直接读 `card.entities`（单一命名空间，不再合并 cast/codex）。
+边来自 `entity.relations`（人物）、`entity.links`（设定集）、`entity.parent_id` 与显式 `card.edges`。
+图只读、纯函数，不写库。
 
 **模板快照**：`worlds.version` 在每次 `saveWorld()`（含辞书钉选）时递增。
 会话创建时把整张卡写入 `sessions.card_snapshot_json` 并记录 `world_version`；
@@ -117,8 +116,8 @@ NarrativeStudio/
 **投影表**（可 SQL 查询，随 saveWorld 同步）：
 
 ```sql
-codex_entries(world_id, codex_id, type, name, aliases_json, tags_json, summary,
-              facets_json, links_json, reveal, canon_from, detail, pinned, sort)
+entities(world_id, entity_id, type, name, aliases_json, tags_json, summary, detail,
+         facets_json, links_json, reveal, canon_from, pinned, muted, parent_id, sort)
 timeline_events(world_id, event_id, when_label, where_label, what, who_json, source, canon, sort)
 anchors(world_id, anchor_id, label, after_event, snapshot_json, opening_seed, note)
 ```
@@ -176,15 +175,16 @@ patches(session_id, branch_id, agent, kind, payload_json, evidence, status, seve
 
 **写入 `assertions` / `voices` / `patches` 必须显式给 `branch_id`**（缺省抛错，不再静默兜底 `main`）。
 
-**world_state 是运行期世界变化的唯一写入口**：`entity_kind` 为 `cast | codex | player | world`，
+**world_state 是运行期世界变化的唯一写入口**：`entity_kind` 为实体类型（`person` / `place` / `institution` / `item` / `faction` / `concept` / `custom`）或 `player | world`，
 `op` 为 `set | add | remove | introduce`，路径白名单在 `server/world/state-paths.js`。
 身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas, fates)` 把
 模板、增量与已解锁的成长阶段投影成当轮有效的世界（优先级：`world_state` > `fates` > 卡初始值）；
 上下文引擎只读投影结果，永远不把运行期状态写回 `card_json`。
 
-**辞书定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有条目运行期不可写
-（`CODEX_CANON_PATHS`）；运行期只写 `status / condition / access / open_to / owner_id / location_id /
-reveal / facets.sensory` 与列表路径。新条目第一次 `introduce` 时可以一次写清定义。
+**实体定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有事实实体运行期不可写
+（`FACT_CANON_PATHS`）；运行期只写 `status / condition / access / open_to / owner_id / location_id /
+reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summary / role / mood / goal / location`
+与 `voice / psyche / knowledge / agenda / relations` 的列表路径。新条目第一次 `introduce` 时可以一次写清定义。
 
 **断言语义**：只有**单值谓词**（位于 / 是 / 曾经是）在「同主同谓、对象不同、有效期重叠」时
 把旧断言 `status='invalidated'` 并记 `valid_to`，**不删除**；多值谓词（知道 / 拥有 / 想要…）
@@ -206,14 +206,17 @@ VISIBILITIES = ['public','engine','secret']
 
 ```js
 import {
-  normalizeCard, buildAliasIndex, linkEntities,
-  resolveWho, sceneThemeTags, renderCardText, slugify,
+  CARD_VERSION, ENTITY_TYPES, PERSON_TYPE, isPerson, isFact, slugify,
+  normalizeCard, buildAliasIndex, linkEntities, resolveWho, resolveEntity,
+  sceneThemeTags, renderCardText,
 } from './world/schema.js';
 
-normalizeCard(raw)                 // 任意来源 → v4 形状（顶层 premise 也接受）
-buildAliasIndex(card)              // [{alias, kind:'cast'|'codex', id, name}] 长别名优先
-linkEntities(text, aliasIndex)     // -> {cast:[], codex:[]} 最长匹配、不重叠计数
-renderCardText(card)               // 纯文本导出（时间线标 canon 供人看）
+normalizeCard(raw)                 // 任意来源 → v5 形状（entities[] 单命名空间）
+buildAliasIndex(card)              // [{alias, type, id, name, role}] 长别名优先
+linkEntities(text, aliasIndex)     // -> {person:[], fact:[]} 最长匹配、不重叠计数
+resolveWho(name, aliasIndex)       // -> {type,id,name}；只认 person（账本人物）
+resolveEntity(name, aliasIndex)    // -> {type,id,name}；任意实体
+renderCardText(card)               // 纯文本导出（角色段 + 设定集段；时间线标 canon 供人看）
 ```
 
 ## 辞书图谱接口（纯函数）
@@ -225,18 +228,17 @@ import {
 import { lintCard } from './world/lint.js';
 
 buildWorldGraph(card)
-// -> { entities:Map, edges[], aliasToId:Map, mergedCodexIds:Set,
-//      codexById:Map, castById:Map, adjacency:Map, resolve(ref) }
+// -> { entities:Map, edges[], aliasToId:Map, entityById:Map, personById:Map,
+//      adjacency:Map, resolve(ref) }
 graphNeighbors(graph, ids, { depth })   // -> Set<entityId>（1 跳/多跳邻域）
-graphAncestors(graph, id) / graphChildren(graph, id)
+graphAncestors(graph, id) / graphChildren(graph, id) / hasContainment(graph)
 lintCard(card)
 // -> {issues:[{severity:'blocker'|'major'|'minor'|'info', code, message, ids?}],
-//     counts:{entities, edges, merged_codex, issues, bySeverity:{blocker,major,minor,info}}}
-// 结构检查：断链/别名冲突/包含环/孤立辞书/单值声明冲突；
-// 内容检查（info）：cast_incomplete（缺 appearance/one_line/rhythm）、cast_hollow（wants+hides 全空）、
-//                  codex_incomplete（缺 summary/facets）、character_codex_orphan（无同名 cast 的 character 条目）
-// 阻断项（blocker）：parent_cycle、duplicate_id（cast/codex 内或跨表 id 冲突）、
-//                  future_leak（有 source.canon_cutoff 时 past 事件章号 ≥ cutoff；来源不可解析则不猜）
+//     counts:{entities, persons, facts, edges, issues, bySeverity:{blocker,major,minor,info}}}
+// 结构检查：断链/别名冲突/包含环/孤立实体/单值声明冲突；
+// 内容检查（info）：person_incomplete（缺 appearance/summary/rhythm）、person_hollow（wants+hides 全空）、
+//                  fact_incomplete（缺 summary/facets）
+// 阻断项（blocker）：parent_cycle、duplicate_id、future_leak（有 source.canon_cutoff 时 past 事件章号 ≥ cutoff；来源不可解析则不猜）
 ```
 
 ## Scene Sheet 接口（纯函数）
@@ -244,16 +246,17 @@ lintCard(card)
 ```js
 import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet } from './world/scene-sheet.js';
 
-renderWorldIndex(card, capTokens, { skipIds })     // 平铺索引；超配额降级为只留名字
-renderWorldTree(card, capTokens, { skipIds, currentPlaceId })
-  // 有 parent_id 时按包含关系折叠；没有时退回 renderWorldIndex
+renderWorldIndex(card, capTokens, { skipIds })     // 人物段 + 设定集段；超配额降级为只留名字
+renderWorldTree(card, capTokens, { skipIds })      // 有 parent_id 时按包含关系折叠；没有时退回 renderWorldIndex
+renderTimelinePast(card, capTokens)                // 前史（canon='past'）一行一条；future/branch 永不渲染
 selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlaceId, skipIds })
-  // -> [{entry, score, why[]}]  实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20
-  // currentPlaceId 只认账本 place_id；skipIds 用于跳过与 cast 合并的 codex
-  // muted 条目不进入候选（renderWorldIndex / renderWorldTree 同样过滤）；静音 ≠ 删除
+  // 只在事实实体里选（人物由在场判定带出）；-> [{entry, score, why[]}]
+  // 实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20；muted 条目不进入候选（静音 ≠ 删除）
 renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices, echoes, directive, capTokens })
-  // codex = T0 全量，codexBrief = T1 一句
+  // codex = T0 全量事实条目，codexBrief = T1 一句；人物走 present 的 renderCastLine
   // -> {text, meta}  meta 记录 kept[] / dropped[] / codex_rendered / codex_brief_rendered
+lookupCodex(card, queries, { limit })              // 模型主动检索：遍历全部实体（含 person）
+renderCodexHit(entry)                              // 单条渲染；person 额外渲染身份/口吻/性格/知识边界
 ```
 
 ## Context Engine 接口
@@ -272,7 +275,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //      state, ledger, anchor, recentTurns, echoes,
 //      meta:{present, mentioned, theme_tags, codex, codex_candidates,
 //            codex_rendered, codex_dropped, codex_brief_candidates,
-//            codex_brief_rendered, graph:{entities,edges,merged_codex},
+//            codex_brief_rendered, graph:{entities,edges},
 //            facts, facts_candidates, facts_single, facts_many_rendered, facts_many_dropped,
 //            state_fixes, state_warnings,
 //            fates:{total, unlocked, omens},
@@ -338,7 +341,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   同一地点的长剧情一场都不关，场次索引根本建不起来。
 - 结构化记忆（账本/断言/关系/线索/场次）是**主要**记忆载体；场次记录的
   `question / outcome / key_detail / causal / hooks` 承担因果、时间顺序与关键细节。
-- **system 必须逐字节冻结**：连续 10 轮（即使史官一直写 `cast.role` / `player.situation` /
+- **system 必须逐字节冻结**：连续 10 轮（即使史官一直写 `entity.role` / `player.situation` /
   `introduce`）`messages[0].content` 完全一致。这是缓存命中率的前提。
 
 ### 硬约束
@@ -365,7 +368,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   并且逐轮 directive 同时进入尾注，避免被场记单预算丢掉。
 - 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
   最近原文提到但不在场的角色只进辞书邻域/关系提示，不占完整人物卡位。
-- 玩家角色永远在场（即使不在 cast 里，也会造一个最小条目）。
+- 玩家角色永远在场（即使不在人物表里，也会造一个最小条目）。
 - `turns.meta.assembly` 持久化本轮装配清单（层预算、在场、辞书候选/实渲染与原因、摘要/检索、降级标记）。
 
 ## Agent 接口
@@ -379,7 +382,7 @@ runNarrator({ session, world, context, turnNo, options, onDelta, signal })
 runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal })
 // -> {content, reasoning, usage, model, finishReason,
 //     narration:{mode:'segmented', rounds, tools, sealed}}
-// 工具：draft_append / draft_edit / draft_seal / codex_lookup
+// 工具：draft_append / draft_edit / draft_seal / codex_lookup / recall_history
 // 工具结果只进当拍临时消息；总预算 config.narration.toolHistoryTokens（默认 1200）。
 // 上游不支持 tools 时由 orchestrator 回退 runNarrator（narration.fallback='segmented'）。
 
@@ -402,6 +405,7 @@ runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, opti
 //   仍失败返回 parse_failed:true 并写 patches(kind='archivist_parse_failed', status='failed')，
 //   不落脏数据、也不静默当空提案。
 buildDeclaredTargets({ card, present, codex, ledgerCharacters, playerName }) -> string[]
+// codex = 本拍设定集候选（事实实体）；card 里的人与事实都进声明集合，越界写入拒收
 applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerName, declaredTargets })   // 纯函数，可单测
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
 parseArchivistUpdateStrict(content) // -> {ok, error, update}；只有顶层 JSON 对象才算成功（供重试/留痕）
@@ -488,13 +492,14 @@ runEffectOnce(snapshot, fn, { isStale? }) -> Promise<
 // 制卡（server/agents/card-smith.js）
 smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed, player,
             cutoff, extract, cacheDir, cache, onProgress, signal })
-// -> {card, stats:{chapters, cached, entities, events, charter, ...}}
+// -> {card, stats:{chapters, cached, entities, persons, events, charter, ...}}
+// card 直出 v5：entities[]（抽取的 character → type:'person'，其余 kind → 事实类型）
 // card.source = {kind:'novel', title, chapters, canon_cutoff:'chN'}（cutoff 之后的事件写 future）
 // 断点续跑缓存：指纹 = EXTRACT_VERSION + 文件名 + 文本长度/字节数/mtimeMs，按素材绝对路径分桶，
 //   源文件或抽取版本变化即失效；失败章不缓存。cutoff/extract/cacheDir 只供测试注入。
 // 导出（测试用）：readChapters / parseChapterExtract / buildCardFromExtracts / finalizeCard
-// finalizeCard(card, { sourceTexts })：定格 pass（appearance≤60/background≤160/其余≤40、
-//   exemplars 逐字校验、codex.character 归位、同章共现 links）
+// finalizeCard(card, { chapters, sourceTexts })：定格 pass（appearance≤60/background≤160/其余≤40、
+//   exemplars 逐字校验、同章共现 links 只在事实实体之间生成、relations.to 归一到 person id）
 
 // 运行期模型配置（server/model-registry.js）
 AGENT_KEYS   // ['narrator','archivist','sceneKeeper','retrieval','continuity','librarian','worldTick','branch','cardSmith']
@@ -583,9 +588,9 @@ PUT    /api/config                        body:{providers, models, agents}（或
        // -> {error:{message}}，不写库（空 providers/models、坏 baseUrl、未知 Agent、非法 effort 等）
 DELETE /api/config                        -> {ok:true, runtime}   // 删除运行期配置，回到 .env 种子
 GET    /api/fonts                         -> {fonts, source}（服务端本机字体）
-GET    /api/worlds                        -> 摘要列表
-GET    /api/worlds/:id                    -> {world, card, codex, sessions}
-                                          // codex[] 带 muted（投影表无该列，读出时从 card 合并）
+GET    /api/worlds                        -> 摘要列表（顶层 persons[] / entity_count / fact_count）
+GET    /api/worlds/:id                    -> {world, card, entities, sessions}
+                                          // entities[] 为全部实体（含 person 与 pinned/muted）
 GET    /api/worlds/:id/export             -> 纯文本
 GET    /api/worlds/:id/lint               -> {issues, counts}（结构检查 + 内容充分性 +
                                              blocker：parent_cycle / duplicate_id / future_leak；
@@ -595,7 +600,7 @@ POST   /api/worlds                        body:{id?, title?, card, source?}
                                              // {error:{message, issues:[...]}}
 PATCH  /api/worlds/:id                     // 同上，blocker 拒绝保存（422）
 DELETE /api/worlds/:id
-POST   /api/worlds/:id/codex/:codexId/pin body:{pinned}   // 只改 pinned；muted 随整卡保存
+POST   /api/worlds/:id/entities/:entityId/pin body:{pinned}   // -> {entities}；muted 随整卡保存
 POST   /api/worlds/:id/sessions           body:{anchor_id?}
 
 GET    /api/sessions?world_id=
@@ -638,7 +643,7 @@ POST   /api/sessions/:id/recall           body:{question} -> {found, answer, cit
 POST   /api/sessions/:id/recall-history   body:{query, limit?, kinds?, at_turn?} -> {query, hits, text, meta}
 
 GET    /api/presets / GET /api/presets/:id
-POST   /api/presets                       body:{id, card}（只接受 v4 卡）
+POST   /api/presets                       body:{id, card}（只接受 v5 卡）
 POST   /api/presets/:id/import
 GET    /api/smith/materials
 POST   /api/smith/preview                 -> SSE  body:{dir, title, premise, max_chapters}
@@ -670,7 +675,7 @@ openMemoryPanel(sessionId, { onUpdate, onReset })
 
 ```js
 import { buildPlayerView } from '../server/memory/player-view.js';   // 服务端纯函数
-buildPlayerView(ledger, { cast })  // -> {time, place, weather, present[]}
+buildPlayerView(ledger, { persons })  // -> {time, place, weather, present[]}
 ```
 
 - 前端唯一数据源是 `playerView`（GET `/api/sessions/:id`）与 SSE `state.player_view`。

@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * tests/test-context.js — 上下文装配 v4（无网络）
+ * tests/test-context.js — 上下文装配 v5（无网络）
  *
  * 覆盖：
  *   - 提示词结构：一条 system + 原文 + 场记单 + 本轮输入
@@ -48,10 +48,10 @@ const card = schema.normalizeCard({
     { rule: '女子主外、掌权、娶夫；男子主内、被娶、称「嫁」。', kind: 'law' },
     { rule: '司楼是合法存在的官营青楼，是悬在每个男人头上的刀。', kind: 'law' },
   ],
-  cast: [
+  entities: [
     {
-      id: 'ling-yue', name: '凌玥', aliases: ['玥姐姐', '凌家主'],
-      role: '帝都凌家家主 · 伍卿的「妻主」', one_line: '对天下是棋手，对少年是流氓。',
+      id: 'ling-yue', type: 'person', name: '凌玥', aliases: ['玥姐姐', '凌家主'],
+      role: '帝都凌家家主 · 伍卿的「妻主」', summary: '对天下是棋手，对少年是流氓。',
       identity: { appearance: '玄色窄袖长衫，左腕一串旧玉珠', station: '帝都凌家家主', background: '七岁那年被母亲丢在雨街' },
       voice: { rhythm: '陈述句、短句、笑着说的狠话', exemplars: ['「卿儿，过来。」'] },
       psyche: { traits: ['笑里藏刀', '护短'], wants: ['把他带走'], hides: ['七年前是她母亲丢的人'] },
@@ -59,15 +59,13 @@ const card = schema.normalizeCard({
       agenda: [{ goal: '今天必须把他带走', method: '不能用施舍的方式', pressure: 0.9 }],
       weight: 1,
     },
-    { id: 'zhang-lan', name: '张兰', role: '大厦保安', one_line: '势利而胆小', weight: 0.3 },
-    { id: 'li-po', name: '黎婆', role: '伍卿的奶奶', one_line: '恨凌家', weight: 0.5 },
-  ],
-  codex: [
+    { id: 'zhang-lan', type: 'person', name: '张兰', role: '大厦保安', summary: '势利而胆小', weight: 0.3 },
+    { id: 'li-po', type: 'person', name: '黎婆', role: '伍卿的奶奶', summary: '恨凌家', weight: 0.5 },
     {
       id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'],
       tags: ['制度', '交易'], summary: '官营青楼，男子被卖进去等于消失。',
       facets: { rules: ['入内即除籍'], consequences: ['家里会办丧事'] },
-      links: ['cast:ling-yue'], canon_from: 'prologue',
+      links: ['ling-yue'], canon_from: 'prologue',
     },
     {
       id: 'cheng-hu', type: 'concept', name: '称呼礼法', tags: ['制度'],
@@ -77,7 +75,7 @@ const card = schema.normalizeCard({
     {
       id: 'yupei', type: 'item', name: '无纹玉佩', aliases: ['玉佩'],
       tags: ['未解'], summary: '凌玥所赠，遇暗发绿光。',
-      facets: {}, links: ['cast:ling-yue'], reveal: 'secret', canon_from: 'prologue',
+      facets: {}, links: [], reveal: 'secret', canon_from: 'prologue',
     },
   ],
   timeline: [
@@ -88,9 +86,8 @@ const card = schema.normalizeCard({
     id: 'prologue', label: '序章 · 雨街', after_event: 'evt-0',
     snapshot: {
       time: '初冬 · 黄昏', place: '湘曲市 · 商务大厦门口', weather: '冷雨', tension: 0.35,
-      place_id: 'place:yujie',
       characters: { 'wu-qing': { mood: '窘迫', condition: '湿透' } },
-      inventory: [{ id: 'item:yupei', name: '无纹玉佩', holder: '伍卿' }],
+      inventory: [{ id: '', name: '无纹玉佩', holder: '伍卿' }],
     },
     opening_seed: '雨落下来，保安在赶人。台阶上有人撑伞站着，看了很久。',
   }],
@@ -183,7 +180,7 @@ console.log('\n=== 前史不依赖 anchor.snapshot ===');
   // 且文案里不出现「原著/后文」这类改编卡专属措辞。
   const bareCard = schema.normalizeCard({
     title: '原创世界', premise: '一座旧城。',
-    cast: [{ id: 'a-he', name: '阿禾', role: '守夜人', one_line: '沉默' }],
+    entities: [{ id: 'a-he', type: 'person', name: '阿禾', role: '守夜人', summary: '沉默' }],
     timeline: [{ id: 'p1', when: '二十年前', what: '旧城毁于大火', canon: 'past' }],
     player: { mode: 'original', name: '旅人' },
   });
@@ -292,15 +289,13 @@ console.log('\n=== 辞书场景视图：T0 / T1 两档 ===');
 {
   const tierCard = schema.normalizeCard({
     title: 'tier',
-    cast: [
-      { id: 'a', name: '甲', relations: [{ to: 'b', kind: '旧识' }] },
-      { id: 'b', name: '乙' },
-    ],
-    codex: [
-      { id: 'p', name: '当前地', type: 'place', summary: '这里' },
-      { id: 'n', name: '邻居物', type: 'item', summary: '挨着甲', links: ['cast:a'] },
-      { id: 'pin', name: '钉选物', type: 'concept', summary: '常驻', pinned: true },
-      { id: 'far', name: '远处物', type: 'item', summary: '无连接' },
+    entities: [
+      { id: 'a', type: 'person', name: '甲', relations: [{ to: 'b', kind: '旧识' }] },
+      { id: 'b', type: 'person', name: '乙' },
+      { id: 'p', type: 'place', name: '当前地', summary: '这里' },
+      { id: 'n', type: 'item', name: '邻居物', summary: '挨着甲', links: ['a'] },
+      { id: 'pin', type: 'concept', name: '钉选物', summary: '常驻', pinned: true },
+      { id: 'far', type: 'item', name: '远处物', summary: '无连接' },
     ],
     anchors: [{
       id: 'p0', label: '序',
@@ -338,7 +333,10 @@ console.log('\n=== 辞书场景视图：T0 / T1 两档 ===');
 
 console.log('\n=== 检索预检门控 ===');
 {
-  const gCard = schema.normalizeCard({ title: 'g', codex: [{ name: '司楼', aliases: ['青楼'] }] });
+  const gCard = schema.normalizeCard({
+    title: 'g',
+    entities: [{ id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'] }],
+  });
   ok(shouldPrecheckRetrieval({ mode: 'off', codexCount: 30, minCodex: 24, playerText: '司楼', card: gCard }) === false, 'off 永不预检');
   ok(shouldPrecheckRetrieval({ mode: 'on', codexCount: 1, minCodex: 24, playerText: '走', card: gCard }) === true, 'on 强制预检');
   ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我往前走', card: gCard }) === false, 'auto：没点名不预检');
@@ -353,10 +351,10 @@ console.log('\n=== 场记单内容 ===');
   });
   const sheet = ctx.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
   ok(sheet.includes('时间 初冬 · 黄昏'), '时空来自锚点快照');
-  ok(sheet.includes('私心：今天必须把他带走'), '私心来自 cast.agenda');
-  ok(sheet.includes('外形：玄色窄袖长衫'), '外形来自 cast.identity.appearance');
-  ok(sheet.includes('身份：帝都凌家家主'), '身份来自 cast.identity.station');
-  ok(sheet.includes('性格：笑里藏刀'), '性格来自 cast.psyche.traits');
+  ok(sheet.includes('私心：今天必须把他带走'), '私心来自人物 agenda');
+  ok(sheet.includes('外形：玄色窄袖长衫'), '外形来自人物 identity.appearance');
+  ok(sheet.includes('身份：帝都凌家家主'), '身份来自人物 identity.station');
+  ok(sheet.includes('性格：笑里藏刀'), '性格来自人物 psyche.traits');
   ok(!sheet.includes('七岁那年被母亲丢在雨街'), '背景故事不进场记单（只在卡与世界索引里）');
   ok(sheet.includes('边界：'), '知识边界在场');
   ok(sheet.includes('未回收的线索') || sheet.includes('压力'), '线索/压力段至少有一段');
@@ -459,10 +457,12 @@ console.log('\n=== system：主角与作者笔记优先于世界索引 ===');
     charter: Array.from({ length: 12 }, (_, i) => ({
       rule: `宪章${i}：${'这是很长的世界规则。'.repeat(6)}`,
     })),
-    cast: Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, name: `人物${i}`, role: '角色' })),
-    codex: Array.from({ length: 60 }, (_, i) => ({
-      id: `k${i}`, name: `条目${i}`, type: 'concept', summary: '摘要'.repeat(20),
-    })),
+    entities: [
+      ...Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, type: 'person', name: `人物${i}`, role: '角色' })),
+      ...Array.from({ length: 60 }, (_, i) => ({
+        id: `k${i}`, name: `条目${i}`, type: 'concept', summary: '摘要'.repeat(20),
+      })),
+    ],
     player: {
       name: '我', afraid: '怕水怕高怕欠人情',
       knowledge: { does_not_know: ['七年前的真相'] },
@@ -504,7 +504,7 @@ console.log('\n=== canon / runtime 分离：运行态不改 system 前缀 ===');
 
   const before = await engine.assembleContext({ session: sess, world: w, turnNo: 1, isOpening: true });
   store.addWorldState(made.id, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
     path: 'status', op: 'set', value: '左肩中箭', turn: 1, source: 'archivist',
   });
   const after = await engine.assembleContext({
@@ -525,7 +525,7 @@ console.log('\n=== 原声：回声带真实轮次，且能按角色锚定声线 
   store.createBranch(sid, { branchId: 'main' });
   store.setSessionAnchor(sid, 'prologue', 'main');
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
     path: 'mood', op: 'set', value: '冷峻', turn: 1,
   });
   for (let i = 1; i <= 3; i++) {
@@ -550,8 +550,8 @@ console.log('\n=== 缓存前缀：system 必须逐字节冻结（10 轮含运行
   // 带 parent_id 的树形索引卡：这是最容易被运行态污染的形状。
   const treeCard = schema.normalizeCard({
     ...card,
-    codex: [
-      ...card.codex,
+    entities: [
+      ...card.entities,
       { id: 'ling-fu', type: 'place', name: '凌府', summary: '帝都的宅子' },
       { id: 'ling-fu-yard', type: 'place', name: '凌府天井', summary: '院子里', parent_id: 'ling-fu' },
     ],
@@ -569,11 +569,11 @@ console.log('\n=== 缓存前缀：system 必须逐字节冻结（10 轮含运行
   for (let t = 1; t <= 10; t++) {
     // 每一轮都制造会污染 system 的运行态：角色身份变化、主角处境、新登场实体。
     store.addWorldState(made.id, {
-      branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+      branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
       path: 'role', op: 'set', value: `第${t}轮换的头衔`, turn: t,
     });
     store.addWorldState(made.id, {
-      branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+      branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
       path: 'status', op: 'set', value: `第${t}轮的状态`, turn: t,
     });
     store.addWorldState(made.id, {
@@ -581,11 +581,11 @@ console.log('\n=== 缓存前缀：system 必须逐字节冻结（10 轮含运行
       path: 'situation', op: 'set', value: `第${t}轮的处境`, turn: t,
     });
     store.addWorldState(made.id, {
-      branch_id: 'main', entity_kind: 'cast', entity_id: `extra-${t}`,
+      branch_id: 'main', entity_kind: 'person', entity_id: `extra-${t}`,
       op: 'introduce', value: { name: `临时角色${t}`, role: '路人' }, turn: t,
     });
     store.addWorldState(made.id, {
-      branch_id: 'main', entity_kind: 'codex', entity_id: `tmp-place-${t}`,
+      branch_id: 'main', entity_kind: 'place', entity_id: `tmp-place-${t}`,
       op: 'introduce', value: { type: 'place', name: `临时地点${t}`, summary: '路过' }, turn: t,
     });
 
@@ -891,8 +891,8 @@ console.log('\n=== voice 层进场：称呼与「绝不说」 ===');
 {
   const voiceCard = schema.normalizeCard({
     ...card,
-    cast: [{
-      id: 'ling-yue', name: '凌玥', role: '凌家家主',
+    entities: [...card.entities.filter((e) => e.id !== 'ling-yue'), {
+      id: 'ling-yue', type: 'person', name: '凌玥', role: '凌家家主',
       voice: {
         rhythm: '陈述句短句',
         address: { 伍卿: '卿儿', 张兰: '张老板' },
@@ -927,10 +927,10 @@ console.log('\n=== 成长曲线进装配：条件卡解锁后影响场记单，�
 {
   const fateCard = schema.normalizeCard({
     ...card,
-    cast: [
-      ...card.cast,
+    entities: [
+      ...card.entities,
       {
-        id: 'lu-ke', name: '陆可', role: '村长之女',
+        id: 'lu-ke', type: 'person', name: '陆可', role: '村长之女',
         psyche: { wants: ['回村'], hides: [] },
         voice: { rhythm: '说话直白' },
         weight: 0.6,
@@ -958,14 +958,14 @@ console.log('\n=== 成长曲线进装配：条件卡解锁后影响场记单，�
     session: fsess, world: fw, turnNo: 2, playerText: '陆可走过来。',
   });
   eq(early.meta.fates.unlocked.length, 0, '条件未满足时不解锁');
-  ok(early.card.cast.find((c) => c.id === 'lu-ke').role === '村长之女', '角色保持卡里的初始身份');
+  ok(early.card.entities.find((c) => c.id === 'lu-ke').role === '村长之女', '角色保持卡里的初始身份');
 
   // 第 5 轮：已解锁，role 与 wants 被增量改写
   const late = await engine.assembleContext({
     session: fsess, world: fw, turnNo: 5, playerText: '陆可走过来。',
   });
   eq(late.meta.fates.unlocked.map((f) => f.who), ['陆可'], '条件满足后解锁');
-  const lu = late.card.cast.find((c) => c.id === 'lu-ke');
+  const lu = late.card.entities.find((c) => c.id === 'lu-ke');
   eq(lu.role, '谢家的暗子', 'fates.change 改写了 role');
   ok(lu.psyche.wants.includes('回村'), '原有 wants 仍在');
   ok(lu.psyche.wants.includes('成为谢家的刀'), 'fates 追加了 wants');
@@ -1078,7 +1078,7 @@ console.log('\n=== 会话冻结模板快照 ===');
     card: schema.normalizeCard({
       ...snapshotCard,
       prompt: { ...snapshotCard.prompt, premise: '被改写的命题：只给新会话看。' },
-      cast: [...snapshotCard.cast, { id: 'new-face', name: '新角色' }],
+      entities: [...snapshotCard.entities, { id: 'new-face', type: 'person', name: '新角色' }],
     }),
   });
 
@@ -1093,7 +1093,7 @@ console.log('\n=== 会话冻结模板快照 ===');
 
   // 运行期增量叠加在快照上，而不是写回卡片。
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: 'ling-yue',
+    branch_id: 'main', entity_kind: 'person', entity_id: 'ling-yue',
     path: 'knowledge.knows', op: 'add', value: '快照局里她后来才知道的秘密',
     turn: 2, source: 'archivist',
   });
@@ -1102,7 +1102,7 @@ console.log('\n=== 会话冻结模板快照 ===');
   });
   const sheet = after.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
   ok(sheet.includes('快照局里她后来才知道的秘密'), '世界线增量进入场记单');
-  const liveLingYue = store.getWorld(wid).card.cast.find((c) => c.id === 'ling-yue');
+  const liveLingYue = store.getWorld(wid).card.entities.find((c) => c.id === 'ling-yue');
   ok(!(liveLingYue?.knowledge?.knows || []).includes('快照局里她后来才知道的秘密'), '运行期不写回模板');
 }
 
@@ -1118,11 +1118,11 @@ console.log('\n=== 剧情里新增的实体与事实 ===');
   const dynSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
 
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'cast', entity_id: 'a-jiu',
+    branch_id: 'main', entity_kind: 'person', entity_id: 'a-jiu',
     op: 'introduce', value: { name: '阿九', role: '听雨楼的跑堂' }, turn: 2,
   });
   store.addWorldState(sid, {
-    branch_id: 'main', entity_kind: 'codex', entity_id: 'tingyu-lou',
+    branch_id: 'main', entity_kind: 'place', entity_id: 'tingyu-lou',
     op: 'introduce', value: { type: 'place', name: '听雨楼', summary: '城南的暗线据点' }, turn: 2,
   });
   store.addAssertion(sid, {

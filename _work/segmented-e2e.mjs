@@ -203,14 +203,16 @@ try {
   console.log('\n=== 建卡 / 建局 ===');
   const worldRes = await req('POST', '/api/worlds', {
     card: {
-      version: 4,
+      version: 5,
       title: '分段测试卡',
       premise: '一场雨里的测试。',
-      cast: [{ id: 'me', name: '我', role: '主角', one_line: '测试' }],
-      codex: [{
-        id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'],
-        summary: '官营青楼。', facets: { rules: ['入内即除籍'] },
-      }],
+      entities: [
+        { id: 'me', type: 'person', name: '我', role: '主角', summary: '测试' },
+        {
+          id: 'silou', type: 'institution', name: '司楼', aliases: ['青楼'],
+          summary: '官营青楼。', facets: { rules: ['入内即除籍'] },
+        },
+      ],
       timeline: [],
       anchors: [{
         id: 'prologue', label: '序章', after_event: '',

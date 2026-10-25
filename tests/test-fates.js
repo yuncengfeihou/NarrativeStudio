@@ -35,7 +35,7 @@ function eq(a, b, label) {
 const mkCard = (extra = {}) => normalizeCard({
   title: '测试卡',
   premise: 'p',
-  cast: [{ id: 'lu-ke', name: '陆可', role: '村长之女' }],
+  entities: [{ id: 'lu-ke', type: 'person', name: '陆可', role: '村长之女' }],
   anchors: [{ id: 'p0', label: '序章', snapshot: { time: '初冬' } }],
   ...extra,
 });
@@ -174,8 +174,8 @@ console.log('\n=== visibility：author 只给作者，不进演绎 ===');
 console.log('\n=== change 增量：相加不覆盖 ===');
 {
   const card = mkCard({
-    cast: [{
-      id: 'lu-ke', name: '陆可', role: '村长之女',
+    entities: [{
+      id: 'lu-ke', type: 'person', name: '陆可', role: '村长之女',
       psyche: { wants: ['回村'], hides: ['旧事'] },
       knowledge: { knows: ['村里的事'] },
       relations: [{ to: '伍卿', kind: '暗恋', sentiment: 0.3 }],
@@ -194,7 +194,7 @@ console.log('\n=== change 增量：相加不覆盖 ===');
   });
 
   const world = buildEffectiveWorld(card, [], evaluateFates(card, { turnNo: 1 }).unlocked);
-  const lu = world.cast.find((c) => c.id === 'lu-ke');
+  const lu = world.entities.find((c) => c.id === 'lu-ke');
 
   eq(lu.role, '谢家的暗子', 'role 被改写');
   ok(lu.psyche.wants.includes('回村'), '原有 wants 保留');
@@ -215,16 +215,16 @@ console.log('\n=== change 增量：相加不覆盖 ===');
 console.log('\n=== 优先级：world_state > fates > 卡初始值 ===');
 {
   const card = mkCard({
-    cast: [{ id: 'lu-ke', name: '陆可', role: '村长之女' }],
+    entities: [{ id: 'lu-ke', type: 'person', name: '陆可', role: '村长之女' }],
     fates: [{ who: '陆可', stage: 1, unlock: {}, change: { role: '谢家的暗子' } }],
   });
   // 运行期已经写了 role → fates 不应覆盖运行期值
   const deltas = [{
-    id: 1, entity_kind: 'cast', entity_id: 'lu-ke', path: 'role',
+    id: 1, entity_kind: 'person', entity_id: 'lu-ke', path: 'role',
     op: 'set', value: '剧情里变成的第三个身份', valid_from: 5, valid_to: null,
   }];
   const world = buildEffectiveWorld(card, deltas, evaluateFates(card, { turnNo: 10 }).unlocked);
-  const lu = world.cast.find((c) => c.id === 'lu-ke');
+  const lu = world.entities.find((c) => c.id === 'lu-ke');
   eq(lu.role, '剧情里变成的第三个身份', '运行期 world_state 优先于 fates');
 }
 
@@ -291,7 +291,7 @@ console.log('\n=== seeds：开局播种成线索（伏笔不靠史官「碰巧�
   const seedCard = normalizeCard({
     title: '种卡',
     premise: 'p',
-    cast: [{ id: 'a', name: '甲', role: '角色' }],
+    entities: [{ id: 'a', type: 'person', name: '甲', role: '角色' }],
     anchors: [{ id: 'p0', label: '序章', snapshot: { time: '初冬' } }],
     seeds: [
       { title: '左腿旧伤的成因', kind: 'mystery', weight: 0.9, note: '原文写过不是天生的' },

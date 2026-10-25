@@ -265,9 +265,9 @@ export const api = {
     return fetch(`/api/worlds/${encodeURIComponent(id)}/export`, { signal }).then((r) => r.text());
   },
 
-  /** POST /api/worlds/:id/codex/:codexId/pin  body:{pinned} */
-  pinCodex(worldId, codexId, pinned, signal) {
-    return request(`/api/worlds/${encodeURIComponent(worldId)}/codex/${encodeURIComponent(codexId)}/pin`,
+  /** POST /api/worlds/:id/entities/:entityId/pin  body:{pinned}（v5：person 与事实实体共用一套钉选） */
+  setEntityPinned(worldId, entityId, pinned, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/entities/${encodeURIComponent(entityId)}/pin`,
       { method: 'POST', body: { pinned }, signal });
   },
 

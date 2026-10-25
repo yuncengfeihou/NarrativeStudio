@@ -142,12 +142,14 @@ export function applyFates(world, unlocked = [], { touched = null } = {}) {
   for (const f of unlocked) {
     const change = isObj(f.change) ? f.change : {};
     const who = String(f.who);
-    const target = (world.cast || []).find((c) => c.id === who || c.name === who);
+    const target = (world.entities || []).find((c) => c.type === 'person'
+      && (c.id === who || c.name === who || (c.aliases || []).includes(who)));
     if (!target) continue;
     const eid = target.id;
 
     if (change.role && !blocked(eid, 'role')) target.role = String(change.role);
-    if (change.one_line && !blocked(eid, 'one_line')) target.one_line = String(change.one_line);
+    const summary = change.summary || change.one_line;
+    if (summary && !blocked(eid, 'summary')) target.summary = String(summary);
 
     if (isObj(change.voice)) {
       if (change.voice.rhythm && !blocked(eid, 'voice.rhythm')) {

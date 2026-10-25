@@ -31,7 +31,7 @@ export function shouldPrecheckRetrieval({
     [playerText || '', branchChoice?.description || ''].join('\n'),
     buildAliasIndex(card),
   );
-  return (linked.codex || []).length > 0;
+  return (linked.fact || []).length > 0;
 }
 
 function tryParseObject(text) {
@@ -67,11 +67,11 @@ export function parseRetrievalQueries(content) {
 export async function runRetrieval({
   card, playerText = '', ledger = null, lastNarrative = '', signal,
 }) {
-  const codex = card?.codex || [];
-  if (!codex.length) return null;
+  const entities = card?.entities || [];
+  if (!entities.length) return null;
 
   // 名字/别名的紧凑清单；给模型判断「有什么可查」。
-  const names = [...new Set(codex.flatMap((e) => [e.name, ...(e.aliases || [])]).filter(Boolean))];
+  const names = [...new Set(entities.flatMap((e) => [e.name, ...(e.aliases || [])]).filter(Boolean))];
   const res = await chat({
     agent: 'retrieval',
     messages: [

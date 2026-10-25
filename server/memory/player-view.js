@@ -23,9 +23,9 @@ function text(value) {
  * 账本 present 里存的是角色 id 或名字（史官写名字，锚点快照写 id），
  * 展示前统一归一成卡司显示名；不在卡司里的原样保留。
  */
-function buildNameLookup(cast) {
+function buildNameLookup(persons) {
   const lookup = new Map();
-  for (const member of Array.isArray(cast) ? cast : []) {
+  for (const member of Array.isArray(persons) ? persons : []) {
     if (!member) continue;
     const name = text(member.name);
     if (!name) continue;
@@ -41,12 +41,12 @@ function buildNameLookup(cast) {
 /**
  * 把账本投影成状态条数据。
  * @param {object|null|undefined} ledger  states.state_json 的形状（见 mergeLedger）
- * @param {{cast?: object[]}} [options]   卡司（用于把 present 里的 id/别名归一成显示名）
+ * @param {{persons?: object[]}} [options]   人物实体（用于把 present 里的 id/别名归一成显示名）
  * @returns {{time: string, place: string, weather: string, present: string[]}}
  */
-export function buildPlayerView(ledger, { cast = [] } = {}) {
+export function buildPlayerView(ledger, { persons = [] } = {}) {
   const state = ledger && typeof ledger === 'object' && !Array.isArray(ledger) ? ledger : {};
-  const nameOf = buildNameLookup(cast);
+  const nameOf = buildNameLookup(persons);
   const present = Array.isArray(state.present)
     ? [...new Set(state.present.map((who) => nameOf.get(text(who)) || text(who)).filter(Boolean))]
     : [];

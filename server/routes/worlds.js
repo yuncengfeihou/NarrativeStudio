@@ -1,22 +1,22 @@
 /**
- * server/routes/worlds.js — 世界卡接口（v4）
+ * server/routes/worlds.js — 世界卡接口（v5）
  *
- * 世界卡（World）= 可复用的世界沙盒：命题 / 宪章 / 卡司 / 辞书 / 时间线 / 可玩时间点。
- * 它描述世界，不描述故事——所以没有「幕结构」接口，也没有「键控词条」接口。
+ * 世界卡（World）= 可复用的世界沙盒：故事方向 / 世界规则 / 实体（人物 + 世界事实）/
+ * 时间线 / 开局点。它描述世界，不描述故事——所以没有「幕结构」接口，也没有「键控词条」接口。
  *
- *   GET    /api/worlds                    -> 卡片摘要列表（含会话数）
- *   GET    /api/worlds/:id                -> 完整卡（card + codex + timeline + anchors）
+ *   GET    /api/worlds                    -> 卡片摘要列表（含会话数、persons/entity_count/fact_count）
+ *   GET    /api/worlds/:id                -> 完整卡（card + entities + sessions）
  *   POST   /api/worlds                    -> 新建/覆盖（body = {id?, title, card, source?}）
  *   PATCH  /api/worlds/:id                -> 局部更新
  *   DELETE /api/worlds/:id                -> 删除
  *   GET    /api/worlds/:id/export         -> 卡的纯文本形态（给用户外带）
- *   POST   /api/worlds/:id/codex/:codexId/pin -> 钉选/取消钉选一条辞书
+ *   POST   /api/worlds/:id/entities/:entityId/pin -> 固定带出/取消固定带出
  *   POST   /api/worlds/:id/sessions       -> 从这张卡开一局（可指定 anchorId）
  */
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import {
-  deleteWorld, getCodex, getWorld, listSessions, listWorlds, saveWorld, setCodexPinned,
+  deleteWorld, getEntities, getWorld, listSessions, listWorlds, saveWorld, setEntityPinned,
 } from '../memory/store.js';
 import { normalizeCard, renderCardText } from '../world/schema.js';
 import { lintCard } from '../world/lint.js';
@@ -43,18 +43,34 @@ function settingsFromWorld(world, overrides = {}) {
 }
 
 /**
- * 辞书投影给前端的形状：muted 只存在 card_json（投影表没有这一列），读出时从卡里合并回来。
- * 写入仍走 saveWorld（编辑器整卡保存），不要为它加 PATCH 接口。
+ * 实体投影给前端的形状。投影表由 saveWorld 从 card_json 同步，pinned/muted 都在表里；
+ * 还在卡片里编辑的字段（facets/detail 等）由编辑器整卡保存，不单开 PATCH 接口。
  */
-function codexView(world) {
-  const mutedById = new Map((world.card?.codex || []).map((e) => [e.id, !!e.muted]));
-  return getCodex(world.id).map((c) => ({ ...c, muted: !!mutedById.get(c.codex_id) }));
+function entitiesView(world) {
+  return getEntities(world.id).map((e) => ({
+    id: e.entity_id,
+    type: e.type,
+    name: e.name,
+    aliases: e.aliases,
+    tags: e.tags,
+    summary: e.summary,
+    facets: e.facets,
+    links: e.links,
+    reveal: e.reveal,
+    canon_from: e.canon_from,
+    detail: e.detail,
+    pinned: e.pinned,
+    muted: e.muted,
+    parent_id: e.parent_id,
+  }));
 }
 
 worldsRouter.get('/worlds', (req, res) => {
   const rows = listWorlds();
   res.json(rows.map((w) => {
     const card = normalizeCard(w.card || {});
+    const persons = card.entities.filter((e) => e.type === 'person');
+    const factCount = card.entities.length - persons.length;
     return {
       id: w.id,
       title: w.title,
@@ -63,16 +79,18 @@ worldsRouter.get('/worlds', (req, res) => {
       tags: w.tags,
       session_count: w.session_count,
       updated_at: w.updated_at,
+      // 列表页只需要人物与计数，别把整张卡推给前端。
+      persons: persons.map((p) => ({ id: p.id, name: p.name, role: p.role, summary: p.summary })),
+      entity_count: card.entities.length,
+      fact_count: factCount,
       card: {
         title: card.title,
         subtitle: card.subtitle,
         kind: card.kind,
         genre: card.genre,
         premise: card.prompt.premise,
-        cast: card.cast.map((c) => ({ id: c.id, name: c.name, role: c.role, one_line: c.one_line })),
         player: card.player.name ? { name: card.player.name, identity: card.player.identity, mode: card.player.mode } : null,
         charter_count: card.charter.length,
-        codex_count: card.codex.length,
         timeline_past: card.timeline.filter((t) => t.canon === 'past').length,
         timeline_future: card.timeline.filter((t) => t.canon === 'future').length,
         anchors: card.anchors.map((a) => ({ id: a.id, label: a.label })),
@@ -88,7 +106,7 @@ worldsRouter.get('/worlds/:id', (req, res) => {
   res.json({
     ...world,
     card: normalizeCard(world.card || {}),
-    codex: codexView(world),
+    entities: entitiesView(world),
     sessions: listSessions({ worldId: world.id }),
   });
 });
@@ -134,7 +152,7 @@ worldsRouter.post('/worlds', (req, res) => {
     card,
     source: body.source || card.source || null,
   });
-  res.status(201).json({ ...world, codex: codexView(world) });
+  res.status(201).json({ ...world, entities: entitiesView(world) });
 });
 
 worldsRouter.patch('/worlds/:id', (req, res) => {
@@ -158,7 +176,7 @@ worldsRouter.patch('/worlds/:id', (req, res) => {
     card,
     source: body.source ?? existing.source,
   });
-  res.json({ ...world, codex: codexView(world) });
+  res.json({ ...world, entities: entitiesView(world) });
 });
 
 worldsRouter.delete('/worlds/:id', (req, res) => {
@@ -168,14 +186,14 @@ worldsRouter.delete('/worlds/:id', (req, res) => {
   res.json({ deleted: world.id });
 });
 
-/* ------------------------------ 辞书钉选 ------------------------------ */
+/* ------------------------------ 固定带出 ------------------------------ */
 
-worldsRouter.post('/worlds/:id/codex/:codexId/pin', (req, res) => {
+worldsRouter.post('/worlds/:id/entities/:entityId/pin', (req, res) => {
   const world = getWorld(req.params.id);
   if (!world) return res.status(404).json({ error: { message: 'world not found' } });
   const pinned = !!req.body?.pinned;
-  setCodexPinned(world.id, req.params.codexId, pinned);
-  res.json({ codex: codexView(world) });
+  setEntityPinned(world.id, req.params.entityId, pinned);
+  res.json({ entities: entitiesView(world) });
 });
 
 /* ------------------------------- 开局 -------------------------------- */

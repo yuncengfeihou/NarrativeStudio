@@ -26,7 +26,7 @@ import { config } from '../config.js';
 import { resolveContextWindow } from '../model-registry.js';
 import { estimateMessageTokens, estimateTokens, truncateToTokens } from '../tokens.js';
 import { normalizeCard, buildAliasIndex, linkEntities, sceneThemeTags } from '../world/schema.js';
-import { buildEffectiveWorld, emptyCastEntry } from '../world/effective.js';
+import { buildEffectiveWorld, emptyPersonEntry } from '../world/effective.js';
 import { renderWorldIndex, renderWorldTree, renderTimelinePast, selectCodex, renderSceneSheet, renderSceneIndex, renderRecentScenes } from '../world/scene-sheet.js';
 import { buildWorldGraph, graphNeighbors } from '../world/graph.js';
 import { isFunctionalPredicate } from './predicates.js';
@@ -159,7 +159,7 @@ export function buildSystemLayer(
   const indexCapNow = Math.max(200, indexCap - estimateTokens(fixedText) - reserve - pastTokens);
   // 有包含关系时用树形索引；否则保持平铺。去重后的 codex 不再重复出现。
   const index = graph
-    ? renderWorldTree(card, indexCapNow, { skipIds: graph.mergedCodexIds })
+    ? renderWorldTree(card, indexCapNow)
     : renderWorldIndex(card, indexCapNow);
 
   let text = [fixedText, index, pastText, tailText].filter(Boolean).join('\n\n');
@@ -196,11 +196,12 @@ function loadLedger(sessionId, anchor, { branchId, atTurn }) {
  * @returns {Array}
  */
 function pickPresent(card, { ledger, linked }) {
-  const byId = new Map((card.cast || []).map((c) => [c.id, c]));
-  const byName = new Map((card.cast || []).map((c) => [c.name, c]));
+  const persons = (card.entities || []).filter((e) => e.type === 'person');
+  const byId = new Map(persons.map((c) => [c.id, c]));
+  const byName = new Map(persons.map((c) => [c.name, c]));
   const ids = new Set();
 
-  for (const c of card.cast || []) if (c.always_present) ids.add(c.id);
+  for (const c of persons) if (c.always_present) ids.add(c.id);
   const stage = Array.isArray(ledger?.present) && ledger.present.length
     ? ledger.present
     : Object.keys(ledger?.characters || {});
@@ -208,35 +209,42 @@ function pickPresent(card, { ledger, linked }) {
     const hit = byId.get(key) || byName.get(key);
     ids.add(hit ? hit.id : key);
   }
-  for (const id of linked?.cast || []) ids.add(id);
+  for (const id of linked?.person || []) ids.add(id);
   // 玩家角色永远在场：他就是镜头本身
   if (card.player?.canon_character) ids.add(card.player.canon_character);
   else if (card.player?.name) ids.add(card.player.name);
 
-  // 账本里出现过、但卡司里没有的名字，是剧情即兴造出来的人：
+  // 账本里出现过、但卡里没有的名字，是剧情即兴造出来的人：
   // 给一个最小条目，让他至少能进场，而不是被静默丢掉。
   const present = [...ids]
-    .map((id) => byId.get(id) || byName.get(id) || emptyCastEntry(id, id))
+    .map((id) => byId.get(id) || byName.get(id) || emptyPersonEntry(id, id))
     .filter(Boolean);
 
-  // 玩家角色可能不在卡司里（原创主角）。为他造一个最小条目，保证场记单有他。
+  // 玩家角色可能不在卡里（原创主角）。为他造一个最小条目，保证场记单有他。
   const playerId = card.player?.canon_character || card.player?.name;
   if (playerId && !present.some((c) => c.id === playerId || c.name === playerId)) {
     const p = card.player;
     present.unshift({
       id: playerId,
+      type: 'person',
       name: p.name || '主角',
       aliases: [],
       role: '主角',
-      one_line: '',
+      summary: '',
       status: p.status || '',
       condition: p.condition || '',
       mood: p.mood || '',
       location: p.location || '',
       goal: p.goal || '',
-      identity: {},
+      identity: { age: p.age || '', appearance: p.appearance || '', background: '', station: '' },
       voice: { address: {}, rhythm: p.inner_voice || '', lexicon: [], never: [], exemplars: [] },
-      psyche: { wants: p.wants ? [p.wants] : [], fears: p.afraid ? [p.afraid] : [], hides: [], values: [] },
+      psyche: {
+        traits: [],
+        wants: p.wants ? [p.wants] : [],
+        fears: p.afraid ? [p.afraid] : [],
+        hides: [],
+        values: [],
+      },
       knowledge: { knows: p.knowledge?.knows || [], does_not_know: p.knowledge?.does_not_know || [], believes_falsely: [] },
       agenda: [],
       relations: [],
@@ -259,34 +267,32 @@ function pickPresent(card, { ledger, linked }) {
 function pickCodex(card, { ledger, linked, present = [], pinnedIds = [], graph = null, playerLinked = null }) {
   const currentPlaceId = ledger?.place_id || null;
   const presentIds = [
-    ...(linked?.cast || []),
-    ...(linked?.codex || []),
+    ...(linked?.person || []),
+    ...(linked?.fact || []),
     ...pinnedIds,
   ];
   if (currentPlaceId) presentIds.push(currentPlaceId);
   for (const item of ledger?.inventory || []) if (item.id) presentIds.push(item.id);
 
   const tags = sceneThemeTags(card, presentIds, ledger?.theme_tags || []);
-  const skipIds = graph?.mergedCodexIds || null;
   const candidates = selectCodex(card, {
     presentIds,
-    mentionedIds: linked?.codex || [],
+    mentionedIds: linked?.fact || [],
     threadTags: tags,
     pinnedIds,
     currentPlaceId,
-    skipIds,
   });
 
   if (!graph) return { candidates, t0: candidates, t1: [], themeTags: tags };
 
-  // 焦点 = 在场人物 + 当前地点 + 随身物 + 钉选 + 玩家这一拍点名的辞书。
+  // 焦点 = 在场人物 + 当前地点 + 随身物 + 钉选 + 玩家这一拍点名的设定。
   const focus = new Set();
   const addFocus = (ref) => {
     const id = graph.resolve(ref);
     if (id) focus.add(id);
   };
   for (const c of present) addFocus(c.id);
-  for (const id of playerLinked?.codex || []) addFocus(id);
+  for (const id of playerLinked?.fact || []) addFocus(id);
   if (currentPlaceId) addFocus(currentPlaceId);
   for (const id of pinnedIds) addFocus(id);
   for (const item of ledger?.inventory || []) if (item.id) addFocus(item.id);
@@ -294,10 +300,11 @@ function pickCodex(card, { ledger, linked, present = [], pinnedIds = [], graph =
   const neighborIds = graphNeighbors(graph, focus, { depth: 1 });
   const byId = new Map(candidates.map((c) => [c.entry.id, c]));
 
-  // 邻域里没有链接/标签/钉选的条目也要进 T1（一句摘要），否则图边白建。
+  // 邻域里没有链接/标签/钉选的**事实实体**也要进 T1（一句摘要），否则图边白建。
+  // 人物不进设定集候选：他们在场时由场记单渲染，不等于「设定集条目」。
   for (const id of neighborIds) {
-    const entry = graph.codexById.get(id);
-    if (!entry || skipIds?.has(id) || byId.has(id)) continue;
+    const entry = graph.entityById.get(id);
+    if (!entry || entry.type === 'person' || byId.has(id)) continue;
     const cand = { entry, score: 10, why: ['邻域'] };
     candidates.push(cand);
     byId.set(id, cand);
@@ -307,7 +314,6 @@ function pickCodex(card, { ledger, linked, present = [], pinnedIds = [], graph =
   const t1 = [];
   for (const cand of candidates) {
     const id = cand.entry.id;
-    if (skipIds?.has(id)) continue; // 与 cast 同名的 codex，人物块已经覆盖
     const nodeId = graph.resolve(id) || id;
     if (focus.has(id) || focus.has(nodeId)) {
       t0.push(cand);
@@ -562,8 +568,8 @@ export async function assembleContext({
   );
   const linkedRecent = linkEntities(recentText, aliasIndex);
   const linked = {
-    cast: [...new Set([...(linkedPlayer.cast || []), ...(linkedRecent.cast || [])])],
-    codex: [...new Set([...(linkedPlayer.codex || []), ...(linkedRecent.codex || [])])],
+    person: [...new Set([...(linkedPlayer.person || []), ...(linkedRecent.person || [])])],
+    fact: [...new Set([...(linkedPlayer.fact || []), ...(linkedRecent.fact || [])])],
   };
 
   /* ---- 在场卡司 ---- */
@@ -575,8 +581,10 @@ export async function assembleContext({
   });
   const present = lint.present;
 
-  /* ---- 辞书 ---- */
-  const pinnedIds = (card.codex || []).filter((e) => e.pinned).map((e) => e.id);
+  /* ---- 设定集（事实实体） ---- */
+  const pinnedIds = (card.entities || [])
+    .filter((e) => e.type !== 'person' && e.pinned)
+    .map((e) => e.id);
   const { t0: codexT0, t1: codexT1, themeTags } = pickCodex(card, {
     ledger, linked, present, pinnedIds, graph, playerLinked: linkedPlayer,
   });
@@ -898,7 +906,7 @@ export async function assembleContext({
       theme_tags: themeTags,
       codex: selectedCodex.slice(0, Math.min(codexRendered, 8))
         .map((c) => ({ id: c.entry.id, name: c.entry.name, why: c.why })),
-      codex_total: card.codex.length,
+      codex_total: (card.entities || []).filter((e) => e.type !== 'person').length,
       codex_candidates: codexT0.length,
       codex_rendered: codexRendered,
       codex_dropped: Math.max(0, codexT0.length - codexRendered),
@@ -907,7 +915,6 @@ export async function assembleContext({
       graph: {
         entities: graph.entities.size,
         edges: graph.edges.length,
-        merged_codex: graph.mergedCodexIds.size,
       },
       timeline_past: (card.timeline || []).filter((t) => t.canon === 'past').length,
       timeline_future_held: (card.timeline || []).filter((t) => t.canon === 'future').length,

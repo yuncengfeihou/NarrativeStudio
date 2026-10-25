@@ -20,7 +20,7 @@
     "canon_cutoff": "ch5"
   },
   "card": {
-    "version": 4,
+    "version": 5,
     "kind": "adapted",
     "title": "我在女尊世界捡破烂",
     "subtitle": "一个捡破烂的穿越者，被帝都最有权势的女人认了出来。",
@@ -115,17 +115,38 @@
         "kind": "law"
       }
     ],
-    "cast": [
+    "entities": [
       {
         "id": "凌玥",
+        "type": "person",
         "name": "凌玥",
         "aliases": [
           "玥姐姐",
           "凌家主",
           "凌总"
         ],
+        "tags": [],
+        "summary": "对天下是棋手，对少年是流氓。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "凌家家主",
-        "one_line": "对天下是棋手，对少年是流氓。",
         "identity": {
           "age": "二十三四岁",
           "appearance": "白衬衫黑西装，雨里不撑伞；笑起来时眼睛很冷",
@@ -149,6 +170,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -225,13 +247,34 @@
       },
       {
         "id": "黎婆",
+        "type": "person",
         "name": "黎婆",
         "aliases": [
           "奶奶",
           "老婆子"
         ],
+        "tags": [],
+        "summary": "七十六岁，还能扛四五十斤藤蔓上山。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "伍卿的奶奶",
-        "one_line": "七十六岁，还能扛四五十斤藤蔓上山。",
         "identity": {
           "age": "七十六岁",
           "appearance": "黑粗布衣、灰裹头，抽旱烟，背篓边插着柴刀",
@@ -255,6 +298,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -319,13 +363,34 @@
       },
       {
         "id": "大黑牛",
+        "type": "person",
         "name": "大黑牛",
         "aliases": [
           "老黑",
           "牛"
         ],
+        "tags": [],
+        "summary": "不知踹过多少人，唯独在他面前像只小猫。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "伍卿家的牛",
-        "one_line": "不知踹过多少人，唯独在他面前像只小猫。",
         "identity": {
           "age": "四岁",
           "appearance": "通体乌黑，牛角粗壮，眼睛很亮",
@@ -342,6 +407,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -375,13 +441,34 @@
       },
       {
         "id": "陆可",
+        "type": "person",
         "name": "陆可",
         "aliases": [
           "可可姐",
           "陆姐姐"
         ],
+        "tags": [],
+        "summary": "前期的结巴，后期的冷刀。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "村长之女",
-        "one_line": "前期的结巴，后期的冷刀。",
         "identity": {
           "age": "二十出头",
           "appearance": "褐色夹克、黑色鸭舌帽、口罩；说话前先低头",
@@ -401,6 +488,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -457,12 +545,33 @@
       },
       {
         "id": "谢沐",
+        "type": "person",
         "name": "谢沐",
         "aliases": [
           "二小姐"
         ],
+        "tags": [],
+        "summary": "记吃不记打，被打完第二天还敢逗。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "谢家二小姐",
-        "one_line": "记吃不记打，被打完第二天还敢逗。",
         "identity": {
           "age": "二十岁上下",
           "appearance": "鸭舌帽、牛仔裤、长发披肩，笑起来很欠",
@@ -484,6 +593,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -522,7 +632,7 @@
             "note": "被打完第二天还敢来。"
           },
           {
-            "to": "谢沅",
+            "to": "xie-yuan",
             "kind": "姐妹",
             "sentiment": 0.5,
             "note": "怕姐姐，又爱在姐姐面前逞能。"
@@ -539,13 +649,34 @@
       },
       {
         "id": "姬淮澄",
+        "type": "person",
         "name": "姬淮澄",
         "aliases": [
           "太女殿下",
           "殿下"
         ],
+        "tags": [],
+        "summary": "骄矜、急躁，被拒一次就记恨到底。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "当朝太女",
-        "one_line": "骄矜、急躁，被拒一次就记恨到底。",
         "identity": {
           "age": "二十四五岁",
           "appearance": "纯白西服、银灰领结绣着凤翼、金色流苏",
@@ -567,6 +698,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -628,13 +760,34 @@
       },
       {
         "id": "南荣兰冰",
+        "type": "person",
         "name": "南荣兰冰",
         "aliases": [
           "兰冰",
           "南荣家主"
         ],
+        "tags": [],
+        "summary": "话痨、没正形，一谈正事眼神就变了。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "南荣掌舵",
-        "one_line": "话痨、没正形，一谈正事眼神就变了。",
         "identity": {
           "age": "二十一二岁",
           "appearance": "黑皮手套、天空蓝异瞳，骑机车来去",
@@ -654,6 +807,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -703,13 +857,34 @@
       },
       {
         "id": "凌璇",
+        "type": "person",
         "name": "凌璇",
         "aliases": [
           "老家主",
           "凌姨"
         ],
+        "tags": [],
+        "summary": "对外是老狐狸，对他是变脸戏法式的慈祥。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "凌家老家主",
-        "one_line": "对外是老狐狸，对他是变脸戏法式的慈祥。",
         "identity": {
           "age": "五十岁上下",
           "appearance": "黑粗布衣，拇指玉戒、无名指小红宝石金戒",
@@ -730,6 +905,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -779,12 +955,33 @@
       },
       {
         "id": "许映",
+        "type": "person",
         "name": "许映",
         "aliases": [
           "许秘书"
         ],
+        "tags": [],
+        "summary": "金丝眼镜，办事利落，内心疯狂吐槽的打工人。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "家主秘书",
-        "one_line": "金丝眼镜，办事利落，内心疯狂吐槽的打工人。",
         "identity": {
           "age": "二十五六岁",
           "appearance": "金丝眼镜、深色套装，手里永远抱着文件",
@@ -805,6 +1002,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -855,12 +1053,33 @@
       },
       {
         "id": "张兰",
+        "type": "person",
         "name": "张兰",
         "aliases": [
           "白西装女人"
         ],
+        "tags": [],
+        "summary": "一句话，赶走了她这辈子最不该赶的人。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "湘曲商贾",
-        "one_line": "一句话，赶走了她这辈子最不该赶的人。",
         "identity": {
           "age": "三十多岁",
           "appearance": "白色西服、四边眼镜、胸前白手巾",
@@ -881,6 +1100,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -929,13 +1149,34 @@
       },
       {
         "id": "姬延",
+        "type": "person",
         "name": "姬延",
         "aliases": [
           "陛下",
           "皇帝"
         ],
+        "tags": [],
+        "summary": "笑面老狐狸，五十岁。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "当朝皇帝",
-        "one_line": "笑面老狐狸，五十岁。",
         "identity": {
           "age": "五十岁",
           "appearance": "常服、笑脸，手里盘着玉",
@@ -956,6 +1197,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -1012,13 +1254,34 @@
       },
       {
         "id": "姬凡",
+        "type": "person",
         "name": "姬凡",
         "aliases": [
           "皇子",
           "凡殿下"
         ],
+        "tags": [],
+        "summary": "一句「半个瘸子」，踩了凌玥的雷。",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "皇子",
-        "one_line": "一句「半个瘸子」，踩了凌玥的雷。",
         "identity": {
           "age": "十七八岁",
           "appearance": "华服、眉眼骄纵",
@@ -1038,6 +1301,7 @@
           "exemplars": []
         },
         "psyche": {
+          "traits": [],
           "wants": [],
           "fears": [],
           "hides": [
@@ -1093,23 +1357,62 @@
       },
       {
         "id": "伍卿",
+        "type": "person",
         "name": "伍卿",
         "aliases": [
           "卿儿"
         ],
+        "tags": [],
+        "summary": "捡破烂的穿越者，镜头贴着他",
+        "detail": "",
+        "facets": {
+          "sensory": "",
+          "rules": [],
+          "consequences": [],
+          "history": ""
+        },
+        "links": [],
+        "reveal": "public",
+        "canon_from": "",
+        "sources": [],
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
         "role": "主角",
-        "one_line": "捡破烂的穿越者，镜头贴着他",
-        "always_present": true,
-        "weight": 1,
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "",
+          "station": ""
+        },
         "voice": {
-          "rhythm": "话少，常用「……哦。」应付；心里弹幕不断，嘴上不显。",
           "address": {
             "黎婆": "奶奶"
           },
+          "rhythm": "话少，常用「……哦。」应付；心里弹幕不断，嘴上不显。",
+          "lexicon": [],
           "never": [
             "说漂亮话",
             "主动求人"
-          ]
+          ],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
         },
         "agenda": [
           {
@@ -1120,27 +1423,22 @@
           }
         ],
         "relations": [],
-        "psyche": {},
-        "knowledge": {}
-      }
-    ],
-    "codex": [
+        "always_present": true,
+        "weight": 1
+      },
       {
         "id": "jiang-xiangyao",
-        "type": "character",
+        "type": "person",
         "name": "姜向瑶",
         "aliases": [
           "姜总"
         ],
-        "summary": "姜家当红明星，街上看了伍卿一眼就动心",
         "tags": [
           "姜家",
           "娱乐圈"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc7 / ch60",
-        "parent_id": "jiang-jia",
+        "summary": "姜家当红明星，街上看了伍卿一眼就动心",
+        "detail": "",
         "facets": {
           "sensory": "白色西服；人前高冷，口罩一摘，笑得又软又亮",
           "rules": [
@@ -1152,46 +1450,99 @@
           ],
           "history": "帝都姜家的当红明星，荧幕上常演将军。姜家在帝都说得上话，但碰世家和军方还是差一层。"
         },
-        "detail": "帝都姜家的当红明星，出门保镖开路、被粉丝和狗仔围堵的那种红。白色西服，人前一派高冷，上了车却「眼眸低垂，右手靠在车窗上，嘴角带起淡淡的笑意」，和刚才判若两人。她在街上撞见伍卿，一眼动心，先让司机「掉头，去7街。」甩掉狗仔，再戴口罩、压一顶鸭舌帽折回来，在包子铺前笑了一下——「找到你了。」保镖想拦，伍卿身边的人直接拔枪抵住她，她摘下口罩说「我没恶意。」她自认姜家在帝都能搞定一个男人，除非对方是皇子，那问题就大了；她见过皇子姬恒，所以一眼看出伍卿背景不简单。她的方式是跟：「找个手脚麻利的跟上去。」可第63章跟去的女保镖看见凌玥带兵对峙皇女，头皮发麻，替她算清了账：自家总裁动不了这小男人，喜欢也没用，实力不允许。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc7 / ch60",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第60章 有钱人也喜欢吃包子吗？.txt",
-            "chapter": 60
+            "title": "",
+            "chapter": 60,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第61章 皇女 姬淮澄.txt",
-            "chapter": 61
+            "title": "",
+            "chapter": 61,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第63章 回去再收拾你.txt",
-            "chapter": 63
+            "title": "",
+            "chapter": 63,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "jiang-jia",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "姜家当红明星，街上看了伍卿一眼就动心",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "帝都姜家的当红明星，出门保镖开路、被粉丝和狗仔围堵的那种红。白色西服，人前一派高冷，上了车却「眼眸低垂，右手靠在车窗上，嘴角带起淡淡的笑意」，和刚才判若两人。她在街上撞见伍卿，一眼动心，先让司机「掉头，去7街。」甩掉狗仔，再戴口罩、压一顶鸭舌帽折回来，在包子铺前笑了一下——「找到你了。」保镖想拦，伍卿身边的人直接拔枪抵住她，她摘下口罩说「我没恶意。」她自认姜家在帝都能搞定一个男人，除非对方是皇子，那问题就大了；她见过皇子姬恒，所以一眼看出伍卿背景不简单。她的方式是跟：「找个手脚麻利的跟上去。」可第63章跟去的女保镖看见凌玥带兵对峙皇女，头皮发麻，替她算清了账：自家总裁动不了这小男人，喜欢也没用，实力不允许。",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "liu-shen",
-        "type": "character",
+        "type": "person",
         "name": "刘婶",
         "aliases": [
           "刘茈"
         ],
-        "summary": "凌家老管家，看着凌玥长大，敢劝她",
         "tags": [
           "凌家",
           "凌府"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc6 / ch41",
-        "parent_id": "ling-jia",
+        "summary": "凌家老管家，看着凌玥长大，敢劝她",
+        "detail": "",
         "facets": {
           "sensory": "灰布衣，扣子却是锦绸绣的；两鬓斑白，话少而稳",
           "rules": [
@@ -1203,44 +1554,97 @@
           ],
           "history": "本名刘茈，凌家管家。除老家主凌璇与凌玥，凌家上下都叫她刘婶；凌玥是她看着长大的，她在凌家排第三人。"
         },
-        "detail": "凌家管家，本名刘茈，五六十岁，灰布衣，两鬓斑白，扣子却用锦绸绣过，看着朴素，其实是凌家的老人。除老家主凌璇和凌玥，凌家上下都叫她刘婶；原文说她「在凌家就是第三人」，凌玥是她看着长大的。她说话不急不缓，在机场先喊一声「凌总。」，转头又改口「家主」；汇报只给事实：「南荣兰冰不知如何得知家主的消息，现在正在大厅等候。」「以她以往的行事作风，应该是来与家主叙旧的。」凌玥问她身子如何、有没有按时吃药，她答「有劳家主挂怀，老妇好多了。」她也是少数敢催凌玥的人：「家主，快走吧，一会恐怕会有狗仔见到，被拍摄到就不好了。」她认得伍卿是几年前凌玥带回来的那个小娃娃，理由是凌玥对别的男子半点兴趣都没有，连皇子都兴致淡淡。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc6 / ch41",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第41章 是不是走错台了？.txt",
-            "chapter": 41
+            "title": "",
+            "chapter": 41,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第42章 南荣兰冰.txt",
-            "chapter": 42
+            "title": "",
+            "chapter": 42,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第56章 立大功.txt",
-            "chapter": 56
+            "title": "",
+            "chapter": 56,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "ling-jia",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "凌家老管家，看着凌玥长大，敢劝她",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "凌家管家，本名刘茈，五六十岁，灰布衣，两鬓斑白，扣子却用锦绸绣过，看着朴素，其实是凌家的老人。除老家主凌璇和凌玥，凌家上下都叫她刘婶；原文说她「在凌家就是第三人」，凌玥是她看着长大的。她说话不急不缓，在机场先喊一声「凌总。」，转头又改口「家主」；汇报只给事实：「南荣兰冰不知如何得知家主的消息，现在正在大厅等候。」「以她以往的行事作风，应该是来与家主叙旧的。」凌玥问她身子如何、有没有按时吃药，她答「有劳家主挂怀，老妇好多了。」她也是少数敢催凌玥的人：「家主，快走吧，一会恐怕会有狗仔见到，被拍摄到就不好了。」她认得伍卿是几年前凌玥带回来的那个小娃娃，理由是凌玥对别的男子半点兴趣都没有，连皇子都兴致淡淡。",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "tang-lao",
-        "type": "character",
+        "type": "person",
         "name": "唐老",
         "aliases": [],
-        "summary": "凌家桑邦分舵主，守临海防线的老舵主",
         "tags": [
           "凌家",
           "桑邦"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc9 / ch99",
-        "parent_id": "ling-jia",
+        "summary": "凌家桑邦分舵主，守临海防线的老舵主",
+        "detail": "",
         "facets": {
           "sensory": "白色西服、金戒、上好雪茄；两鬓斑白，眼神深沉而亮",
           "rules": [
@@ -1252,44 +1656,97 @@
           ],
           "history": "桑邦市（Z市）分舵掌舵人，替凌家看着临海防线。Z市是距帝都一千七百六十公里的边境城，帝国军队已在提防。"
         },
-        "detail": "桑邦市分舵舵主，凌家摆在边境的看门人。白色西服、手上金戒、抽上好的雪茄，两鬓斑白，眼睛却炯炯有神，原文写她「深沉而又睿智」，桌上永远堆着厚厚一叠文件。接到凌玥派人送来的秘信，脸上先是有兴奋，也有顾虑，最后变成坚毅里带着忧虑，开口只有一句：「你准备一下，将临海的防线布好，然后去一趟帝都。」周琪追问是不是要和帝国动手，她先点局势「帝国的军队已经在提防着我们」，再被问就是「要你做你就去做，哪这么多废话」，被磨得绷不住了才补一句「别这么多废话，去帝都不去总部，难道让你住皇宫里？」她嘴上嫌周琪贫，心里最清楚这人「有分寸，而且统兵能力极强，有帅才」，才肯把桑邦最利的一把刀送进帝都。后期：寿宴前后凌玥与帝国在码头对峙，桑邦这边布的就是临海防线。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc9 / ch99",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第99章 山雨欲来.txt",
-            "chapter": 99
+            "title": "",
+            "chapter": 99,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第102章 布局.txt",
-            "chapter": 102
+            "title": "",
+            "chapter": 102,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第116章 记忆浮动.txt",
-            "chapter": 116
+            "title": "",
+            "chapter": 116,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "ling-jia",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "凌家桑邦分舵主，守临海防线的老舵主",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "桑邦市分舵舵主，凌家摆在边境的看门人。白色西服、手上金戒、抽上好的雪茄，两鬓斑白，眼睛却炯炯有神，原文写她「深沉而又睿智」，桌上永远堆着厚厚一叠文件。接到凌玥派人送来的秘信，脸上先是有兴奋，也有顾虑，最后变成坚毅里带着忧虑，开口只有一句：「你准备一下，将临海的防线布好，然后去一趟帝都。」周琪追问是不是要和帝国动手，她先点局势「帝国的军队已经在提防着我们」，再被问就是「要你做你就去做，哪这么多废话」，被磨得绷不住了才补一句「别这么多废话，去帝都不去总部，难道让你住皇宫里？」她嘴上嫌周琪贫，心里最清楚这人「有分寸，而且统兵能力极强，有帅才」，才肯把桑邦最利的一把刀送进帝都。后期：寿宴前后凌玥与帝国在码头对峙，桑邦这边布的就是临海防线。",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "xie-yuan",
-        "type": "character",
+        "type": "person",
         "name": "谢沅",
         "aliases": [],
-        "summary": "谢家掌舵人，斯文体面，专治妹妹",
         "tags": [
           "谢家",
           "世家"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc8 / ch69",
-        "parent_id": "xie-jia",
+        "summary": "谢家掌舵人，斯文体面，专治妹妹",
+        "detail": "",
         "facets": {
           "sensory": "黑西服，白色口袋巾折得讲究；清冷，笑起来比冷脸更难缠",
           "rules": [
@@ -1301,44 +1758,97 @@
           ],
           "history": "帝都谢家嫡长女、现任掌舵人，谢沐的亲姐。比凌玥小一两个月，却从小直呼其名，从不叫表姐。"
         },
-        "detail": "谢家嫡长女、掌舵人，谢沐的亲姐。黑色西服，白色口袋巾折得讲究，清冷高雅，说话不快不慢，先笑后落刀。对妹妹是血脉压制：一句「把烟掐了。」就能让谢沐照做，急了直接拍后脑「闭嘴！」；对外人则体面周全，第一次见伍卿先替妹妹赔罪——「自我介绍一下，我叫谢沅，我这妹妹脑袋上缺根筋，说话从不过脑，表夫不必与她动气。」她比凌玥小一两个月，却从不叫表姐。谈事开门见山：「凌玥，这几天需要谢家怎么做？」谢家在明面上的人早已暴露，所以她出的是「外边的人，拿钱办事，不问缘由」。凌玥心里的评价是：城府深到连自己都能瞒过，她不会完全信任任何人，永远都不会。第108章送客，她只留一句「凌玥，小心卫家。」",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc8 / ch69",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第69章 最重要的一件事.txt",
-            "chapter": 69
+            "title": "",
+            "chapter": 69,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第70章 你最好有事.txt",
-            "chapter": 70
+            "title": "",
+            "chapter": 70,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第108章 文化有限.txt",
-            "chapter": 108
+            "title": "",
+            "chapter": 108,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xie-jia",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "谢家掌舵人，斯文体面，专治妹妹",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "谢家嫡长女、掌舵人，谢沐的亲姐。黑色西服，白色口袋巾折得讲究，清冷高雅，说话不快不慢，先笑后落刀。对妹妹是血脉压制：一句「把烟掐了。」就能让谢沐照做，急了直接拍后脑「闭嘴！」；对外人则体面周全，第一次见伍卿先替妹妹赔罪——「自我介绍一下，我叫谢沅，我这妹妹脑袋上缺根筋，说话从不过脑，表夫不必与她动气。」她比凌玥小一两个月，却从不叫表姐。谈事开门见山：「凌玥，这几天需要谢家怎么做？」谢家在明面上的人早已暴露，所以她出的是「外边的人，拿钱办事，不问缘由」。凌玥心里的评价是：城府深到连自己都能瞒过，她不会完全信任任何人，永远都不会。第108章送客，她只留一句「凌玥，小心卫家。」",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "zhao-dashen",
-        "type": "character",
+        "type": "person",
         "name": "赵大婶",
         "aliases": [],
-        "summary": "废品站老板娘，悄悄多给伍卿两块二",
         "tags": [
           "市井",
           "山村"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc1 / ch4",
-        "parent_id": "fei-pin-zhan",
+        "summary": "废品站老板娘，悄悄多给伍卿两块二",
+        "detail": "",
         "facets": {
           "sensory": "五十许，穿羽绒服，开门先笑；手粗，话热",
           "rules": [
@@ -1350,41 +1860,90 @@
           ],
           "history": "湘曲市一带收废品的妇人，五十来岁，伍卿是她的老客户。家中老母住院，那笔治疗费压得她身心疲惫。"
         },
-        "detail": "收废品的妇人，五十许岁，穿一件羽绒服。伍卿是她的老客户，熟到能在大铁门外直接喊「赵大婶，赵大婶........」，她应一声「小卿啊，来了，来了。」看见少年小脸小手冻得通红，她莫名鼻子发酸，说「小卿先进去坐会，婶把东西搬进去。」其实她自己更难：家中老母住院，那笔治疗费一想起来就让她身心疲惫。结账时该给七十二块八，她给了七十五，多出的两块二一个字没提，伍卿出门才嘟囔一句「人还怪好的。」第11章伍卿要牵牛进菜市场，心里想的第一件事就是先把牛放到她那儿。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc1 / ch4",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第4章 街道上的一牛一少年.txt",
-            "chapter": 4
+            "title": "",
+            "chapter": 4,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第11章 最惨穿越者.txt",
-            "chapter": 11
+            "title": "",
+            "chapter": 11,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §四 弧一"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §四 弧一",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "fei-pin-zhan",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "废品站老板娘，悄悄多给伍卿两块二",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "收废品的妇人，五十许岁，穿一件羽绒服。伍卿是她的老客户，熟到能在大铁门外直接喊「赵大婶，赵大婶........」，她应一声「小卿啊，来了，来了。」看见少年小脸小手冻得通红，她莫名鼻子发酸，说「小卿先进去坐会，婶把东西搬进去。」其实她自己更难：家中老母住院，那笔治疗费一想起来就让她身心疲惫。结账时该给七十二块八，她给了七十五，多出的两块二一个字没提，伍卿出门才嘟囔一句「人还怪好的。」第11章伍卿要牵牛进菜市场，心里想的第一件事就是先把牛放到她那儿。",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "zhao-wan",
-        "type": "character",
+        "type": "person",
         "name": "赵宛",
         "aliases": [
           "图野将军"
         ],
-        "summary": "帝国野战军总指挥，冷面，凌玥的镜子",
         "tags": [
           "军方",
           "帝国"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc7 / ch64",
-        "parent_id": "diguo-junfang",
+        "summary": "帝国野战军总指挥，冷面，凌玥的镜子",
+        "detail": "",
         "facets": {
           "sensory": "蓝色军官服，长发挽起不留一丝碎发；眼神犀利如鹰",
           "rules": [
@@ -1396,41 +1955,90 @@
           ],
           "history": "赵家世代为将，祖上七百年前做过护国大将军，如今没落到连财阀都比不上；她不到三十岁靠自己坐上野战军总指挥。"
         },
-        "detail": "帝国野战军总指挥，号图野将军。蓝色军官服，长发全部挽起，一丝碎发都不留，五官端正，眼神犀利如鹰。总指挥之下除了皇帝没人能直接调动她——这既是权柄也是枷锁：第76章码头，直升机请示是否对凌家的人火力覆盖，她只回两个字「不可。」没有皇帝的命令她不会乱来，何况她清楚凌家的兵就在附近，一动手就会赶到。她和凌玥是一面镜子的两侧：第64章她从雪地屋顶的凹陷看出凌玥布了不止一处狙击手，心里一沉「这么短的时间，居然布置的如此周到，凌玥……此人不简单！」；她也从凌玥身上看到了自己的影子，那种铁血军人的气息。对皇女姬淮澄称「殿下」，会低头解释「殿下息怒，就在刚刚，属下发现，我们周围有隐藏在暗处的狙击手。」赵家没落过，她是自己爬上来的，看人极准，也极难被说动。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc7 / ch64",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第64章 先认错.txt",
-            "chapter": 64
+            "title": "",
+            "chapter": 64,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第76章 棋手与棋子.txt",
-            "chapter": 76
+            "title": "",
+            "chapter": 76,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "diguo-junfang",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "帝国野战军总指挥，冷面，凌玥的镜子",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "帝国野战军总指挥，号图野将军。蓝色军官服，长发全部挽起，一丝碎发都不留，五官端正，眼神犀利如鹰。总指挥之下除了皇帝没人能直接调动她——这既是权柄也是枷锁：第76章码头，直升机请示是否对凌家的人火力覆盖，她只回两个字「不可。」没有皇帝的命令她不会乱来，何况她清楚凌家的兵就在附近，一动手就会赶到。她和凌玥是一面镜子的两侧：第64章她从雪地屋顶的凹陷看出凌玥布了不止一处狙击手，心里一沉「这么短的时间，居然布置的如此周到，凌玥……此人不简单！」；她也从凌玥身上看到了自己的影子，那种铁血军人的气息。对皇女姬淮澄称「殿下」，会低头解释「殿下息怒，就在刚刚，属下发现，我们周围有隐藏在暗处的狙击手。」赵家没落过，她是自己爬上来的，看人极准，也极难被说动。",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "zhao-wuyuan",
-        "type": "character",
+        "type": "person",
         "name": "赵无鸢",
         "aliases": [
           "荡野将军"
         ],
-        "summary": "凌家荡野将军，林子里的猛虎，只认凌家的恩",
         "tags": [
           "凌家",
           "军方"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc10 / ch124",
-        "parent_id": "ling-jia",
+        "summary": "凌家荡野将军，林子里的猛虎，只认凌家的恩",
+        "detail": "",
         "facets": {
           "sensory": "三十许，指挥迷彩、长发压进帽里；左腕一道很深的旧刀疤",
           "rules": [
@@ -1442,34 +2050,79 @@
           ],
           "history": "凌家老将。未从军时老母病重，为那份高薪进凌家当保镖；凌璇看中她，一路提拔，还派凌家顶级军医去治她母亲。"
         },
-        "detail": "凌家第二先锋军第六小队指挥官，凌璇亲口称她「森林中的猛虎」，封荡野将军。三十许岁，一身军事指挥迷彩，长发挽进帽子里，左手腕一道很深的旧刀伤，眼神凌厉，周身自带杀气。她不是世家出身：当年老母病重，为了那份高薪才进凌家当保镖，后来被凌璇看上，一步步提上来，凌家还派顶级军医去治她母亲——原文说「雪中送炭远胜于锦上添花」，所以她认的是恩，不是军饷。第124章她守在距长江对岸约四十公里的山凹，几千人潜伏不动，接过凌玥一笔一划写的亲笔信（信中赞她劳苦功高，要她「以四千虎狼之师势比拦下帝国两万边关之犬尔」，三日退兵，落款一个「凌」字），冰冷如霜的脸上才露出些许欣喜，只答一句：「大将军，属下万死不辞！」她肩上的肩章是凌家的长柳点云图。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc10 / ch124",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第124章 天生的王者.txt",
-            "chapter": 124
+            "title": "",
+            "chapter": 124,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "ling-jia",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "凌家荡野将军，林子里的猛虎，只认凌家的恩",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "凌家第二先锋军第六小队指挥官，凌璇亲口称她「森林中的猛虎」，封荡野将军。三十许岁，一身军事指挥迷彩，长发挽进帽子里，左手腕一道很深的旧刀伤，眼神凌厉，周身自带杀气。她不是世家出身：当年老母病重，为了那份高薪才进凌家当保镖，后来被凌璇看上，一步步提上来，凌家还派顶级军医去治她母亲——原文说「雪中送炭远胜于锦上添花」，所以她认的是恩，不是军饷。第124章她守在距长江对岸约四十公里的山凹，几千人潜伏不动，接过凌玥一笔一划写的亲笔信（信中赞她劳苦功高，要她「以四千虎狼之师势比拦下帝国两万边关之犬尔」，三日退兵，落款一个「凌」字），冰冷如霜的脸上才露出些许欣喜，只答一句：「大将军，属下万死不辞！」她肩上的肩章是凌家的长柳点云图。",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "zhou-qi",
-        "type": "character",
+        "type": "person",
         "name": "周琪",
         "aliases": [],
-        "summary": "唐老手里的尖刀，痞气，统兵有帅才",
         "tags": [
           "凌家",
           "军方"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "arc9 / ch99",
-        "parent_id": "ling-jia",
+        "summary": "唐老手里的尖刀，痞气，统兵有帅才",
+        "detail": "",
         "facets": {
           "sensory": "棕皮衣、单马尾、右耳一只黑耳环；笑起来一副混混做派",
           "rules": [
@@ -1481,34 +2134,94 @@
           ],
           "history": "桑邦分舵唐老麾下，二十四五岁。凌玥把她从Z市调进帝都，要的就是一把没名气、帝国不会多看一眼的刀。"
         },
-        "detail": "桑邦分舵唐老麾下，二十四五岁，棕色皮衣、长发用一根发绳扎成单马尾、右耳一只黑耳环，穿职业裤还敢在唐老办公室里翘二郎腿。身手好、脑子也有，毛病是懒得想：「唐老，你实话告诉我，是不是要与帝国那边动手了？」被一句「要你做你就去做，哪这么多废话」堵回去，转头还能赔笑「嘿嘿，您老别生气，我这不是确认嘛」。到帝都第一天蹲在别墅院里逗鹅，把鹅脖子掐得直扑腾，被伍卿拍开才发现自己看人看呆了，连忙道歉；外套里夹的枪被看见，越解释越像坏人，心里直叫「完了，解释不清了.....」，还腹诽「唯男子与小人难养也」。凌玥认定她是帅才，让她带第七小队扎进海口码头，寿宴当夜拦住帝国第九、第十七分队。第116章码头对峙，她一身凌家迷彩套防弹衣，枪抵着对面军官的脑门，嘴上还在耍贫：「只是今天天气好，憋得慌，出来看月亮不行啊？」",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "arc9 / ch99",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第99章 山雨欲来.txt",
-            "chapter": 99
+            "title": "",
+            "chapter": 99,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第101章 不速之客.txt",
-            "chapter": 101
+            "title": "",
+            "chapter": 101,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第102章 布局.txt",
-            "chapter": 102
+            "title": "",
+            "chapter": 102,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第116章 记忆浮动.txt",
-            "chapter": 116
+            "title": "",
+            "chapter": 116,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §2.10",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "ling-jia",
+        "status": "",
+        "condition": "",
+        "mood": "",
+        "location": "",
+        "goal": "",
+        "role": "唐老手里的尖刀，痞气，统兵有帅才",
+        "identity": {
+          "age": "",
+          "appearance": "",
+          "background": "桑邦分舵唐老麾下，二十四五岁，棕色皮衣、长发用一根发绳扎成单马尾、右耳一只黑耳环，穿职业裤还敢在唐老办公室里翘二郎腿。身手好、脑子也有，毛病是懒得想：「唐老，你实话告诉我，是不是要与帝国那边动手了？」被一句「要你做你就去做，哪这么多废话」堵回去，转头还能赔笑「嘿嘿，您老别生气，我这不是确认嘛」。到帝都第一天蹲在别墅院里逗鹅，把鹅脖子掐得直扑腾，被伍卿拍开才发现自己看人看呆了，连忙道歉；外套里夹的枪被看见，越解释越像坏人，心里直叫「完了，解释不清了.....」，还腹诽「唯男子与小人难养也」。凌玥认定她是帅才，让她带第七小队扎进海口码头，寿宴当夜拦住帝国第九、第十七分队。第116章码头对峙，她一身凌家迷彩套防弹衣，枪抵着对面军官的脑门，嘴上还在耍贫：「只是今天天气好，憋得慌，出来看月亮不行啊？」",
+          "station": ""
+        },
+        "voice": {
+          "address": {},
+          "rhythm": "",
+          "lexicon": [],
+          "never": [],
+          "exemplars": []
+        },
+        "psyche": {
+          "traits": [],
+          "wants": [],
+          "fears": [],
+          "hides": [],
+          "values": []
+        },
+        "knowledge": {
+          "knows": [],
+          "does_not_know": [],
+          "believes_falsely": []
+        },
+        "agenda": [],
+        "relations": [],
+        "always_present": false,
+        "weight": 0.5
       },
       {
         "id": "dong-wu-qin-he",
@@ -1520,10 +2233,7 @@
           "悬念"
         ],
         "summary": "牛、鹅、猫都只黏他一个人",
-        "canon_from": "ch1",
-        "parent_id": "",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "动物亲和只写现象，不写原因。它是后期的一根线，不是金手指——不能让动物替他打架。",
         "facets": {
           "sensory": "大黑牛用鼻子蹭他，白鹅跟着他走，橘猫跳上他的肩",
           "rules": [
@@ -1534,19 +2244,38 @@
           ],
           "history": "从山村的牛到凌府的白鹅，动物对他的亲近一直没变过；原文没有解释原因。"
         },
-        "detail": "动物亲和只写现象，不写原因。它是后期的一根线，不是金手指——不能让动物替他打架。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch1",
         "sources": [
           {
             "kind": "novel",
             "ref": "第1章",
-            "chapter": 1
+            "title": "",
+            "chapter": 1,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §三"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §三",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "shi-jie-gu-jia",
@@ -1558,10 +2287,7 @@
           "女尊"
         ],
         "summary": "现代皮囊、封建骨架：枪与凤椅同框",
-        "canon_from": "prologue",
-        "parent_id": "",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "写日常时，现代器物照用，礼法门第照旧。别把女尊写成口号，要写成空气：谁坐主位、谁先动筷、谁被当作物件估价。",
         "facets": {
           "sensory": "",
           "rules": [
@@ -1576,14 +2302,29 @@
           ],
           "history": "两百年前姬氏废了跪拜，却没松动男女尊卑；于是这个世界的楼很高，椅子还是凤椅。"
         },
-        "detail": "写日常时，现代器物照用，礼法门第照旧。别把女尊写成口号，要写成空气：谁坐主位、谁先动筷、谁被当作物件估价。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "prologue",
         "sources": [
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §一"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §一",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "zuo-tui-jiu-shang",
@@ -1599,10 +2340,7 @@
           "悬念"
         ],
         "summary": "脚腕的旧伤是后天砸出来的，他想不起来",
-        "canon_from": "ch1",
-        "parent_id": "",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "这是伍卿「弱」的一部分，也是记忆封印的接口之一。别把它写成能靠毅力克服的小伤，也别提前揭成因。",
         "facets": {
           "sensory": "阴雨天会疼，走快了会跛；伍卿习惯把重心挪到右腿",
           "rules": [
@@ -1613,19 +2351,38 @@
           ],
           "history": "十岁那年被丢在东街十五路之前，这条腿就坏了。是砸的，不是天生的。"
         },
-        "detail": "这是伍卿「弱」的一部分，也是记忆封印的接口之一。别把它写成能靠毅力克服的小伤，也别提前揭成因。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch1",
         "sources": [
           {
             "kind": "novel",
             "ref": "第1章",
-            "chapter": 1
+            "title": "",
+            "chapter": 1,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §三"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §三",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "diguo-junfang",
@@ -1634,15 +2391,12 @@
         "aliases": [
           "星叶图"
         ],
-        "summary": "帝国正规军，以星叶图为标识，皇帝直辖",
         "tags": [
           "军队",
           "皇室"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch61",
-        "parent_id": "",
+        "summary": "帝国正规军，以星叶图为标识，皇帝直辖",
+        "detail": "星叶图一露，就等于皇室到场。赵家世代为将，赵宛凭一己之力爬到野战军总指挥，眼光毒辣，能一眼看出屋顶上的狙击手。军方医术比凌家的私人军医强得多。但军方历来对凌家客气，见了凌玥也要给三分薄面，轻易不敢真动手。",
         "facets": {
           "sensory": "迷彩军装，肩上是星叶图臂标",
           "rules": [
@@ -1653,35 +2407,65 @@
           ],
           "history": "皇室的正统官方军，兵士穿统一迷彩，肩标为星叶图；野战军总指挥是赵宛，不到三十岁就坐上这个位置"
         },
-        "detail": "星叶图一露，就等于皇室到场。赵家世代为将，赵宛凭一己之力爬到野战军总指挥，眼光毒辣，能一眼看出屋顶上的狙击手。军方医术比凌家的私人军医强得多。但军方历来对凌家客气，见了凌玥也要给三分薄面，轻易不敢真动手。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch61",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第61章 皇女 姬淮澄.txt",
-            "chapter": 61
+            "title": "",
+            "chapter": 61,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第63章 回去再收拾你.txt",
-            "chapter": 63
+            "title": "",
+            "chapter": 63,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第64章 先认错.txt",
-            "chapter": 64
+            "title": "",
+            "chapter": 64,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第53章 西装暴徒.txt",
-            "chapter": 53
+            "title": "",
+            "chapter": 53,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第23章 解释不清了.txt",
-            "chapter": 23
+            "title": "",
+            "chapter": 23,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "ji-shi",
@@ -1690,15 +2474,12 @@
         "aliases": [
           "姬家"
         ],
-        "summary": "统治帝国的皇族，皇帝姬延坐镇皇宫",
         "tags": [
           "皇权",
           "统治"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch43",
-        "parent_id": "",
+        "summary": "统治帝国的皇族，皇帝姬延坐镇皇宫",
+        "detail": "姬延一米九，穿黑色军衣、袖口绣金火凤；太女姬淮澄穿白西装，行事张扬；皇子姬恒、姬凡都在。皇帝一面提拔新人制衡凌玥，一面又清楚女儿不是凌玥的对手，只能先按着。皇室常以宴会、请帖、封路这类手段试探凌家。",
         "facets": {
           "sensory": "",
           "rules": [
@@ -1710,45 +2491,68 @@
           ],
           "history": "姬氏皇朝统治帝国，皇帝姬延居皇宫凤椅；皇室两百年前就废除了跪拜制度，平民见皇帝也只是弯腰行礼"
         },
-        "detail": "姬延一米九，穿黑色军衣、袖口绣金火凤；太女姬淮澄穿白西装，行事张扬；皇子姬恒、姬凡都在。皇帝一面提拔新人制衡凌玥，一面又清楚女儿不是凌玥的对手，只能先按着。皇室常以宴会、请帖、封路这类手段试探凌家。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch43",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第43章 见家长.txt",
-            "chapter": 43
+            "title": "",
+            "chapter": 43,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第45章 赴宴变故.txt",
-            "chapter": 45
+            "title": "",
+            "chapter": 45,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第62章 起不到任何作用的威胁.txt",
-            "chapter": 62
+            "title": "",
+            "chapter": 62,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第109章 怎么哪都能扯上自己？.txt",
-            "chapter": 109
+            "title": "",
+            "chapter": 109,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "jiang-jia",
         "type": "faction",
         "name": "姜家",
         "aliases": [],
-        "summary": "帝都数一数二的豪门，财势与话语权都不小",
         "tags": [
           "豪门",
           "帝都"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch61",
-        "parent_id": "",
+        "summary": "帝都数一数二的豪门，财势与话语权都不小",
+        "detail": "姜向瑶是姜总，在街上见过伍卿后动了心思，自恃「姜家在帝都也算是数一数二的豪门大家」，觉得搞定一个男人没问题；她派了手脚麻利的人跟踪伍卿，被凌玥的护卫拿枪顶住，只能后退收手。原文没写姜家的家主、宅邸与产业，别替它补。",
         "facets": {
           "sensory": "",
           "rules": [],
@@ -1757,35 +2561,50 @@
           ],
           "history": "帝都的豪门大家，实力与话语权都不弱"
         },
-        "detail": "姜向瑶是姜总，在街上见过伍卿后动了心思，自恃「姜家在帝都也算是数一数二的豪门大家」，觉得搞定一个男人没问题；她派了手脚麻利的人跟踪伍卿，被凌玥的护卫拿枪顶住，只能后退收手。原文没写姜家的家主、宅邸与产业，别替它补。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch61",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第61章 皇女 姬淮澄.txt",
-            "chapter": 61
+            "title": "",
+            "chapter": 61,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第63章 回去再收拾你.txt",
-            "chapter": 63
+            "title": "",
+            "chapter": 63,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "ling-jia",
         "type": "faction",
         "name": "凌家",
         "aliases": [],
-        "summary": "当朝最大的诸侯王世家，盘踞帝都",
         "tags": [
           "世家",
           "军阀"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch40",
-        "parent_id": "",
+        "summary": "当朝最大的诸侯王世家，盘踞帝都",
+        "detail": "家主凌玥，老家主凌璇，管家刘婶（刘茈）看着凌玥长大。军中称凌玥「将军」，兵士肩上是凌家的长柳点云图，皮卡上的徽章是贪狼标志；另设第二先锋军，赵无鸢是第六小队指挥官。湘曲那份基业对凌家只是弃子。谢家、南荣家在暗处与它结盟，南荣兰冰自愿当炮手。",
         "facets": {
           "sensory": "",
           "rules": [
@@ -1797,49 +2616,77 @@
           ],
           "history": "用古代的话说，凌家就是一个大诸侯，而且是有野心的诸侯王，属于听封不听调的；皇帝下令世家财阀最多招两千私兵，凌家远不止"
         },
-        "detail": "家主凌玥，老家主凌璇，管家刘婶（刘茈）看着凌玥长大。军中称凌玥「将军」，兵士肩上是凌家的长柳点云图，皮卡上的徽章是贪狼标志；另设第二先锋军，赵无鸢是第六小队指挥官。湘曲那份基业对凌家只是弃子。谢家、南荣家在暗处与它结盟，南荣兰冰自愿当炮手。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch40",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第63章 回去再收拾你.txt",
-            "chapter": 63
+            "title": "",
+            "chapter": 63,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第41章 是不是走错台了？.txt",
-            "chapter": 41
+            "title": "",
+            "chapter": 41,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第76章 棋手与棋子.txt",
-            "chapter": 76
+            "title": "",
+            "chapter": 76,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第124章 天生的王者.txt",
-            "chapter": 124
+            "title": "",
+            "chapter": 124,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.2"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.2",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "nanrong-jia",
         "type": "faction",
         "name": "南荣家",
         "aliases": [],
-        "summary": "南荣兰冰掌舵的帝都世家，与凌家走得近",
         "tags": [
           "世家",
           "依附"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch41",
-        "parent_id": "",
+        "summary": "南荣兰冰掌舵的帝都世家，与凌家走得近",
+        "detail": "南荣兰冰是南荣家现在的掌舵人，行事作风凌玥不太喜欢，但算发小；她把南荣家经营得井井有条、日渐昌盛，不是没脑子的纨绔。她主动说「我南荣家愿给你当炮手」，也清楚南荣家太弱小，一旦凌玥这盘棋输了，南荣家保不住现状。",
         "facets": {
           "sensory": "",
           "rules": [],
@@ -1848,40 +2695,59 @@
           ],
           "history": "帝都南荣家；南荣是复姓，兰冰才是名字。实力挺大，可跟凌家比差的不只是一个层次"
         },
-        "detail": "南荣兰冰是南荣家现在的掌舵人，行事作风凌玥不太喜欢，但算发小；她把南荣家经营得井井有条、日渐昌盛，不是没脑子的纨绔。她主动说「我南荣家愿给你当炮手」，也清楚南荣家太弱小，一旦凌玥这盘棋输了，南荣家保不住现状。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch41",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第41章 是不是走错台了？.txt",
-            "chapter": 41
+            "title": "",
+            "chapter": 41,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第74章 用一辈子来抵债.txt",
-            "chapter": 74
+            "title": "",
+            "chapter": 74,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第76章 棋手与棋子.txt",
-            "chapter": 76
+            "title": "",
+            "chapter": 76,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "wei-jia",
         "type": "faction",
         "name": "卫家",
         "aliases": [],
-        "summary": "帝都世家，近来与皇室走得很近",
         "tags": [
           "世家",
           "棋子"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch76",
-        "parent_id": "",
+        "summary": "帝都世家，近来与皇室走得很近",
+        "detail": "第77章凌玥一句话点破：卫家甘愿当马前卒，葬送百人的性命，只为替姬延的棋盘打开局面。第89章那条死胡同翻过去就是卫家的势力范围；凌玥随即把侦察兵的重点挪到卫家身上，谢沅也提醒「小心卫家」。",
         "facets": {
           "sensory": "",
           "rules": [],
@@ -1890,45 +2756,68 @@
           ],
           "history": "帝都的世家，在帝都有自己的势力范围；外来的雇佣军敢在帝都与它交火，本身就是一步棋"
         },
-        "detail": "第77章凌玥一句话点破：卫家甘愿当马前卒，葬送百人的性命，只为替姬延的棋盘打开局面。第89章那条死胡同翻过去就是卫家的势力范围；凌玥随即把侦察兵的重点挪到卫家身上，谢沅也提醒「小心卫家」。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch76",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第76章 棋手与棋子.txt",
-            "chapter": 76
+            "title": "",
+            "chapter": 76,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第77章 突变.txt",
-            "chapter": 77
+            "title": "",
+            "chapter": 77,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第89章 逃脱，预谋.txt",
-            "chapter": 89
+            "title": "",
+            "chapter": 89,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第108章 文化有限.txt",
-            "chapter": 108
+            "title": "",
+            "chapter": 108,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "xie-jia",
         "type": "faction",
         "name": "谢家",
         "aliases": [],
-        "summary": "帝都世家，谢沅掌舵，谢沐的姐姐",
         "tags": [
           "世家",
           "暗盟"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch69",
-        "parent_id": "",
+        "summary": "帝都世家，谢沅掌舵，谢沐的姐姐",
+        "detail": "谢沅来凌家商量「皇室下个月可能有动作」，主动问需要谢家做什么；凌玥却不肯把底牌告诉她，连谢家也蒙在鼓里。临走时谢沅提醒「小心卫家」。明面上谢家是帝都世家，暗地里替凌玥做事，这层关系不能摆到台面上。",
         "facets": {
           "sensory": "",
           "rules": [],
@@ -1937,40 +2826,59 @@
           ],
           "history": "帝都谢家，嫡长女谢沅是现在的掌舵人，二小姐谢沐是个混地下赌场的纨绔"
         },
-        "detail": "谢沅来凌家商量「皇室下个月可能有动作」，主动问需要谢家做什么；凌玥却不肯把底牌告诉她，连谢家也蒙在鼓里。临走时谢沅提醒「小心卫家」。明面上谢家是帝都世家，暗地里替凌玥做事，这层关系不能摆到台面上。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch69",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第69章 最重要的一件事.txt",
-            "chapter": 69
+            "title": "",
+            "chapter": 69,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第70章 你最好有事.txt",
-            "chapter": 70
+            "title": "",
+            "chapter": 70,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第108章 文化有限.txt",
-            "chapter": 108
+            "title": "",
+            "chapter": 108,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "jiazhuo-jituan",
         "type": "institution",
         "name": "嘉桌集团",
         "aliases": [],
-        "summary": "凌玥在湘曲名下的公司，保镖薪水开得极高",
         "tags": [
           "公司",
           "凌家"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch22",
-        "parent_id": "xiang-qu",
+        "summary": "凌玥在湘曲名下的公司，保镖薪水开得极高",
+        "detail": "同行都知道嘉桌集团开的保镖薪水是别家的两倍，所以它的保镖格外卖命，也怕被老板看见偷懒丢了饭碗。凌玥在湘曲是最大的商业大亨，谁都想搭上这条线；张兰的公司运转出问题，托了极多人脉才换来一次合作机会。",
         "facets": {
           "sensory": "",
           "rules": [
@@ -1979,74 +2887,124 @@
           "consequences": [],
           "history": "凌玥在湘曲名下的公司；她三年前只身来湘曲寻人，这家公司是顺手开的"
         },
-        "detail": "同行都知道嘉桌集团开的保镖薪水是别家的两倍，所以它的保镖格外卖命，也怕被老板看见偷懒丢了饭碗。凌玥在湘曲是最大的商业大亨，谁都想搭上这条线；张兰的公司运转出问题，托了极多人脉才换来一次合作机会。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch22",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第22章 没办法.txt",
-            "chapter": 22
+            "title": "",
+            "chapter": 22,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第5章 相遇.txt",
-            "chapter": 5
+            "title": "",
+            "chapter": 5,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第6章 稍微用点手段.txt",
-            "chapter": 6
+            "title": "",
+            "chapter": 6,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第20章 来晚了.txt",
-            "chapter": 20
+            "title": "",
+            "chapter": 20,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xiang-qu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "liaofan-yiyuan",
         "type": "institution",
         "name": "辽矾医院",
         "aliases": [],
-        "summary": "湘曲的医院，黎婆曾在此住院治疗",
         "tags": [
           "医院",
           "湘曲"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch20",
-        "parent_id": "xiang-qu",
+        "summary": "湘曲的医院，黎婆曾在此住院治疗",
+        "detail": "凌玥让专家组「赶来辽矾医院」，又亲自过去；黎婆倚在病床上盯着一个地方出神，脸色比前几天好了很多。治疗费说好八十万出头，后来被凌玥四舍五入成三千万。医院里人多眼杂，凌玥的人进出一向不避讳。",
         "facets": {
           "sensory": "",
           "rules": [],
           "consequences": [],
           "history": "湘曲城里的一家医院；黎婆病倒后在这里住院，病房门口一直有保镖守着"
         },
-        "detail": "凌玥让专家组「赶来辽矾医院」，又亲自过去；黎婆倚在病床上盯着一个地方出神，脸色比前几天好了很多。治疗费说好八十万出头，后来被凌玥四舍五入成三千万。医院里人多眼杂，凌玥的人进出一向不避讳。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch20",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第20章 来晚了.txt",
-            "chapter": 20
+            "title": "",
+            "chapter": 20,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第25章 重操旧业.txt",
-            "chapter": 25
+            "title": "",
+            "chapter": 25,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第32章 会暖床就行.txt",
-            "chapter": 32
+            "title": "",
+            "chapter": 32,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.3"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.3",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xiang-qu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "si-lou",
@@ -2058,10 +3016,7 @@
           "威胁"
         ],
         "summary": "官营青楼：卖进去，等于彻底消失",
-        "canon_from": "ch32",
-        "parent_id": "",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "司楼不是花街柳巷的背景板，是悬在主角头上的刀。它可以被提到、被利用、被畏惧，但不要写成可以随便逛的地方。",
         "facets": {
           "sensory": "",
           "rules": [
@@ -2073,15 +3028,29 @@
           ],
           "history": "凌玥提起那笔债时说到过司楼。对伍卿来说，那两个字比枪口更冷。"
         },
-        "detail": "司楼不是花街柳巷的背景板，是悬在主角头上的刀。它可以被提到、被利用、被畏惧，但不要写成可以随便逛的地方。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch32",
         "sources": [
           {
             "kind": "novel",
             "ref": "第32章 卿儿会暖床就行",
-            "chapter": 32
+            "title": "",
+            "chapter": 32,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "bai-e-yu-mao",
@@ -2090,15 +3059,12 @@
         "aliases": [
           "巧鹅"
         ],
-        "summary": "凌家的大白鹅与橘猫，都只黏伍卿一个人",
         "tags": [
           "动物",
           "日常"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch50",
-        "parent_id": "",
+        "summary": "凌家的大白鹅与橘猫，都只黏伍卿一个人",
+        "detail": "巧鹅走到哪跟到哪，伍卿几次想送回去都没送成；许映还把它认成鸭子，被伍卿上了一课。橘猫毛长、脖子和脚掌是白的、尾巴毛茸茸，指甲被剪得很短，晚上趴在伍卿身上替他解闷。两只都只亲伍卿，凌玥本不喜欢养宠物，宅里原本只有狼犬。",
         "facets": {
           "sensory": "鹅身雪白无杂毛、壮硕；猫橘色长毛，像狐狸",
           "rules": [
@@ -2109,30 +3075,56 @@
           ],
           "history": "大白鹅是凌璇从拍卖行高价买回的观赏宠物，名叫巧鹅；橘猫是凌玥不知从哪弄来塞给伍卿的"
         },
-        "detail": "巧鹅走到哪跟到哪，伍卿几次想送回去都没送成；许映还把它认成鸭子，被伍卿上了一课。橘猫毛长、脖子和脚掌是白的、尾巴毛茸茸，指甲被剪得很短，晚上趴在伍卿身上替他解闷。两只都只亲伍卿，凌玥本不喜欢养宠物，宅里原本只有狼犬。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch50",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第84章 拿只鹅当嫁妆不过分吧？.txt",
-            "chapter": 84
+            "title": "",
+            "chapter": 84,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第86章 这是鹅.txt",
-            "chapter": 86
+            "title": "",
+            "chapter": 86,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第50章 狐里狐气的大猫.txt",
-            "chapter": 50
+            "title": "",
+            "chapter": 50,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第99章 山雨欲来.txt",
-            "chapter": 99
+            "title": "",
+            "chapter": 99,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "niu-che",
@@ -2146,10 +3138,7 @@
           "家当"
         ],
         "summary": "百公里只烧两捆青草，家里最值钱的资产",
-        "canon_from": "ch3",
-        "parent_id": "",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "牛车是穷的象征，也是自由的象征：他能走多远，全看这辆车。",
         "facets": {
           "sensory": "两根车辕、一床旧褥子，晃起来吱呀响",
           "rules": [
@@ -2161,15 +3150,29 @@
           ],
           "history": "伍卿每天牵着它进城卖破烂。凌玥扬言要把它卖了，把伍卿急得当场认怂。"
         },
-        "detail": "牛车是穷的象征，也是自由的象征：他能走多远，全看这辆车。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch3",
         "sources": [
           {
             "kind": "novel",
             "ref": "第3章",
-            "chapter": 3
+            "title": "",
+            "chapter": 3,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "yu-pei",
@@ -2184,10 +3187,7 @@
           "超自然"
         ],
         "summary": "贴身时暗处会投出绿色「凌」字",
-        "canon_from": "ch59",
-        "parent_id": "",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "玉佩是全书唯一确定「超自然」的东西。它认伍卿，不是伍卿会用它的力量；写它的时候只写异象，不解释原理。",
         "facets": {
           "sensory": "通体温润，没有纹样也没有氏牌，握久了会发热",
           "rules": [
@@ -2199,15 +3199,29 @@
           ],
           "history": "凌玥把这块玉交给伍卿当护身符。七年前的信物、凌家的印，还是别的什么，只给暗示，不揭底。"
         },
-        "detail": "玉佩是全书唯一确定「超自然」的东西。它认伍卿，不是伍卿会用它的力量；写它的时候只写异象，不解释原理。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch59",
         "sources": [
           {
             "kind": "novel",
             "ref": "第59章 玉佩",
-            "chapter": 59
+            "title": "",
+            "chapter": 59,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "bie-shu",
@@ -2221,10 +3235,7 @@
           "湘曲"
         ],
         "summary": "凌玥在湘曲的宅邸，离辽矾医院不远",
-        "canon_from": "ch26",
-        "parent_id": "xiang-qu",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "伍卿第一次被带进来时满脑子只想回医院看奶奶，后来在这儿换了新衣、被按在沙发上揉腿；凌玥的军医和保镖也住在这一带。别把这里和帝都的凌府混成一处。",
         "facets": {
           "sensory": "铁门深院，护卫成群；客厅挑高，沙发酒柜都是深色",
           "rules": [
@@ -2233,20 +3244,38 @@
           "consequences": [],
           "history": "黎婆住院那阵，凌玥把伍卿接到这里住，方便他白天去医院陪床。"
         },
-        "detail": "伍卿第一次被带进来时满脑子只想回医院看奶奶，后来在这儿换了新衣、被按在沙发上揉腿；凌玥的军医和保镖也住在这一带。别把这里和帝都的凌府混成一处。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch26",
         "sources": [
           {
             "kind": "novel",
             "ref": "第26章 各司其职",
-            "chapter": 26
+            "title": "",
+            "chapter": 26,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "第27章 现代社会，古代封建思想",
-            "chapter": 27
+            "title": "",
+            "chapter": 27,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xiang-qu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "di-du",
@@ -2256,15 +3285,12 @@
           "A市",
           "帝都"
         ],
-        "summary": "全国最豪华的都城，皇宫与世家盘踞之地",
         "tags": [
           "都城",
           "权力中心"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch41",
-        "parent_id": "",
+        "summary": "全国最豪华的都城，皇宫与世家盘踞之地",
+        "detail": "东街中心九十五号是凌府；西街又称27街，有私人军事训练场；十七街的十字路口曾被皇室车队封路，来往车辆只能绕道；西街区的二十二街道在拆旧房重建，路口有豪华酒店；东街十五路是拆光路灯的重建荒地；皇宫在城内，门口兵士持步枪、霰弹枪盘查请帖；巍江在北市海口，码头一带夜里常出现军队对峙。街上商务车队与持枪兵士是日常风景。",
         "facets": {
           "sensory": "高楼与古式府院并存，入夜灯火通明",
           "rules": [
@@ -2274,79 +3300,118 @@
           "consequences": [],
           "history": "被称为全国最豪华的都城，也被人叫作A市；城北有北场机场，巍江在北市海口"
         },
-        "detail": "东街中心九十五号是凌府；西街又称27街，有私人军事训练场；十七街的十字路口曾被皇室车队封路，来往车辆只能绕道；西街区的二十二街道在拆旧房重建，路口有豪华酒店；东街十五路是拆光路灯的重建荒地；皇宫在城内，门口兵士持步枪、霰弹枪盘查请帖；巍江在北市海口，码头一带夜里常出现军队对峙。街上商务车队与持枪兵士是日常风景。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch41",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第41章 是不是走错台了？.txt",
-            "chapter": 41
+            "title": "",
+            "chapter": 41,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第71章 打错了，也算漏了.txt",
-            "chapter": 71
+            "title": "",
+            "chapter": 71,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第46章 无辜躺枪.txt",
-            "chapter": 46
+            "title": "",
+            "chapter": 46,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第74章 用一辈子来抵债.txt",
-            "chapter": 74
+            "title": "",
+            "chapter": 74,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.1"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.1",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "dixia-duchang",
         "type": "place",
         "name": "地下赌场",
         "aliases": [],
-        "summary": "帝都地下的赌场，纨绔子弟厮混之处",
         "tags": [
           "灰色场所",
           "谢家"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch53",
-        "parent_id": "di-du",
+        "summary": "帝都地下的赌场，纨绔子弟厮混之处",
+        "detail": "原文只在第53章一笔带过：谢沐是「常年混迹在地下赌场当老板下赌注的二代」，打架时连自己都底气不足。具体位置、赌法、规矩原文都没写，演绎时别补出楼层、暗号或看场打手之类的细节。",
         "facets": {
           "sensory": "",
           "rules": [],
           "consequences": [],
           "history": "谢家二小姐谢沐常年混迹其中，当老板、下赌注，是出了名的二代"
         },
-        "detail": "原文只在第53章一笔带过：谢沐是「常年混迹在地下赌场当老板下赌注的二代」，打架时连自己都底气不足。具体位置、赌法、规矩原文都没写，演绎时别补出楼层、暗号或看场打手之类的细节。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch53",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第53章 西装暴徒.txt",
-            "chapter": 53
+            "title": "",
+            "chapter": 53,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "dongjie-shiwulu",
         "type": "place",
         "name": "东街十五路",
         "aliases": [],
-        "summary": "东街一片拆建荒地，夜里几乎没有人影",
         "tags": [
           "荒地",
           "旧事"
         ],
-        "links": [],
-        "reveal": "secret",
-        "canon_from": "ch96",
-        "parent_id": "di-du",
+        "summary": "东街一片拆建荒地，夜里几乎没有人影",
+        "detail": "七年前，凌玥的母亲凌璇带着两名保镖来到别墅，笑着哄十岁的伍卿说「阿姨带小卿去个地方」，让保镖把他领上车，随后吩咐「带他到东街十五路，然后让其下车，剩下的不用管」。伍卿在车上还疑惑「东街十五路？玥姐姐怎么会去那」，接着车门被锁死，他扒着车窗朝门口的凌玥大喊。此后他与凌玥相关的记忆断掉。这是全书记忆线的起点，别当成普通荒地写。",
         "facets": {
           "sensory": "拆掉老房的重建地带，路灯全被拆走",
           "rules": [],
@@ -2355,45 +3420,70 @@
           ],
           "history": "属于拆掉老房子重建的地带，人烟稀少，大晚上几乎没有一个人影，路灯都被拆了"
         },
-        "detail": "七年前，凌玥的母亲凌璇带着两名保镖来到别墅，笑着哄十岁的伍卿说「阿姨带小卿去个地方」，让保镖把他领上车，随后吩咐「带他到东街十五路，然后让其下车，剩下的不用管」。伍卿在车上还疑惑「东街十五路？玥姐姐怎么会去那」，接着车门被锁死，他扒着车窗朝门口的凌玥大喊。此后他与凌玥相关的记忆断掉。这是全书记忆线的起点，别当成普通荒地写。",
+        "links": [],
+        "reveal": "secret",
+        "canon_from": "ch96",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第96章 记忆旋涡.txt",
-            "chapter": 96
+            "title": "",
+            "chapter": 96,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "ershier-jiedao",
         "type": "place",
         "name": "二十二街道",
         "aliases": [],
-        "summary": "西街区正在拆建的街道，路口有豪华酒店",
         "tags": [
           "街道",
           "工地"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch71",
-        "parent_id": "di-du",
+        "summary": "西街区正在拆建的街道，路口有豪华酒店",
+        "detail": "陆可在这里的酒店门口向服务员问路，才问出「去东街中心，九十五号街道直走，带着四合院风格的院子便是凌府」。街上到处是施工帽与挖掘机，旧房拆了准备重建，路人不多。",
         "facets": {
           "sensory": "工人戴施工帽，挖掘机停在拆了一半的旧房前",
           "rules": [],
           "consequences": [],
           "history": "西街区的一条街道，正在拆旧房重建，行人稀少，酒店自带专属停车场"
         },
-        "detail": "陆可在这里的酒店门口向服务员问路，才问出「去东街中心，九十五号街道直走，带着四合院风格的院子便是凌府」。街上到处是施工帽与挖掘机，旧房拆了准备重建，路人不多。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch71",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第71章 打错了，也算漏了.txt",
-            "chapter": 71
+            "title": "",
+            "chapter": 71,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "fei-pin-zhan",
@@ -2407,10 +3497,7 @@
           "湘曲"
         ],
         "summary": "湘曲市里收破烂的地方，赵大婶在这里",
-        "canon_from": "ch4",
-        "parent_id": "xiang-qu",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "门是大铁门，喊一声「赵大婶」就有人应。伍卿在这儿卖完瓶子，才去商务大厦门口捡下一趟。",
         "facets": {
           "sensory": "大铁门、堆到半人高的纸壳与瓶罐、门口一台地磅",
           "rules": [
@@ -2422,30 +3509,41 @@
           ],
           "history": "伍卿每趟牵着牛车进城，先把四麻袋破烂拉到这儿，换了钱再去买菜买米。"
         },
-        "detail": "门是大铁门，喊一声「赵大婶」就有人应。伍卿在这儿卖完瓶子，才去商务大厦门口捡下一趟。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch4",
         "sources": [
           {
             "kind": "novel",
             "ref": "第4章 街道上的一牛一少年",
-            "chapter": 4
+            "title": "",
+            "chapter": 4,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xiang-qu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "huang-gong",
         "type": "place",
         "name": "皇宫",
         "aliases": [],
-        "summary": "姬氏皇朝的宫殿，皇帝姬延在此临朝设宴",
         "tags": [
           "皇权",
           "禁地"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch43",
-        "parent_id": "di-du",
+        "summary": "姬氏皇朝的宫殿，皇帝姬延在此临朝设宴",
+        "detail": "门口兵士穿迷彩、手握步枪与霰弹枪，肩上是星叶图。凌玥递请帖，卫兵一认出是她就笑着把请帖还回去、直接放行。进殿不给带兵，随从在门外等。大殿是古香古色的长餐桌配着凌家别墅里常见的椅子，首座是一张朱红王座，雕着金丝火凤凰。宫墙外圈是狭窄小巷与古时府院建筑，宫墙内外两重世界。",
         "facets": {
           "sensory": "红漆凤凰大门，金碧辉煌，殿内凤椅与长桌",
           "rules": [
@@ -2457,30 +3555,56 @@
           ],
           "history": "宫殿大门高耸入云，两根石柱上雕着四只金色凤凰；大殿里凤椅旁摆着工作椅与长桌，更像会议大厅"
         },
-        "detail": "门口兵士穿迷彩、手握步枪与霰弹枪，肩上是星叶图。凌玥递请帖，卫兵一认出是她就笑着把请帖还回去、直接放行。进殿不给带兵，随从在门外等。大殿是古香古色的长餐桌配着凌家别墅里常见的椅子，首座是一张朱红王座，雕着金丝火凤凰。宫墙外圈是狭窄小巷与古时府院建筑，宫墙内外两重世界。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch43",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第43章 见家长.txt",
-            "chapter": 43
+            "title": "",
+            "chapter": 43,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第61章 皇女 姬淮澄.txt",
-            "chapter": 61
+            "title": "",
+            "chapter": 61,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第113章 一眼震惊.txt",
-            "chapter": 113
+            "title": "",
+            "chapter": 113,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第114章 宴会（一）.txt",
-            "chapter": 114
+            "title": "",
+            "chapter": 114,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "ling-fu",
@@ -2494,10 +3618,7 @@
           "凌家"
         ],
         "summary": "东街九十五号的凌家宅院，外人称凌府",
-        "canon_from": "ch41",
-        "parent_id": "di-du",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "前院二楼是凌玥的办公室，后院住着老家主凌璇，偏殿大院内是训练室，医务室也在宅内。院里养着几条高大凶猛的狼犬，还有一只橘猫；管家刘婶管内务。伍卿和旁白习惯把这儿叫「别墅」——那是同一处宅院，不是湘曲那栋别墅。",
         "facets": {
           "sensory": "两层小楼，四合院的骨架掺着现代装修；院里有狼犬，偏殿门口两名雇佣军迷彩门卫持枪",
           "rules": [
@@ -2511,40 +3632,59 @@
           ],
           "history": "从湘曲飞回 A 市后，凌玥把伍卿接到这里住。东街中心九十五号，问路只说「直走，带四合院风格的院子便是凌府」。"
         },
-        "detail": "前院二楼是凌玥的办公室，后院住着老家主凌璇，偏殿大院内是训练室，医务室也在宅内。院里养着几条高大凶猛的狼犬，还有一只橘猫；管家刘婶管内务。伍卿和旁白习惯把这儿叫「别墅」——那是同一处宅院，不是湘曲那栋别墅。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch41",
         "sources": [
           {
             "kind": "novel",
             "ref": "第41章 是不是走错台了？",
-            "chapter": 41
+            "title": "",
+            "chapter": 41,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "第71章 打错了，也算漏了",
-            "chapter": 71
+            "title": "",
+            "chapter": 71,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "第44章 误闯训练室",
-            "chapter": 44
+            "title": "",
+            "chapter": 44,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "ma-tou",
         "type": "place",
         "name": "码头",
         "aliases": [],
-        "summary": "巍江边的码头，凌家与军方对峙之地",
         "tags": [
           "码头",
           "对峙"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch76",
-        "parent_id": "wei-jiang",
+        "summary": "巍江边的码头，凌家与军方对峙之地",
+        "detail": "第76至77章的交火发生在紧靠码头的废弃码头（旧码头），皮卡上的兵士胸前是凌家的贪狼标志，对面是星叶图的皇室军队；凌玥下令「没我的命令，我方人马不可擅自开一枪」，赵宛在附近巨石上听通讯汇报。第102章海口码头新开了台球市，凌家第七小队驻扎其中。",
         "facets": {
           "sensory": "夜里的码头，枪栓声与脚步声响成一片",
           "rules": [
@@ -2555,60 +3695,97 @@
           ],
           "history": "巍江边的码头，岸边有礁石巨石可作掩体；某一夜三千人聚集，江对岸也站满人"
         },
-        "detail": "第76至77章的交火发生在紧靠码头的废弃码头（旧码头），皮卡上的兵士胸前是凌家的贪狼标志，对面是星叶图的皇室军队；凌玥下令「没我的命令，我方人马不可擅自开一枪」，赵宛在附近巨石上听通讯汇报。第102章海口码头新开了台球市，凌家第七小队驻扎其中。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch76",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第76章 棋手与棋子.txt",
-            "chapter": 76
+            "title": "",
+            "chapter": 76,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第77章 突变.txt",
-            "chapter": 77
+            "title": "",
+            "chapter": 77,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第102章 布局.txt",
-            "chapter": 102
+            "title": "",
+            "chapter": 102,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第116章 记忆浮动.txt",
-            "chapter": 116
+            "title": "",
+            "chapter": 116,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "wei-jiang",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "paimai-hang",
         "type": "place",
         "name": "拍卖行",
         "aliases": [],
-        "summary": "帝都拍卖行，世家重金竞买珍品之处",
         "tags": [
           "买卖",
           "世家"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch84",
-        "parent_id": "di-du",
+        "summary": "帝都拍卖行，世家重金竞买珍品之处",
+        "detail": "这只鹅后来被凌璇送给伍卿当「嫁妆」，还差点被炖了。拍卖行能流通活物与孤品，价格由世家一路抬上去；原文没写内部陈设、竞价规则与主持人的样子，别自己补。",
         "facets": {
           "sensory": "",
           "rules": [],
           "consequences": [],
           "history": "凌璇在这里花高价拍下一只通体雪白的大白鹅，说「可能世上再也找不到第二只」"
         },
-        "detail": "这只鹅后来被凌璇送给伍卿当「嫁妆」，还差点被炖了。拍卖行能流通活物与孤品，价格由世家一路抬上去；原文没写内部陈设、竞价规则与主持人的样子，别自己补。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch84",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第84章 拿只鹅当嫁妆不过分吧？.txt",
-            "chapter": 84
+            "title": "",
+            "chapter": 84,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "sang-bang",
@@ -2617,50 +3794,62 @@
         "aliases": [
           "Z市"
         ],
-        "summary": "帝国边境城，凌家分舵与唐老在此",
         "tags": [
           "边境",
           "凌家分舵"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch99",
-        "parent_id": "",
+        "summary": "帝国边境城，凌家分舵与唐老在此",
+        "detail": "市区中心一座高楼，五楼是唐老的办公室：白西服、金戒指、雪茄，桌上堆着厚文件。唐老是Z市分舵的掌舵人，收到凌玥的密信后命周琪布好临海防线，再赴帝都总部。帝国军队已经盯上他们，随时可能把枪口顶上来。",
         "facets": {
           "sensory": "入夜灯塔直冲云霄，市区高楼灯火通明",
           "rules": [],
           "consequences": [],
           "history": "也称Z市，距帝都1760公里，属于边境城；城里繁华，夜里灯塔的光像在跟别的城市较劲"
         },
-        "detail": "市区中心一座高楼，五楼是唐老的办公室：白西服、金戒指、雪茄，桌上堆着厚文件。唐老是Z市分舵的掌舵人，收到凌玥的密信后命周琪布好临海防线，再赴帝都总部。帝国军队已经盯上他们，随时可能把枪口顶上来。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch99",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第99章 山雨欲来.txt",
-            "chapter": 99
+            "title": "",
+            "chapter": 99,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第116章 记忆浮动.txt",
-            "chapter": 116
+            "title": "",
+            "chapter": 116,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "shiqi-jie",
         "type": "place",
         "name": "十七街",
         "aliases": [],
-        "summary": "帝都一条被两伙人当街霸占的街道",
         "tags": [
           "街道",
           "冲突"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch46",
-        "parent_id": "di-du",
+        "summary": "帝都一条被两伙人当街霸占的街道",
+        "detail": "第46章皇太女姬淮澄把车马停在街心，凌玥在这里与她正面照面：两人嘴上客气、眼里全是刀。街上有一家餐楼，皇子姬恒当时就在楼里。因为封路，来往轿车到了十字路口只能转向另一条路。",
         "facets": {
           "sensory": "十字路口，街边有餐楼，商务车排成长龙",
           "rules": [
@@ -2671,15 +3860,29 @@
           ],
           "history": "被称作十七街的这条街道，两伙人各占一头，局势一触即发"
         },
-        "detail": "第46章皇太女姬淮澄把车马停在街心，凌玥在这里与她正面照面：两人嘴上客气、眼里全是刀。街上有一家餐楼，皇子姬恒当时就在楼里。因为封路，来往轿车到了十字路口只能转向另一条路。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch46",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第46章 无辜躺枪.txt",
-            "chapter": 46
+            "title": "",
+            "chapter": 46,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "wei-jiang",
@@ -2688,15 +3891,12 @@
         "aliases": [
           "银江"
         ],
-        "summary": "帝都北市海口的凶险江面，渔船往来",
         "tags": [
           "天险",
           "边界"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch74",
-        "parent_id": "",
+        "summary": "帝都北市海口的凶险江面，渔船往来",
+        "detail": "江面时常狂风大作，平时很少看到船，一般是巨大的渔船在航行；渔民又管它叫「银河」。两岸崖高，适合埋伏与狙击；第124章的密信里，凌家要拿四千虎狼之师守住江岸，对上帝国两万边关军。夜里码头一带常有凌家与帝国军队对峙，双方都不肯先开枪。",
         "facets": {
           "sensory": "狂风大作、波涛汹涌，日光下如银色浪涛滚动",
           "rules": [
@@ -2707,40 +3907,59 @@
           ],
           "history": "一条宽阔的长江从高大的崖间贯穿而过，位于帝都北市海口；因水波如银色浪涛，也被许多人称为银江"
         },
-        "detail": "江面时常狂风大作，平时很少看到船，一般是巨大的渔船在航行；渔民又管它叫「银河」。两岸崖高，适合埋伏与狙击；第124章的密信里，凌家要拿四千虎狼之师守住江岸，对上帝国两万边关军。夜里码头一带常有凌家与帝国军队对峙，双方都不肯先开枪。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch74",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第74章 用一辈子来抵债.txt",
-            "chapter": 74
+            "title": "",
+            "chapter": 74,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第116章 记忆浮动.txt",
-            "chapter": 116
+            "title": "",
+            "chapter": 116,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第124章 天生的王者.txt",
-            "chapter": 124
+            "title": "",
+            "chapter": 124,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "wuming-shancun",
         "type": "place",
         "name": "无名山村",
         "aliases": [],
-        "summary": "湘曲辖下四面环山的小村落，三十几户人家",
         "tags": [
           "山村",
           "家"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch1",
-        "parent_id": "xiang-qu",
+        "summary": "湘曲辖下四面环山的小村落，三十几户人家",
+        "detail": "四面环山，村口一条小溪与一条蜿蜒的乡间小路，村里人吃喝不愁，唯有伍卿家是四处漏风的竹屋。黎婆几年前突然带着小孙子搬来住。村子太穷，也因此避开了城里的刀枪。原文始终没给村子起名，别替它取名。",
         "facets": {
           "sensory": "红砖小平房，炊烟四起，一条小溪从半山腰流到村口",
           "rules": [
@@ -2749,74 +3968,124 @@
           "consequences": [],
           "history": "一个名不见经传的村落，坐落在湘曲市附近的山里，三十几户人家，红砖盖成的小平房"
         },
-        "detail": "四面环山，村口一条小溪与一条蜿蜒的乡间小路，村里人吃喝不愁，唯有伍卿家是四处漏风的竹屋。黎婆几年前突然带着小孙子搬来住。村子太穷，也因此避开了城里的刀枪。原文始终没给村子起名，别替它取名。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch1",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第1章 穿越，开局家徒四壁.txt",
-            "chapter": 1
+            "title": "",
+            "chapter": 1,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第9章 选择性失忆.txt",
-            "chapter": 9
+            "title": "",
+            "chapter": 9,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第119章 梦中梦（回忆篇）.txt",
-            "chapter": 119
+            "title": "",
+            "chapter": 119,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "analysis",
-            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.1"
+            "ref": "素材/我在女尊世界捡破烂/_分析.md §一 1.1",
+            "title": "",
+            "chapter": 0,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xiang-qu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "xiang-qu",
         "type": "place",
         "name": "湘曲市",
         "aliases": [],
-        "summary": "帝国边境的偏远山城，凌玥在此寻人三年",
         "tags": [
           "边境",
           "山城"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch4",
-        "parent_id": "",
+        "summary": "帝国边境的偏远山城，凌玥在此寻人三年",
+        "detail": "城里最出名的商人就是凌玥，她的嘉桌集团开在这里，保镖薪水是同行两倍；黎婆病倒后被送进辽矾医院。市中心有高楼大厦与商务大厦，出了城就是连绵大山，山里有三十几户人家的村落。冬天极冷，比帝都冷得多。",
         "facets": {
           "sensory": "冰天雪地的山城，市中心有拔地而起的高楼",
           "rules": [],
           "consequences": [],
           "history": "边境城，偏远的山里城市；三年前凌玥只身来此，只为寻找少年，名下的公司倒是顺手开的"
         },
-        "detail": "城里最出名的商人就是凌玥，她的嘉桌集团开在这里，保镖薪水是同行两倍；黎婆病倒后被送进辽矾医院。市中心有高楼大厦与商务大厦，出了城就是连绵大山，山里有三十几户人家的村落。冬天极冷，比帝都冷得多。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch4",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第4章 街道上的一牛一少年.txt",
-            "chapter": 4
+            "title": "",
+            "chapter": 4,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第20章 来晚了.txt",
-            "chapter": 20
+            "title": "",
+            "chapter": 20,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第45章 赴宴变故.txt",
-            "chapter": 45
+            "title": "",
+            "chapter": 45,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第119章 梦中梦（回忆篇）.txt",
-            "chapter": 119
+            "title": "",
+            "chapter": 119,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "xijie-xunlianchang",
@@ -2826,15 +4095,12 @@
           "西街",
           "27街"
         ],
-        "summary": "西街即27街的私人军事训练场，凌家兵在此操练",
         "tags": [
           "军事",
           "凌家"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch50",
-        "parent_id": "di-du",
+        "summary": "西街即27街的私人军事训练场，凌家兵在此操练",
+        "detail": "场上兵士穿迷彩、持自动步枪，排成半圆站得笔直；凌玥身后跟着两名保镖和提公文包的许映。原文还提到城西的训练场、临北训练场、海口码头的分队驻地，以及一座在A市郊外的训练场：围墙架着通电带尖刺的铁丝网、外墙裹迷彩布、有厚重铁门、浑水坑匍匐、蒙眼拆装枪与靶场。别把这几处写成同一座。",
         "facets": {
           "sensory": "宽阔场地，迷彩兵士列成半圆，枪械成排",
           "rules": [
@@ -2843,45 +4109,68 @@
           "consequences": [],
           "history": "凌玥出了宅子往西走就是这处训练场，场上少说三千人"
         },
-        "detail": "场上兵士穿迷彩、持自动步枪，排成半圆站得笔直；凌玥身后跟着两名保镖和提公文包的许映。原文还提到城西的训练场、临北训练场、海口码头的分队驻地，以及一座在A市郊外的训练场：围墙架着通电带尖刺的铁丝网、外墙裹迷彩布、有厚重铁门、浑水坑匍匐、蒙眼拆装枪与靶场。别把这几处写成同一座。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch50",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第50章 狐里狐气的大猫.txt",
-            "chapter": 50
+            "title": "",
+            "chapter": 50,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第78章 给大黑牛消毒.txt",
-            "chapter": 78
+            "title": "",
+            "chapter": 78,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第102章 布局.txt",
-            "chapter": 102
+            "title": "",
+            "chapter": 102,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第104章 训练场.txt",
-            "chapter": 104
+            "title": "",
+            "chapter": 104,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "di-du",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "xunlian-shi",
         "type": "place",
         "name": "训练室",
         "aliases": [],
-        "summary": "凌府偏院的女子训练室，女兵在此操练",
         "tags": [
           "训练",
           "凌府"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch44",
-        "parent_id": "ling-fu",
+        "summary": "凌府偏院的女子训练室，女兵在此操练",
+        "detail": "伍卿在府里闲逛时拐进右方偏院，误入此处，撞见女兵只穿短裤、赤裸上身训练，红着脸跑出府院，此后一想起来就尴尬。凌玥也会在这里罚人：谢沐被叫来「训练室等我」，随后被凌玥动手打伤，由两名军医搀去医务室；凌玥打完常在这里换下西服再出去。别把这里写成对外开放的健身房。",
         "facets": {
           "sensory": "偏殿大院内的大屋子，女兵赤膊短裤操练",
           "rules": [
@@ -2892,40 +4181,59 @@
           ],
           "history": "设在凌府偏殿大院里，门口两名穿雇佣军迷彩的持枪门卫把守"
         },
-        "detail": "伍卿在府里闲逛时拐进右方偏院，误入此处，撞见女兵只穿短裤、赤裸上身训练，红着脸跑出府院，此后一想起来就尴尬。凌玥也会在这里罚人：谢沐被叫来「训练室等我」，随后被凌玥动手打伤，由两名军医搀去医务室；凌玥打完常在这里换下西服再出去。别把这里写成对外开放的健身房。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch44",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第44章 误闯训练室.txt",
-            "chapter": 44
+            "title": "",
+            "chapter": 44,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第52章 有人要遭殃了.txt",
-            "chapter": 52
+            "title": "",
+            "chapter": 52,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第53章 西装暴徒.txt",
-            "chapter": 53
+            "title": "",
+            "chapter": 53,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "ling-fu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "yiwu-shi",
         "type": "place",
         "name": "医务室",
         "aliases": [],
-        "summary": "凌府内的医务室，私人军医在此治伤",
         "tags": [
           "医疗",
           "凌府"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch53",
-        "parent_id": "ling-fu",
+        "summary": "凌府内的医务室，私人军医在此治伤",
+        "detail": "谢沐被凌玥教训后，由两名军医搀进来，两人一边替他看伤一边互相递眼色，谢沐只好自己找话遮掩。凌玥在地下室审完人，也吩咐把人「带去医务室」。这里能处理外伤与皮肉伤，别写成能做手术、治疑难杂症的医院。",
         "facets": {
           "sensory": "",
           "rules": [
@@ -2936,20 +4244,38 @@
           ],
           "history": "宅子里常备军医，因为训练时经常有人受伤；这些是私人军医，比不上军方那边的医术"
         },
-        "detail": "谢沐被凌玥教训后，由两名军医搀进来，两人一边替他看伤一边互相递眼色，谢沐只好自己找话遮掩。凌玥在地下室审完人，也吩咐把人「带去医务室」。这里能处理外伤与皮肉伤，别写成能做手术、治疑难杂症的医院。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch53",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第53章 西装暴徒.txt",
-            "chapter": 53
+            "title": "",
+            "chapter": 53,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第56章 立大功.txt",
-            "chapter": 56
+            "title": "",
+            "chapter": 56,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "ling-fu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "yu-jie",
@@ -2964,10 +4290,7 @@
           "街头"
         ],
         "summary": "湘曲市中心的商务大厦，门前的街是开场那场雨",
-        "canon_from": "ch4",
-        "parent_id": "xiang-qu",
-        "reveal": "public",
-        "pinned": false,
+        "detail": "大厦门口是玩家开局的舞台：雨、牛车、四麻袋瓶子、张兰的白手巾、凌玥湿透的肩膀。它就在湘曲市中心，离废品站不算远。",
         "facets": {
           "sensory": "玻璃幕墙的高楼，门口垃圾桶出奇地干净，初冬的冷雨落下来",
           "rules": [
@@ -2978,35 +4301,50 @@
           ],
           "history": "伍卿牵着大黑牛在这里躲雨、翻垃圾桶，被白西装的张兰当众赶走；凌玥的车停在雨里，她没打伞走下来。"
         },
-        "detail": "大厦门口是玩家开局的舞台：雨、牛车、四麻袋瓶子、张兰的白手巾、凌玥湿透的肩膀。它就在湘曲市中心，离废品站不算远。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch4",
         "sources": [
           {
             "kind": "novel",
             "ref": "第4章 街道上的一牛一少年",
-            "chapter": 4
+            "title": "",
+            "chapter": 4,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "第5章 她认得他",
-            "chapter": 5
+            "title": "",
+            "chapter": 5,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "links": []
+        "pinned": false,
+        "muted": false,
+        "parent_id": "xiang-qu",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       },
       {
         "id": "zhu-wu",
         "type": "place",
         "name": "竹屋",
         "aliases": [],
-        "summary": "山村最破的一间竹屋，伍卿与奶奶的家",
         "tags": [
           "家",
           "贫穷"
         ],
-        "links": [],
-        "reveal": "public",
-        "canon_from": "ch1",
-        "parent_id": "wuming-shancun",
+        "summary": "山村最破的一间竹屋，伍卿与奶奶的家",
+        "detail": "屋里只有一张竹桌、四个瓷碗、一口漆黑的铁锅，煮饭靠一只铁烧壶；墙角堆着塞满踩扁瓶罐的麻袋，是全家换钱的来源。院子用竹子编成，院里有灶。晚上点煤油灯，或者靠灶膛的火光——这屋子没通电。凌玥带保镖进村那次，院子里凭空搭起三顶蓝色的露营帐篷。",
         "facets": {
           "sensory": "竹壁修补多处、四处漏风，屋里靠煤油灯与灶膛",
           "rules": [],
@@ -3015,30 +4353,56 @@
           ],
           "history": "用竹子搭的屋子，年头久了，四周竹壁被人修修补补，看着无比寒碜"
         },
-        "detail": "屋里只有一张竹桌、四个瓷碗、一口漆黑的铁锅，煮饭靠一只铁烧壶；墙角堆着塞满踩扁瓶罐的麻袋，是全家换钱的来源。院子用竹子编成，院里有灶。晚上点煤油灯，或者靠灶膛的火光——这屋子没通电。凌玥带保镖进村那次，院子里凭空搭起三顶蓝色的露营帐篷。",
+        "links": [],
+        "reveal": "public",
+        "canon_from": "ch1",
         "sources": [
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第1章 穿越，开局家徒四壁.txt",
-            "chapter": 1
+            "title": "",
+            "chapter": 1,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第13章 真认识啊？.txt",
-            "chapter": 13
+            "title": "",
+            "chapter": 13,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第2章 奶奶.txt",
-            "chapter": 2
+            "title": "",
+            "chapter": 2,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           },
           {
             "kind": "novel",
             "ref": "素材/我在女尊世界捡破烂/第14章 涨工资.txt",
-            "chapter": 14
+            "title": "",
+            "chapter": 14,
+            "offset": 0,
+            "quote": "",
+            "turn_no": 0
           }
         ],
-        "pinned": false
+        "pinned": false,
+        "muted": false,
+        "parent_id": "wuming-shancun",
+        "status": "",
+        "condition": "",
+        "access": "",
+        "open_to": "",
+        "owner_id": "",
+        "location_id": ""
       }
     ],
     "timeline": [],
@@ -3101,75 +4465,111 @@
     ],
     "edges": [
       {
-        "from": "唐老",
-        "to": "周琪",
+        "from": "tang-lao",
+        "to": "zhou-qi",
         "kind": "上下级",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "唐老把周琪当刀，也当半个女儿。"
       },
       {
-        "from": "赵宛",
-        "to": "帝国军方",
+        "from": "zhao-wan",
+        "to": "diguo-junfang",
         "kind": "隶属",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "野战军总指挥，除皇帝外无人能直接调她。"
       },
       {
         "from": "姬延",
-        "to": "帝国军方",
+        "to": "diguo-junfang",
         "kind": "直辖",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "星叶图只认皇帝。"
       },
       {
-        "from": "大白鹅与橘猫",
-        "to": "凌府",
+        "from": "bai-e-yu-mao",
+        "to": "ling-fu",
         "kind": "养在",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": ""
       },
       {
-        "from": "牛车",
-        "to": "竹屋",
+        "from": "niu-che",
+        "to": "zhu-wu",
         "kind": "停在",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": ""
       },
       {
-        "from": "谢沅",
+        "from": "xie-yuan",
         "to": "谢沐",
         "kind": "姐妹",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "亲姐；管她抽烟、管她别碰伍卿"
       },
       {
-        "from": "谢沅",
-        "to": "卫家",
+        "from": "xie-yuan",
+        "to": "wei-jia",
         "kind": "敌对",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "临走只丢一句「小心卫家」"
       },
       {
-        "from": "赵宛",
+        "from": "zhao-wan",
         "to": "姬淮澄",
         "kind": "护卫",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "称殿下，替她挡下暗处的枪"
       },
       {
-        "from": "赵无鸢",
+        "from": "zhao-wuyuan",
         "to": "凌璇",
         "kind": "知遇",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "凌璇提拔她、救她母亲，她认这份恩"
       },
       {
-        "from": "刘婶",
+        "from": "liu-shen",
         "to": "凌璇",
         "kind": "主仆",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "老家主之下，凌家排位第三人"
       },
       {
-        "from": "刘婶",
+        "from": "liu-shen",
         "to": "南荣兰冰",
         "kind": "通报",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "兰冰上门，由她先报给凌玥"
       },
       {
-        "from": "赵大婶",
-        "to": "无名山村",
+        "from": "zhao-dashen",
+        "to": "wuming-shancun",
         "kind": "住处",
+        "directed": true,
+        "weight": 0.5,
+        "visibility": "public",
         "note": "村子附近收废品，伍卿的破烂都卖给她"
       }
     ],
@@ -3182,7 +4582,8 @@
         "kind": "mystery",
         "weight": 0.85,
         "note": "贴身时暗处会投出绿色的「凌」字。它是什么、为什么认主，先只给暗示，不揭底。",
-        "payoff_hint": "凌玥七年前留下的信物"
+        "payoff_hint": "凌玥七年前留下的信物",
+        "source": {}
       },
       {
         "id": "seed-tui-shang",
@@ -3190,7 +4591,8 @@
         "kind": "mystery",
         "weight": 0.8,
         "note": "后天砸出来的旧伤，伍卿记不起成因；阴雨天会疼。",
-        "payoff_hint": "七年前那场雨里的车"
+        "payoff_hint": "七年前那场雨里的车",
+        "source": {}
       },
       {
         "id": "seed-qi-nian-qian",
@@ -3198,7 +4600,8 @@
         "kind": "secret",
         "weight": 0.95,
         "note": "凌璇把十岁的伍卿丢在东街十五路、封了他的记忆；凌玥找了他七年。真相解开前只允许碎片。",
-        "payoff_hint": "东街十五路、兔子书包、那封信"
+        "payoff_hint": "东街十五路、兔子书包、那封信",
+        "source": {}
       },
       {
         "id": "seed-li-po-bing",
@@ -3206,7 +4609,8 @@
         "kind": "debt",
         "weight": 0.6,
         "note": "咳疾与年纪是伏笔；医院那张账单会把这个家逼到卖身的边上。",
-        "payoff_hint": "八十万治疗费"
+        "payoff_hint": "八十万治疗费",
+        "source": {}
       },
       {
         "id": "seed-si-lou",
@@ -3214,7 +4618,8 @@
         "kind": "debt",
         "weight": 0.55,
         "note": "凌玥口中的三千四百万不是钱，是司楼——把男人卖进去，等于从世上消失。",
-        "payoff_hint": "司楼掌柜"
+        "payoff_hint": "司楼掌柜",
+        "source": {}
       },
       {
         "id": "seed-huang-quan",
@@ -3222,7 +4627,8 @@
         "kind": "promise",
         "weight": 0.6,
         "note": "姬延在等十成胜算；姬淮澄想从凌玥手里要人。前期的婚约与请帖都是这只手。",
-        "payoff_hint": "皇帝寿宴"
+        "payoff_hint": "皇帝寿宴",
+        "source": {}
       }
     ],
     "canon_arc": [
@@ -3232,7 +4638,6 @@
         "chapter_to": 4,
         "label": "竹屋与牛车",
         "summary": "黄昏穿越、接收原主记忆与腿疾；第一顿大米饭大萝卜；清晨牛车进城，废品站换 75 块、山货 21 块；商务大厦门口翻垃圾桶被白西装赶走。末章黑色商务车停住。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "黄昏穿越，醒来时在漏风的竹屋",
@@ -3259,7 +4664,8 @@
             ],
             "where": "商务大厦"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-2",
@@ -3267,7 +4673,6 @@
         "chapter_to": 13,
         "label": "街头相遇·先预定",
         "summary": "雨里凌玥认出「卿儿」，张兰驱赶致合作告吹；凌玥强行买衣买菜跟回村，黎婆骂她「混洞女娃」；第 12 章「就当姐姐去提亲不就好了」先预定，第 13 章黎婆逐客令把关系钉成赎罪—审判。",
-        "load_bearing": true,
         "beats": [
           {
             "what": "张兰当众赶人，凌玥下车喊「卿儿」",
@@ -3296,7 +4701,8 @@
             ],
             "where": "竹屋"
           }
-        ]
+        ],
+        "load_bearing": true
       },
       {
         "id": "arc-3",
@@ -3304,7 +4710,6 @@
         "chapter_to": 24,
         "label": "竹屋攻防·奶奶病倒",
         "summary": "凌玥带帐篷住进院子、涨工资杀鸡被全村围观；陆可正面竞争；黎婆晕倒确诊癌症，治疗费 80 万；医院走廊里伍卿扑进她怀里求她，第 18 章自愿卖身，第 24 章黎婆叹「孽缘」。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "凌玥在院里搭帐篷，村里人围看",
@@ -3332,7 +4737,8 @@
             ],
             "where": "辽矾医院"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-4",
@@ -3340,7 +4746,6 @@
         "chapter_to": 33,
         "label": "医院别墅·司楼之约",
         "summary": "陪他捡破烂、别墅里换裙子揉腿、三千四百万债务与司楼、第一次失身、出院回村；第 32 章「卿儿会暖床就行」，第 33 章跑路计划泡汤。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "别墅里换衣揉腿，第一次失身",
@@ -3367,7 +4772,8 @@
             ],
             "where": "无名山村"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-5",
@@ -3375,7 +4781,6 @@
         "chapter_to": 40,
         "label": "回村告别·启程帝都",
         "summary": "三辆商务车进村，后山找牛、雪地按脚腕，凌玥扬言卖牛逼出「回帝都就娶卿儿」，收拾行李飞 A 市；第 40 章落地。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "三辆商务车进村，全村围观",
@@ -3403,7 +4808,8 @@
             ],
             "where": "湘曲→帝都"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-6",
@@ -3411,7 +4817,6 @@
         "chapter_to": 50,
         "label": "帝都凌府·见家长",
         "summary": "入住凌府见凌璇，南荣兰冰登门，误闯训练室撞见女兵裸身，十七街被姬淮澄拦车索人，宴会醉酒失身；第 46 章「割爱进宫当侍男」皇权首次伸手，第 49 章「我不干净了」。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "入住凌府，见凌璇与刘婶",
@@ -3441,7 +4846,8 @@
             ],
             "where": "皇宫"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-7",
@@ -3449,7 +4855,6 @@
         "chapter_to": 65,
         "label": "谢沐·玉佩·皇女强抢",
         "summary": "谢沐闯房被凌玥打进医务室；玉佩在暗处投出「凌」字；伍卿独自出门被姬淮澄当街强掳，凌玥带数百兵与狙击手围住古巷，「先认错」；第 63 章「光天化日强抢凌某夫郎」撕破脸，第 64 章赵宛发现屋顶狙击手。",
-        "load_bearing": true,
         "beats": [
           {
             "what": "谢沐闯房，被凌玥打进医务室",
@@ -3477,7 +4882,8 @@
             ],
             "where": "帝都古巷"
           }
-        ]
+        ],
+        "load_bearing": true
       },
       {
         "id": "arc-8",
@@ -3485,7 +4891,6 @@
         "chapter_to": 89,
         "label": "巍江枪声·暗子浮出",
         "summary": "巍江遇机车党兰冰，雇佣军交火，「那山上有反光」救凌玥，狙击对决、防弹窗弹孔；回别墅给牛灌盐水；陆可以暗子身份住别墅对面、接姬淮澄电话；皇帝寿宴请帖送到。第 77 章「会是谁想杀自己」，第 85 章「殿下息怒」，88-89 章陆可暴露、巷战逃亡。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "巍江枪战，「那山上有反光」",
@@ -3512,7 +4917,8 @@
             ],
             "where": "凌府"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-9",
@@ -3520,7 +4926,6 @@
         "chapter_to": 112,
         "label": "婚服·记忆旋涡·寿宴前夜",
         "summary": "婚服 3D 投影「明年开春」，哄穿裙子；姬凡上门送请帖炫耀婚约；记忆决堤（93-98 章回忆七年前雨夜与兔子书包下的信），咬她一口；训练场学打枪；凌家四千人开赴巍江。第 97 章「卿儿有点恨你了」最低点，第 98 章「你哭了」她第一次失态，第 102 章「不管你用什么方法！」造反执行。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "婚服投影，哄穿裙子",
@@ -3547,7 +4952,8 @@
             ],
             "where": "凌府→巍江"
           }
-        ]
+        ],
+        "load_bearing": false
       },
       {
         "id": "arc-10",
@@ -3555,7 +4961,6 @@
         "chapter_to": 124,
         "label": "寿宴·回忆篇·山雨欲来",
         "summary": "皇帝五十寿宴隔桌交锋；117-119 章回忆补完擦肩与梦中梦；桑邦市唐老接密信布临海防线，周琪赴京；凌玥亲笔信赵无鸢，四千人潜伏巍江。第 115 章「凌家主豪爽，请」，姬延定判「此人必定是姬氏皇朝的一大劫」；第 124 章「天生的王者」战争倒计时。",
-        "load_bearing": false,
         "beats": [
           {
             "what": "皇帝五十寿宴，隔桌交锋",
@@ -3583,7 +4988,8 @@
             ],
             "where": "巍江"
           }
-        ]
+        ],
+        "load_bearing": false
       }
     ],
     "divergence": {
@@ -3608,7 +5014,7 @@
     },
     "player": {
       "mode": "canon",
-      "canon_character": "",
+      "canon_character": "伍卿",
       "name": "伍卿",
       "age": "身体十七岁（灵魂来自现代，前世孤儿院长大，约二十出头）",
       "identity": "湘曲市无名山村的破烂少年 · 后来成为凌家「夫人」",
@@ -3617,6 +5023,11 @@
       "inner_voice": "心里有一整个弹幕池：算账、吐槽、骂人、自我安慰，热闹得不行。嘴上却常常只挤出「…………哦。」。现代词汇砸进古代情境（「强制开机」「CPU 都快烧了」「社死感拉满」），是他唯一的幽默来源。",
       "wants": "吃饱、睡暖、别惹事。他最大的理想是回到山里，牵着牛车继续捡破烂——那是他随时可以退回的安全绳。",
       "afraid": "怕疼、怕羞、最怕欠人情。因为算不清那要还多少。凡事先算「我要还多少、我还得起吗」，算不清就拖，拖不过就顺从，顺从完再偷偷计划跑路。",
+      "status": "",
+      "condition": "",
+      "mood": "",
+      "location": "",
+      "goal": "",
       "knowledge": {
         "knows": [],
         "does_not_know": [

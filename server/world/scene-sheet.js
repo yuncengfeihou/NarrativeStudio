@@ -14,7 +14,6 @@ const join = (arr, sep = '、') => (arr || []).filter(Boolean).join(sep);
 /* ══════════════════════════════════════════════════════════════════════ */
 
 const TYPE_GROUPS = [
-  { key: 'character', label: '人物' },
   { key: 'place', label: '地点' },
   { key: 'institution', label: '机构' },
   { key: 'faction', label: '势力' },
@@ -23,6 +22,12 @@ const TYPE_GROUPS = [
   { key: 'custom', label: '其他' },
 ];
 
+const isPerson = (e) => e?.type === 'person';
+const personsOf = (card) => (card.entities || []).filter((e) => isPerson(e));
+/** 事实实体：非 person 且未被作者静音。静音只在「自动带出」路径生效。 */
+const factsOf = (card, skipIds = null) => (card.entities || [])
+  .filter((e) => !isPerson(e) && !skipIds?.has(e.id) && !e.muted);
+
 /**
  * 世界索引 = 小说开头那张「人物表」。它不提供细节，只保证模型知道世界上
  * 存在这些东西，不会凭空发明同名实体，也不会把地名写漂。
@@ -30,10 +35,9 @@ const TYPE_GROUPS = [
  * 超预算时的降级顺序：带摘要 → 只留名字 → 末尾省略。
  */
 export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}) {
-  const cast = card.cast || [];
-  // muted 是作者显式静音：索引与场记候选都不再自动带出它（避免「我明明关了它还在」）。
-  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id) && !e.muted);
-  if (!cast.length && !codex.length) return '';
+  const persons = personsOf(card);
+  const facts = factsOf(card, skipIds);
+  if (!persons.length && !facts.length) return '';
 
   const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
     + '不说明「此刻如何」——细节以场记单为准。不得发明索引之外的重要实体，'
@@ -62,18 +66,17 @@ export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}
     lines.push(line);
   };
 
-  const castItems = cast
+  const personItems = persons
     .slice()
     .sort((a, b) => (b.weight || 0) - (a.weight || 0))
     .map((c) => {
       // 索引只承载 canon（这个人是谁）；受伤/死亡/失势等运行态由场记单负责。
-      return { name: c.name, summary: c.role || c.one_line || '' };
+      return { name: c.name, summary: c.role || c.summary || '' };
     });
-  pushGroup('人物', castItems);
+  pushGroup('人物', personItems);
 
   for (const g of TYPE_GROUPS) {
-    if (g.key === 'character') continue;
-    const items = codex
+    const items = facts
       .filter((e) => e.type === g.key)
       .map((e) => ({ name: e.name, summary: e.summary }));
     pushGroup(g.label, items);
@@ -92,8 +95,8 @@ export function renderWorldIndex(card, capTokens = 1200, { skipIds = null } = {}
  * @param {{skipIds?:Set<string>}} opts
  */
 export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {}) {
-  const codex = (card.codex || []).filter((e) => !skipIds?.has(e.id) && !e.muted);
-  const hasParent = codex.some((e) => e.parent_id);
+  const facts = factsOf(card, skipIds);
+  const hasParent = facts.some((e) => e.parent_id);
   if (!hasParent) return renderWorldIndex(card, capTokens, { skipIds });
 
   const header = '【世界索引】这个世界上已存在的人物与事物。它们只说明「有什么」，'
@@ -101,14 +104,14 @@ export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {})
     + '不得改写这些名字。';
 
   const byKey = new Map();
-  for (const e of codex) {
+  for (const e of facts) {
     byKey.set(e.id, e);
     byKey.set(e.name, e);
     for (const a of e.aliases || []) byKey.set(a, e);
   }
   const children = new Map();
   const roots = [];
-  for (const e of codex) {
+  for (const e of facts) {
     const parent = e.parent_id ? byKey.get(e.parent_id) : null;
     if (parent && parent !== e) {
       if (!children.has(parent.id)) children.set(parent.id, []);
@@ -125,13 +128,13 @@ export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {})
 
   const buildLines = (withSummary) => {
     const lines = [];
-    const cast = (card.cast || []).slice().sort((a, b) => (b.weight || 0) - (a.weight || 0));
-    if (cast.length) {
-      // 索引只承载 canon。c.status 是运行态（史官会写「左肩中箭」这类），
+    const persons = personsOf(card).slice().sort((a, b) => (b.weight || 0) - (a.weight || 0));
+    if (persons.length) {
+      // 索引只承载 canon。status 是运行态（史官会写「左肩中箭」这类），
       // 一旦渲染进 system，卡上有 parent_id 时 system 就每轮失效——而平铺卡不会，
       // 于是「会不会破坏缓存」取决于卡的形状，比稳定地坏更糟。
-      lines.push(`人物　${join(cast.map((c) => {
-        const s = c.role || c.one_line || '';
+      lines.push(`人物　${join(persons.map((c) => {
+        const s = c.role || c.summary || '';
         return withSummary && s ? `${c.name}（${s}）` : c.name;
       }), '｜')}`);
     }
@@ -146,8 +149,8 @@ export function renderWorldTree(card, capTokens = 1200, { skipIds = null } = {})
     for (const e of roots.filter(isTree).sort((a, b) => a.name.localeCompare(b.name))) walk(e, 0);
 
     for (const g of TYPE_GROUPS) {
-      if (g.key === 'character' || g.key === 'place' || g.key === 'institution' || g.key === 'faction') continue;
-      const items = codex.filter((e) => e.type === g.key && !isTree(e));
+      if (g.key === 'place' || g.key === 'institution' || g.key === 'faction') continue;
+      const items = facts.filter((e) => e.type === g.key && !isTree(e));
       if (!items.length) continue;
       lines.push(`${g.label}　${join(items.map((e) => (withSummary && e.summary ? `${e.name}（${e.summary}）` : e.name)), '｜')}`);
     }
@@ -223,7 +226,9 @@ export function selectCodex(card, {
   const linkSet = new Set([...presentIds, ...mentionedIds, ...pinnedIds]);
   const tagSet = new Set((threadTags || []).filter(Boolean));
   const out = [];
-  for (const entry of card.codex || []) {
+  // 只在「事实实体」里选：人物由在场判定带出，不做设定集条目。
+  for (const entry of (card.entities || [])) {
+    if (isPerson(entry)) continue;
     if (skipIds?.has(entry.id)) continue;
     // 静音优先于钉选：作者关掉自动进场后，不该再被「钉选无条件 +100」偷偷带回来。
     if (entry.muted) continue;
@@ -572,7 +577,8 @@ export function lookupCodex(card, queries, { limit = 3 } = {}) {
     .map(norm).filter(Boolean);
   if (!qs.length) return [];
   const out = [];
-  for (const entry of card?.codex || []) {
+  // 检索覆盖全部实体（含人物）：模型问「凌玥是谁」时，人物条目也要能查全文。
+  for (const entry of card?.entities || []) {
     const names = [entry.name, ...(entry.aliases || [])].map(norm).filter(Boolean);
     const summary = norm(entry.summary);
     const detail = norm(entry.detail);
@@ -581,6 +587,8 @@ export function lookupCodex(card, queries, { limit = 3 } = {}) {
     const facetText = [
       facets.sensory, facets.history,
       ...(facets.rules || []), ...(facets.consequences || []),
+      isPerson(entry) ? [entry.identity?.appearance, entry.identity?.background,
+        ...(entry.psyche?.traits || []), ...(entry.psyche?.wants || [])].filter(Boolean).join(' ') : '',
     ].map(norm).filter(Boolean);
 
     let score = 0;
@@ -702,7 +710,8 @@ export function renderRecentScenes(scenes = [], capTokens = 900) {
 
 /** 把一个辞书条目渲染成检索结果块（全文级，不是摘要）。 */
 export function renderCodexHit(entry) {
-  const lines = [`· ${entry.name}${entry.type ? `（${entry.type}）` : ''}`];
+  const person = isPerson(entry);
+  const lines = [`· ${entry.name}${entry.type ? `（${person ? '人物' : entry.type}）` : ''}`];
   const seen = new Set();
   // 同一段文字常同时出现在 summary / facets.history / detail 里；按归一化文本去重。
   const push = (prefix, value) => {
@@ -714,6 +723,22 @@ export function renderCodexHit(entry) {
     lines.push(`${prefix}${text}`);
   };
   push('  ', entry.summary);
+  if (person) {
+    const id = entry.identity || {};
+    if (str(id.age)) push('  年龄：', id.age);
+    if (str(id.appearance)) push('  外貌：', id.appearance);
+    if (str(id.station)) push('  身份：', id.station);
+    if (str(id.background)) push('  背景：', id.background);
+    if (entry.psyche?.traits?.length) push('  性格：', entry.psyche.traits.join('、'));
+    if (entry.voice?.rhythm) push('  口吻：', entry.voice.rhythm);
+    if (entry.voice?.never?.length) push('  绝不说：', entry.voice.never.join('／'));
+    if (entry.psyche?.hides?.length) push('  藏着：', entry.psyche.hides.join('；'));
+    if (entry.agenda?.length) {
+      push('  私心：', entry.agenda.map((a) => a.goal).filter(Boolean).join('；'));
+    }
+    if (entry.knowledge?.knows?.length) push('  知道：', entry.knowledge.knows.join('、'));
+    if (entry.knowledge?.does_not_know?.length) push('  不知道：', entry.knowledge.does_not_know.join('、'));
+  }
   const f = entry.facets || {};
   if (f.rules?.length) push('  规则：', join(f.rules, '；'));
   if (f.consequences?.length) push('  后果：', join(f.consequences, '；'));

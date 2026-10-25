@@ -1,17 +1,17 @@
 /**
  * server/agents/card-smith.js — 制卡流水线（Card Smith）
  *
- * 把一部小说（或任意设定素材）抽成一张 v4 世界卡。这是**一次性的长任务**，
+ * 把一部小说（或任意设定素材）抽成一张 v5 世界卡。这是**一次性的长任务**，
  * 不是运行时行为：跑完得到一张可复用的世界沙盒。
  *
  * 流水线（按章并行 → 合并仲裁 → 定格）：
- *   1. 按章抽取：每章一个子任务，产出实体（含角色内在/声线）/ 关系 / 事件 / 台词 / 世界规则
+ *   1. 按章抽取：每章一个子任务，产出实体（含人物内在/声线）/ 关系 / 事件 / 台词 / 世界规则
  *   2. 合并仲裁：跨章去重、别名归并，每条都带出处（第几章）
  *   3. 定格 pass：把合并结果冻结成「起点那一刻」的卡——按章出处切 cutoff、
- *      裁剪文本、把辞书里的 character 归位到卡司、按同章共现补 links
- *   4. 切时间线：cutoff 之前的事件标 past，之后标 future（只作校勘参考，永不注入）
+ *      裁剪文本、按同章共现补事实实体之间的 links
+ *   4. 切时间线：cutoff 之前的事件标 past，之后标 future（只作参考走向，永不注入）
  *   5. 生成快照：起点那一刻谁在场、什么状态、谁知道什么
- *   6. 产出卡：命题 / 宪章 / 卡司 / 辞书 / 时间线 / 锚点
+ *   6. 产出卡：故事方向 / 世界规则 / 实体（人物 + 世界事实）/ 时间线 / 开局点
  *
  * 关键规则：
  *   - 只抽「起点之前的剧情」作为 canon。后续章节的事件标 future，默认不注入。
@@ -26,7 +26,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { chat } from '../llm.js';
-import { normalizeCard } from '../world/schema.js';
+import { normalizeCard, isPerson, PERSON_TYPE } from '../world/schema.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
 const obj = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
@@ -362,16 +362,20 @@ function collectField(sources, key, maxLen = 40, maxCount = 3) {
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-/* 3. 组装成 v4 世界卡                                                    */
+/* 3. 组装成 v5 世界卡                                                    */
 /* ══════════════════════════════════════════════════════════════════════ */
 
+/**
+ * 抽取阶段的 kind → v5 实体 type。
+ * 抽取契约（EXTRACT_VERSION）不变：character 仍是抽取时的叫法，落卡时统一成 person。
+ */
 const KIND_TO_TYPE = {
-  character: 'character', place: 'place', institution: 'institution',
+  character: PERSON_TYPE, place: 'place', institution: 'institution',
   faction: 'faction', item: 'item', concept: 'concept',
 };
 
 /**
- * 把合并后的素材组装成 v4 卡，并跑一遍定格 pass。
+ * 把合并后的素材组装成 v5 卡，并跑一遍定格 pass。
  * @param {object} args
  * @param {Array}  args.chapters   各章抽取结果（{chapter, entities, relations, events, voices, rules}）
  * @param {string} args.title
@@ -407,7 +411,11 @@ export function buildCardFromExtracts({
   const initialChapters = new Set(chapters.filter((c) => c.chapter < cut).map((c) => c.chapter));
   const firstChapter = chapters[0]?.chapter ?? 1;
 
-  const cast = entities.filter((e) => e.kind === 'character').map((e) => {
+  // 实体的出处：按章去重成 sources；合卡后每条实体都保留「第几章出现」
+  const sourcesFor = (list) => [...new Set(list.map((s) => s.chapter))].sort((a, b) => a - b)
+    .map((ch) => ({ kind: 'novel', ref: `ch.${ch}`, chapter: ch }));
+
+  const persons = entities.filter((e) => e.kind === 'character').map((e) => {
     const allSources = [...arr(e.sources)].sort((a, b) => a.chapter - b.chapter);
     const atStart = sourcesBefore(e, cut);
     const keys = new Set([e.name, ...e.aliases]);
@@ -455,11 +463,23 @@ export function buildCardFromExtracts({
 
     return {
       id: e.name,
+      type: PERSON_TYPE,
       name: e.name,
       aliases: e.aliases,
+      tags: [],
+      summary: e.summary,
+      detail: e.detail,
+      facets: { sensory: '', rules: [], consequences: [], history: '' },
+      links: [],
+      reveal: 'public',
+      canon_from: 'prologue',
+      sources: sourcesFor(allSources),
+      pinned: false,
+      muted: false,
+      parent_id: '',
       role: e.summary,
-      one_line: e.summary,
       identity: {
+        age: '',
         appearance: firstField(allSources, 'appearance'),
         station: firstField(allSources, 'station'),
         background: e.detail,
@@ -478,25 +498,39 @@ export function buildCardFromExtracts({
       knowledge,
       agenda: agenda.slice(0, 3),
       relations: rels.slice(0, 8),
+      always_present: false,
       weight: e.chapters.length >= 5 ? 0.9 : e.chapters.length >= 2 ? 0.6 : 0.3,
+      // 运行期初始值：定格只写静态卡，状态从空开始
+      status: '', condition: '', mood: '', location: '', goal: '',
     };
   });
 
-  const codex = entities
+  const facts = entities
     .filter((e) => e.kind !== 'character')
-    .map((e) => ({
-      id: e.name,
-      type: KIND_TO_TYPE[e.kind] || 'custom',
-      name: e.name,
-      aliases: e.aliases,
-      tags: [],
-      summary: e.summary,
-      facets: { history: e.detail },
-      links: [],
-      reveal: 'public',
-      canon_from: 'prologue',
-      detail: e.detail,
-    }));
+    .map((e) => {
+      const allSources = [...arr(e.sources)].sort((a, b) => a.chapter - b.chapter);
+      return {
+        id: e.name,
+        type: KIND_TO_TYPE[e.kind] || 'custom',
+        name: e.name,
+        aliases: e.aliases,
+        tags: [],
+        summary: e.summary,
+        detail: e.detail,
+        facets: { sensory: '', rules: [], consequences: [], history: e.detail },
+        links: [],
+        reveal: 'public',
+        canon_from: 'prologue',
+        sources: sourcesFor(allSources),
+        pinned: false,
+        muted: false,
+        parent_id: '',
+        // 运行期初始值：定格只写静态卡，事实实体的访问/归属从空开始
+        status: '', condition: '', access: '', open_to: '', owner_id: '', location_id: '',
+      };
+    });
+
+  const cardEntities = [...persons, ...facts];
 
   const timeline = events.map((e, i) => ({
     id: `evt-${String(i + 1).padStart(3, '0')}`,
@@ -550,8 +584,7 @@ export function buildCardFromExtracts({
       }
       : null,
     charter,
-    cast,
-    codex,
+    entities: cardEntities,
     timeline,
     anchors: [{
       id: 'prologue',
@@ -560,6 +593,7 @@ export function buildCardFromExtracts({
       snapshot: {
         time: '',
         place: anchorPlace,
+        place_id: anchorPlace,
         characters: snapshotChars,
         inventory: [],
         last_hook: pastEvents.length ? pastEvents[pastEvents.length - 1].what : '',
@@ -577,23 +611,34 @@ export function buildCardFromExtracts({
  * 定格 pass：把合并结果凝练成「可以直接进运行时」的卡。
  * 纯函数、不调模型、可重复执行；宁缺勿编。
  * - 文本按运行时口径裁剪：appearance ≤60、background ≤160、其余每条 ≤40
- * - 辞书里的 character 归位到卡司（detail 并入 identity.background）
- * - links 只按「同章共现」生成：同一章出现的两个非角色实体互链，不调模型、不依赖名字名单
+ * - 人物与事实同住 entities，按 type 分派后各自裁剪；引用一律归一成裸 id
+ * - links 只按「同章共现」生成：同一章出现的两个事实实体互链，不调模型、不依赖名字名单
  * - exemplars 必须是原文里逐字出现过的台词，模型编的句子直接丢
  */
 export function finalizeCard(card, { chapters = [], sourceTexts = null } = {}) {
   const next = JSON.parse(JSON.stringify(card || {}));
   const rawText = sourceTexts ? arr(sourceTexts).join('\n').replace(/\s+/g, '') : '';
-  const cast = arr(next.cast);
-  const castByKey = new Map();
+  const all = arr(next.entities);
+  const persons = all.filter(isPerson);
+  const facts = all.filter((e) => !isPerson(e));
+  const idOf = (e) => str(e.id) || str(e.name);
 
-  for (const c of cast) {
+  // 名字 / 别名 / id 都归一到实体表，卡里只允许出现裸 id
+  const idByKey = new Map();
+  for (const e of all) {
+    for (const key of [e.id, e.name, ...arr(e.aliases)]) {
+      const k = str(key);
+      if (k && !idByKey.has(k)) idByKey.set(k, idOf(e));
+    }
+  }
+
+  for (const c of persons) {
+    c.summary = clip(c.summary, 60);
+    c.role = clip(c.role, 40);
     c.identity = obj(c.identity);
     c.identity.appearance = clip(c.identity.appearance, 60);
     c.identity.background = clip(c.identity.background, 160);
     c.identity.station = clip(c.identity.station, 40);
-    c.one_line = clip(c.one_line, 60);
-    c.role = clip(c.role, 40);
     c.voice = obj(c.voice);
     c.voice.address = Object.fromEntries(
       Object.entries(obj(c.voice.address))
@@ -625,54 +670,32 @@ export function finalizeCard(card, { chapters = [], sourceTexts = null } = {}) {
       goals.add(a.goal);
       return true;
     }).slice(0, 3);
-    for (const key of [c.name, c.id, ...arr(c.aliases)]) {
-      const k = str(key);
-      if (k && !castByKey.has(k)) castByKey.set(k, c);
-    }
   }
 
-  // 辞书里的 character 归位到卡司：detail 并进 background，条目本身从辞书移除
-  const codex = [];
-  const charCodex = new Map();
-  for (const e of arr(next.codex)) {
-    const item = obj(e);
-    item.summary = clip(item.summary, 120);
-    item.detail = clip(item.detail, 400);
-    item.facets = obj(item.facets);
-    item.facets.history = clip(item.facets.history, 200);
-    if (item.type === 'character') {
-      const hit = castByKey.get(str(item.name))
-        || arr(item.aliases).map((a) => castByKey.get(str(a))).find(Boolean);
-      if (hit) {
-        const pieces = [hit.identity.background, clip(item.detail || item.summary, 160)].filter(Boolean);
-        hit.identity.background = clip(pieces.join('；'), 160);
-        charCodex.set(str(item.name), hit.id);
-        for (const a of arr(item.aliases)) if (str(a)) charCodex.set(str(a), hit.id);
-        continue;
-      }
-    }
-    codex.push(item);
+  for (const e of facts) {
+    e.summary = clip(e.summary, 120);
+    e.detail = clip(e.detail, 400);
+    e.facets = obj(e.facets);
+    e.facets.history = clip(e.facets.history, 200);
   }
-  next.codex = codex;
 
-  // 同章共现：确定性规则，不调模型、不做名单
-  const codexNameToId = new Map();
-  for (const e of codex) {
-    for (const key of [e.id, e.name, ...arr(e.aliases)]) {
-      const k = str(key);
-      if (k && !codexNameToId.has(k)) codexNameToId.set(k, str(e.id) || str(e.name));
-    }
-  }
+  // 同章共现只发生在事实实体之间；links 只记裸 id
+  const factIds = new Set(facts.map(idOf));
   const linkMap = new Map();
-  for (const e of codex) linkMap.set(str(e.id) || str(e.name), arr(e.links).map(str).filter(Boolean));
+  for (const e of facts) {
+    const seeded = arr(e.links)
+      .map((x) => str(idByKey.get(stripRef(x))) || stripRef(x))
+      .filter(Boolean);
+    linkMap.set(idOf(e), seeded);
+  }
   const seenPairs = new Set();
   for (const ch of chapters) {
     const ids = [];
     for (const ent of arr(ch.entities)) {
       if (ent.kind === 'character') continue;
-      const id = codexNameToId.get(str(ent.name))
-        || arr(ent.aliases).map((a) => codexNameToId.get(str(a))).find(Boolean);
-      if (id && !ids.includes(id)) ids.push(id);
+      const id = idByKey.get(str(ent.name))
+        || arr(ent.aliases).map((a) => idByKey.get(str(a))).find(Boolean);
+      if (id && factIds.has(id) && !ids.includes(id)) ids.push(id);
     }
     for (let i = 0; i < ids.length; i++) {
       for (let j = i + 1; j < ids.length; j++) {
@@ -686,23 +709,24 @@ export function finalizeCard(card, { chapters = [], sourceTexts = null } = {}) {
       }
     }
   }
-  for (const e of codex) {
-    const own = str(e.id) || str(e.name);
-    e.links = dedupe(linkMap.get(own) || []).filter((x) => x !== own).slice(0, 8);
+  for (const e of facts) {
+    const own = idOf(e);
+    e.links = dedupe(linkMap.get(own) || []).filter((x) => x !== own && factIds.has(x)).slice(0, 8);
   }
 
-  // 关系：to 归一为卡司 id（辞书 character 的一并归位），坏引用与自环丢弃
-  for (const c of cast) {
+  // 关系：to 归一为人物 id；指向事实、坏引用与自环都丢弃
+  const personIds = new Set(persons.map(idOf));
+  for (const c of persons) {
+    const own = idOf(c);
     const seen = new Set();
     const rels = [];
     for (const r of arr(c.relations)) {
       const o = obj(r);
-      const raw = stripRef(o.to);
-      const to = str(castByKey.get(raw)?.id || charCodex.get(raw) || raw);
-      if (!to || to === str(c.id) || seen.has(to)) continue;
+      const to = str(idByKey.get(stripRef(o.to)));
+      if (!to || to === own || !personIds.has(to) || seen.has(to)) continue;
       seen.add(to);
       rels.push({
-        to: clip(to, 20),
+        to,
         kind: clip(o.kind, 20),
         sentiment: clampSym(o.sentiment),
         note: clip(o.note, 60),
@@ -711,7 +735,7 @@ export function finalizeCard(card, { chapters = [], sourceTexts = null } = {}) {
     c.relations = rels.slice(0, 8);
   }
 
-  next.cast = cast;
+  next.entities = all;
   return normalizeCard(next);
 }
 
@@ -867,7 +891,8 @@ export async function smithCard({
     stats: {
       chapters: total,
       cached,
-      entities: card.cast.length + card.codex.length,
+      entities: card.entities.length,
+      persons: card.entities.filter(isPerson).length,
       events: card.timeline.length,
       charter: card.charter.length,
     },
