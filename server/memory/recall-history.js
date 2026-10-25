@@ -8,7 +8,7 @@
  * 装不下就停，避免一次检索把上下文撑爆。
  */
 import { estimateTokens, truncateToTokens } from '../tokens.js';
-import { searchTurns } from './store.js';
+import { searchTurnsDetailed } from './store.js';
 
 const KIND_LABEL = { player: '玩家', narrator: '旁白', system: '系统' };
 const SNIPPET_TOKENS = 120;
@@ -39,7 +39,7 @@ export function renderRecallResults(query, hits, { maxTokens = DEFAULT_MAX_TOKEN
  * @param {number} [args.atTurn]    检索时点，默认到最新
  * @param {string} args.query
  * @param {number} [args.limit]     1-8，默认 4
- * @returns {{text:string, hits:Array, meta:{query,hits,limit,tokens}}}
+ * @returns {{text:string, hits:Array, meta:{query,hits,limit,tokens,engine}}}  engine ∈ fts5|like|none
  */
 export function recallHistory({
   sessionId, branchId = null, forkTurn = null, atTurn, query, limit = 4,
@@ -47,10 +47,14 @@ export function recallHistory({
 } = {}) {
   const q = String(query || '').trim();
   if (!q) {
-    return { text: '错误：query 不能为空。', hits: [], meta: { query: q, hits: 0, limit: 0, tokens: 0 } };
+    return { text: '错误：query 不能为空。', hits: [], meta: { query: q, hits: 0, limit: 0, tokens: 0, engine: 'none' } };
   }
   const lim = Math.max(1, Math.min(8, Number(limit) || 4));
-  const hits = searchTurns(sessionId, q, { branchId, forkTurn, atTurn, limit: lim, kinds });
+  const { hits, engine } = searchTurnsDetailed(sessionId, q, { branchId, forkTurn, atTurn, limit: lim, kinds });
   const text = renderRecallResults(q, hits, { maxTokens });
-  return { text, hits, meta: { query: q, hits: hits.length, limit: lim, tokens: estimateTokens(text) } };
+  return {
+    text,
+    hits,
+    meta: { query: q, hits: hits.length, limit: lim, tokens: estimateTokens(text), engine },
+  };
 }

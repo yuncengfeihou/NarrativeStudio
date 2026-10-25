@@ -460,7 +460,7 @@ runRetrieval({ card, playerText, ledger, lastNarrative, signal })
 // 历史检索（server/memory/recall-history.js；与 codex_lookup 同构的第五个分段工具）
 // recallHistory({ sessionId, branchId, forkTurn, atTurn, query, limit, kinds, maxTokens })
 // -> { text, hits:[{turn_no, kind, snippet, token_count}],
-//      meta:{query, hits, limit, tokens} }
+//      meta:{query, hits, limit, tokens, engine:'fts5'|'like'|'none'} }
 // 只读：按 branch_id 可见链（含继承的父分支，兄弟分支不可见）+ atTurn 过滤 turns 原文；
 // ≥3 个 Unicode 字符走 FTS5 trigram（turns_fts 外部内容表，触发器与 turns 同步，
 // 启动时按行数差 rebuild 自愈），少于 3 字走 LIKE 兜底（两字人名很常见）。
@@ -473,6 +473,8 @@ runRetrieval({ card, playerText, ledger, lastNarrative, signal })
 // 回合原文检索（server/memory/store.js）
 searchTurns(sessionId, query, { branchId, forkTurn, atTurn, limit, kinds })
 // -> [{turn_no, kind, snippet, token_count}]，按时间从近到远；分支过滤规则同 getTurnsForBranch
+searchTurnsDetailed(sessionId, query, {…同上}) -> { hits:[…], engine:'fts5'|'like'|'none' }
+// engine 供 recall_history 的 meta 自报「这次到底走了哪条检索路」，不参与排序。
 
 // 分支守卫（server/memory/branch-guard.js）
 branchSnapshot(sessionId, branchId?) -> {sessionId, branchId, maxTurnNo, maxTurnId} | null

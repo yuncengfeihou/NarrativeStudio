@@ -188,6 +188,8 @@ console.log('\n=== 历史检索：FTS5 + 分支可见性 ===');
 
   eq(store.searchTurns(sid, '玥姐姐', { branchId: 'main' }).map((h) => h.turn_no), [1, 1], 'FTS5 能检索 ≥3 字中文子串');
   eq(store.searchTurns(sid, '凌玥', { branchId: 'main' }).map((h) => h.turn_no), [2, 2], '两字查询由 LIKE 兜底');
+  eq(store.searchTurnsDetailed(sid, '玥姐姐', { branchId: 'main' }).engine, 'fts5', 'searchTurnsDetailed 自报 FTS5 主路');
+  eq(store.searchTurnsDetailed(sid, '凌玥', { branchId: 'main' }).engine, 'like', 'searchTurnsDetailed 自报 LIKE 兜底');
 
   store.updateTurnContent(sid, 2, 'player', '梅雨天她撑伞等你。');
   eq(store.searchTurns(sid, '梅雨天', { branchId: 'main' }).map((h) => h.turn_no), [2], '段落改写后索引同步');
@@ -206,6 +208,7 @@ console.log('\n=== 历史检索：FTS5 + 分支可见性 ===');
   const r = await recall.recallHistory({ sessionId: sid, branchId: 'b2', atTurn: 3, query: '旧仓库' });
   ok(r.text.includes('【历史检索：旧仓库】'), 'recallHistory 渲染带标题');
   ok(r.hits.length >= 1 && r.meta.tokens > 0, 'recallHistory 返回命中与 token 预算');
+  eq(r.meta.engine, 'fts5', 'recallHistory meta 自报检索引擎');
   ok(!r.text.includes('书院'), '召回文本不泄漏兄弟分支内容');
 
   const empty = recall.renderRecallResults('旧仓库', []);

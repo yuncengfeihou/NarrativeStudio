@@ -1752,9 +1752,9 @@ export function getRecentTextForBranch(sessionId, branchId, forkTurn, turnsBack 
  *   否则分叉后搜不到继承的父分支原文，却可能搜到兄弟分支的回合。
  * - atTurn 用来冻结「检索时点」，不把本拍之后的原文带进来。
  *
- * @returns {Array<{turn_no, kind, snippet, token_count}>} 按时间从近到远
+ * @returns {{hits:Array<{turn_no, kind, snippet, token_count}>, engine:'fts5'|'like'|'none'}}
  */
-export function searchTurns(sessionId, query, {
+export function searchTurnsDetailed(sessionId, query, {
   branchId = null,
   forkTurn = null,
   atTurn = Number.MAX_SAFE_INTEGER,
@@ -1762,11 +1762,12 @@ export function searchTurns(sessionId, query, {
   kinds = ['player', 'narrator'],
 } = {}) {
   const q = String(query || '').trim();
-  if (!q) return [];
+  if (!q) return { hits: [], engine: 'none' };
   const db = getDb();
   const kindSql = kinds.map(() => '?').join(',');
   const cap = Math.max(limit * 4, limit); // 先多取候选，分支过滤后再截断
   let rows = [];
+  let engine = 'like';
 
   if ([...q].length >= 3) {
     try {
@@ -1777,6 +1778,7 @@ export function searchTurns(sessionId, query, {
         WHERE turns_fts MATCH ? AND t.session_id=? AND t.kind IN (${kindSql}) AND t.turn_no<=?
         ORDER BY t.turn_no DESC, t.id DESC LIMIT ?
       `).all(match, sessionId, ...kinds, atTurn, cap);
+      if (rows.length) engine = 'fts5';
     } catch { rows = []; }
   }
 
@@ -1803,12 +1805,20 @@ export function searchTurns(sessionId, query, {
     return lim == null || r.turn_no <= lim;
   });
 
-  return visible.slice(0, limit).map((r) => ({
-    turn_no: r.turn_no,
-    kind: r.kind,
-    snippet: truncate(r.content, 400),
-    token_count: r.token_count,
-  }));
+  return {
+    engine,
+    hits: visible.slice(0, limit).map((r) => ({
+      turn_no: r.turn_no,
+      kind: r.kind,
+      snippet: truncate(r.content, 400),
+      token_count: r.token_count,
+    })),
+  };
+}
+
+/** 只要命中片段时用这个；engine 只对 recall_history 的 meta 有用。 */
+export function searchTurns(sessionId, query, opts = {}) {
+  return searchTurnsDetailed(sessionId, query, opts).hits;
 }
 
 /** 在断言里按主/谓/对象文本检索。 */
