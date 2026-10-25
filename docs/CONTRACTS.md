@@ -453,14 +453,22 @@ runRetrieval({ card, playerText, ledger, lastNarrative, signal })
 // -> {text, queries, entries:[{id,name,why}], usage} | null
 // parseRetrievalQueries(content) -> string[]（宽容解析，失败返回空数组）
 
-// 【规划中，未实现，勿依赖】历史检索（与 codex_lookup 同构的第五个分段工具）
-// recallHistory({ sessionId, branchId, atTurn, query, kinds, limit })
-// -> { text, hits:[{kind:'turn'|'scene', turn_no|scene_id, score, snippet}],
-//      meta:{engine:'fts5'|'like', query, dropped, branch, at_turn} }
-// 只有模型主动发起才查 turns/scenes；按 branch_id + atTurn 过滤，结果只进 retrieval
-// 子层、当拍蒸发。FTS5 trigram 是主路，少于 3 个 Unicode 字符的查询走 LIKE 兜底；
-// 不写 turns/scenes、不改账本，也不做 embedding 自动召回（AGENTS §15.1/§15.4）。
-// 接线计划：narrator-loop 工具表 + orchestrator 回传；HTTP 不新增端点。
+// 历史检索（server/memory/recall-history.js；与 codex_lookup 同构的第五个分段工具）
+// recallHistory({ sessionId, branchId, forkTurn, atTurn, query, limit, kinds, maxTokens })
+// -> { text, hits:[{turn_no, kind, snippet, token_count}],
+//      meta:{query, hits, limit, tokens} }
+// 只读：按 branch_id 可见链（含继承的父分支，兄弟分支不可见）+ atTurn 过滤 turns 原文；
+// ≥3 个 Unicode 字符走 FTS5 trigram（turns_fts 外部内容表，触发器与 turns 同步，
+// 启动时按行数差 rebuild 自愈），少于 3 字走 LIKE 兜底（两字人名很常见）。
+// 结果只进 retrieval 子层、当拍蒸发；不写库、不进 turns、不做自动召回/embedding
+// （AGENTS §1.1/§15.4）。narrator-loop：SEGMENTED_TOOLS 第 5 个工具，由
+// runSegmentedTool({recall}) 注入回调；orchestrator 用当前分支 + turnNo 接线。
+// HTTP：POST /api/sessions/:id/recall-history。
+// renderRecallResults(query, hits, {maxTokens}) -> string（纯函数，单测用）
+
+// 回合原文检索（server/memory/store.js）
+searchTurns(sessionId, query, { branchId, forkTurn, atTurn, limit, kinds })
+// -> [{turn_no, kind, snippet, token_count}]，按时间从近到远；分支过滤规则同 getTurnsForBranch
 
 // 分支守卫（server/memory/branch-guard.js）
 branchSnapshot(sessionId, branchId?) -> {sessionId, branchId, maxTurnNo, maxTurnId} | null
@@ -627,6 +635,7 @@ PATCH  /api/sessions/:id/notes/:id
 DELETE /api/sessions/:id/notes/:id
 POST   /api/sessions/:id/audit            -> 校勘报告
 POST   /api/sessions/:id/recall           body:{question} -> {found, answer, citations}
+POST   /api/sessions/:id/recall-history   body:{query, limit?, kinds?, at_turn?} -> {query, hits, text, meta}
 
 GET    /api/presets / GET /api/presets/:id
 POST   /api/presets                       body:{id, card}（只接受 v4 卡）

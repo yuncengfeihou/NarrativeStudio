@@ -24,6 +24,7 @@ const orch = await import('../server/agents/orchestrator.js');
 const schema = await import('../server/world/schema.js');
 const effective = await import('../server/world/effective.js');
 const playerView = await import('../server/memory/player-view.js');
+const recall = await import('../server/memory/recall-history.js');
 
 let pass = 0;
 let fail = 0;
@@ -171,6 +172,48 @@ console.log('\n=== 分支：回合可见性 ===');
 
   const text = store.getRecentTextForBranch(sid, 'b2', 2, 8);
   ok(text.includes('另一种可能') && text.includes('正文1'), '分支原文含继承与新写');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 历史检索：FTS5 + 分支可见性 ===');
+{
+  const sid = `s-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  store.addTurn(sid, { turn_no: 1, kind: 'player', content: '我去找玥姐姐借伞。', branch_id: 'main' });
+  store.addTurn(sid, { turn_no: 1, kind: 'narrator', content: '雨很大，玥姐姐在檐下等你。', branch_id: 'main' });
+  store.addTurn(sid, { turn_no: 2, kind: 'player', content: '凌玥说她知道旧仓库。', branch_id: 'main' });
+  store.addTurn(sid, { turn_no: 2, kind: 'narrator', content: '凌玥领你走进旧仓库。', branch_id: 'main' });
+
+  eq(store.searchTurns(sid, '玥姐姐', { branchId: 'main' }).map((h) => h.turn_no), [1, 1], 'FTS5 能检索 ≥3 字中文子串');
+  eq(store.searchTurns(sid, '凌玥', { branchId: 'main' }).map((h) => h.turn_no), [2, 2], '两字查询由 LIKE 兜底');
+
+  store.updateTurnContent(sid, 2, 'player', '梅雨天她撑伞等你。');
+  eq(store.searchTurns(sid, '梅雨天', { branchId: 'main' }).map((h) => h.turn_no), [2], '段落改写后索引同步');
+  eq(store.searchTurns(sid, '凌玥说她知道旧仓库', { branchId: 'main' }).length, 0, '旧内容不再命中');
+
+  store.createBranch(sid, { branchId: 'b2', parentBranch: 'main', forkTurn: 2 });
+  store.createBranch(sid, { branchId: 'b3', parentBranch: 'main', forkTurn: 2 });
+  store.addTurn(sid, { turn_no: 3, kind: 'player', content: 'b2 线：我去了码头。', branch_id: 'b2' });
+  store.addTurn(sid, { turn_no: 4, kind: 'player', content: 'b3 线：我去了书院。', branch_id: 'b3' });
+
+  ok(store.searchTurns(sid, '旧仓库', { branchId: 'b2' }).length >= 1, 'b2 能检索到继承的父分支原文');
+  eq(store.searchTurns(sid, '书院', { branchId: 'b2' }).length, 0, 'b2 检索不到兄弟分支的回合');
+  eq(store.searchTurns(sid, '码头', { branchId: 'b3' }).length, 0, 'b3 也检索不到兄弟分支');
+  eq(store.searchTurns(sid, '码头', { branchId: 'b2', atTurn: 2 }).length, 0, 'atTurn 之后的回合不参与检索');
+
+  const r = await recall.recallHistory({ sessionId: sid, branchId: 'b2', atTurn: 3, query: '旧仓库' });
+  ok(r.text.includes('【历史检索：旧仓库】'), 'recallHistory 渲染带标题');
+  ok(r.hits.length >= 1 && r.meta.tokens > 0, 'recallHistory 返回命中与 token 预算');
+  ok(!r.text.includes('书院'), '召回文本不泄漏兄弟分支内容');
+
+  const empty = recall.renderRecallResults('旧仓库', []);
+  ok(empty.includes('没有在已经发生的回合里找到'), 'renderRecallResults 空命中给出确定文案');
+  const capped = recall.renderRecallResults('旧仓库', [
+    { turn_no: 1, kind: 'player', snippet: '一'.repeat(400) },
+  ], { maxTokens: 20 });
+  eq(capped.split('\n').length, 1, 'renderRecallResults 超预算时只保留标题');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

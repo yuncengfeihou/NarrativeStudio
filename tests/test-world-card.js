@@ -660,6 +660,27 @@ console.log('\n=== 制卡：断点续跑（按章缓存） ===');
   eq(thirdCounter.n, 1, '素材改动 → 指纹失效，只重跑改动章');
   eq(third.stats.cached, 1, '素材改动 → 另一章仍命中缓存');
 
+  // 并发抽取：结果按章号确定性合并，与串行一致（不因完成顺序漂移）。
+  const parDir = fs.mkdtempSync(path.join(os.tmpdir(), 'narra-smith-par-'));
+  for (let i = 1; i <= 3; i++) fs.writeFileSync(path.join(parDir, `第${i}章.txt`), `第${i}章原文。`, 'utf8');
+  const extractAsync = () => async (chapter, index) => {
+    // 让第 1 章最慢完成，验证合并顺序不受完成顺序影响。
+    await new Promise((r) => setTimeout(r, index === 1 ? 30 : 1));
+    return {
+      chapter: index,
+      entities: [{ kind: 'character', name: `角色${index}`, summary: '某人', detail: '来历' }],
+      relations: [], events: [], voices: [], rules: [],
+    };
+  };
+  const serial = await smithLib.smithCard({
+    dir: parDir, title: '并发', concurrency: 1, extract: extractAsync(), cacheDir: path.join(parDir, 'cache-serial'),
+  });
+  const parallel = await smithLib.smithCard({
+    dir: parDir, title: '并发', concurrency: 3, extract: extractAsync(), cacheDir: path.join(parDir, 'cache-par'),
+  });
+  eq(JSON.stringify(parallel.card), JSON.stringify(serial.card), '并发抽取与串行产出同一张卡（按章号合并）');
+  eq(parallel.stats.chapters, 3, '并发抽取章数完整');
+
   const failDir = fs.mkdtempSync(path.join(os.tmpdir(), 'narra-smith-fail-'));
   fs.writeFileSync(path.join(failDir, '第1章.txt'), '一。', 'utf8');
   fs.writeFileSync(path.join(failDir, '第2章.txt'), '二。', 'utf8');

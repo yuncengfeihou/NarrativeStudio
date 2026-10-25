@@ -390,6 +390,32 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_threads_branch ON threads(session_id, branch_id, status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_world ON sessions(world_id, updated_at DESC);
   `);
+
+  // 历史检索索引（只给「模型主动发起的 recall_history」用，不参与自动注入）。
+  // trigram 分词让中文 ≥3 字子串可索引；<3 字（如两字人名）FTS5 不收，由 LIKE 兜底。
+  // 外部内容表 + 触发器保持与 turns 同步；旧库靠下面的 rebuild 自愈，不做 schema 迁移。
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
+      content,
+      content='turns',
+      content_rowid='id',
+      tokenize='trigram'
+    );
+    CREATE TRIGGER IF NOT EXISTS turns_fts_ai AFTER INSERT ON turns BEGIN
+      INSERT INTO turns_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS turns_fts_ad AFTER DELETE ON turns BEGIN
+      INSERT INTO turns_fts(turns_fts, rowid, content) VALUES ('delete', old.id, old.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS turns_fts_au AFTER UPDATE OF content ON turns BEGIN
+      INSERT INTO turns_fts(turns_fts, rowid, content) VALUES ('delete', old.id, old.content);
+      INSERT INTO turns_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+  `);
+  const rows = db.prepare(`SELECT count(*) AS n FROM turns`).get().n;
+  const indexed = db.prepare(`SELECT count(*) AS n FROM turns_fts`).get().n;
+  if (rows !== indexed) db.exec(`INSERT INTO turns_fts(turns_fts) VALUES('rebuild')`);
+
   return db;
 }
 
@@ -1714,20 +1740,65 @@ export function getRecentTextForBranch(sessionId, branchId, forkTurn, turnsBack 
 }
 
 /**
- * 在回合原文里做子串检索。中文没有词边界，LIKE 子串比分词更可靠。
- * @returns {Array<{turn_no, kind, snippet}>}
+ * 在回合原文里做子串检索（只给模型主动发起的 recall_history 用）。
+ *
+ * - ≥3 个字符走 trigram 全文索引；<3 字退回 LIKE（中文两字人名很常见，FTS5 trigram 不收）。
+ * - 分支可见性与 getTurnsForBranch 同一套规则：不能只看 branch_id 相等，
+ *   否则分叉后搜不到继承的父分支原文，却可能搜到兄弟分支的回合。
+ * - atTurn 用来冻结「检索时点」，不把本拍之后的原文带进来。
+ *
+ * @returns {Array<{turn_no, kind, snippet, token_count}>} 按时间从近到远
  */
-export function searchTurns(sessionId, query, { branchId = null, limit = 8, kinds = ['player', 'narrator'] } = {}) {
+export function searchTurns(sessionId, query, {
+  branchId = null,
+  forkTurn = null,
+  atTurn = Number.MAX_SAFE_INTEGER,
+  limit = 8,
+  kinds = ['player', 'narrator'],
+} = {}) {
   const q = String(query || '').trim();
   if (!q) return [];
-  const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
-  let sql = `SELECT turn_no, kind, content, token_count FROM turns
-             WHERE session_id=? AND kind IN (${kinds.map(() => '?').join(',')}) AND content LIKE ? ESCAPE '\\'`;
-  const params = [sessionId, ...kinds, like];
-  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
-  sql += ` ORDER BY turn_no DESC, id DESC LIMIT ?`;
-  params.push(limit);
-  return getDb().prepare(sql).all(...params).map((r) => ({
+  const db = getDb();
+  const kindSql = kinds.map(() => '?').join(',');
+  const cap = Math.max(limit * 4, limit); // 先多取候选，分支过滤后再截断
+  let rows = [];
+
+  if ([...q].length >= 3) {
+    try {
+      const match = `"${q.replace(/"/g, '""')}"`;
+      rows = db.prepare(`
+        SELECT t.turn_no, t.kind, t.content, t.token_count, t.branch_id
+        FROM turns_fts f JOIN turns t ON t.id = f.rowid
+        WHERE turns_fts MATCH ? AND t.session_id=? AND t.kind IN (${kindSql}) AND t.turn_no<=?
+        ORDER BY t.turn_no DESC, t.id DESC LIMIT ?
+      `).all(match, sessionId, ...kinds, atTurn, cap);
+    } catch { rows = []; }
+  }
+
+  if (!rows.length) {
+    const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    rows = db.prepare(`
+      SELECT turn_no, kind, content, token_count, branch_id FROM turns
+      WHERE session_id=? AND kind IN (${kindSql}) AND turn_no<=? AND content LIKE ? ESCAPE '\\'
+      ORDER BY turn_no DESC, id DESC LIMIT ?
+    `).all(sessionId, ...kinds, atTurn, like, cap);
+  }
+
+  const chain = branchId ? branchChain(sessionId, branchId) : null;
+  const limits = chain ? new Map(chain.map((c) => [c.branch_id, c.limit])) : null;
+  const visible = rows.filter((r) => {
+    if (!limits) {
+      // 没有分支记录（旧会话/纯回合测试）：退回「自己的 + 编号不大于分叉点」。
+      if (!branchId) return true;
+      return r.branch_id === branchId || (forkTurn != null && r.turn_no <= forkTurn);
+    }
+    const lim = limits.get(r.branch_id);
+    // 兄弟分支的回合不在可见链里：undefined 必须当作不可见（不能靠 == null 放过）。
+    if (!limits.has(r.branch_id)) return false;
+    return lim == null || r.turn_no <= lim;
+  });
+
+  return visible.slice(0, limit).map((r) => ({
     turn_no: r.turn_no,
     kind: r.kind,
     snippet: truncate(r.content, 400),

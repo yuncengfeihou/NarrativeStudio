@@ -1175,8 +1175,8 @@ console.log('\n=== 分段演绎：草稿工作区与工具协议（纯函数） 
 
   eq(
     loop.SEGMENTED_TOOLS.map((t) => t.function.name),
-    ['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup'],
-    '第一阶段只暴露四个工具',
+    ['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup', 'recall_history'],
+    '五个工具：草稿工作区 + 辞书/历史两个取证通道',
   );
   eq(loop.resolveNarrationMode({ narration_mode: 'segmented' }, 'single'), 'segmented', '会话可开启分段模式');
   eq(loop.resolveNarrationMode({ narration_mode: 'single' }, 'segmented'), 'single', '会话可显式关闭分段模式');
@@ -1209,6 +1209,16 @@ console.log('\n=== 分段演绎：草稿工作区与工具协议（纯函数） 
   ok(!hit.error, '有命中时不报错');
   const miss = loop.runSegmentedTool({ name: 'codex_lookup', args: { query: '不存在的东西' }, draft: '', card });
   ok(miss.text.includes('不要编造'), '无命中时明确要求不编造');
+
+  const recallCalls = [];
+  const recalled = loop.runSegmentedTool({
+    name: 'recall_history', args: { query: '旧仓库', limit: 3 }, draft: '', card,
+    recall: ({ query, limit }) => { recallCalls.push({ query, limit }); return { text: '【历史检索：旧仓库】片段' }; },
+  });
+  eq(recallCalls, [{ query: '旧仓库', limit: 3 }], '历史检索把 query/limit 交给注入回调');
+  ok(recalled.text.includes('片段') && !recalled.error, '历史检索结果原样返回给模型');
+  const noRecall = loop.runSegmentedTool({ name: 'recall_history', args: { query: '旧仓库' }, draft: '', card });
+  ok(noRecall.error, '未接检索通道时报错，不静默返回空结果');
 
   const sealEmpty = loop.runSegmentedTool({ name: 'draft_seal', args: {}, draft: '', card });
   ok(sealEmpty.error, '空草稿不能定稿');
@@ -1356,7 +1366,27 @@ console.log('\n=== 分段演绎：完整工具循环（假流，无网络） ===
   eq(r4.content, '正文', '工具错误后继续下一轮');
   ok(r4.narration.sealed, '下一轮无工具调用时定稿');
 
-  // 5) 取消必须向上抛，不能吞掉后继续写库。
+  // 5) 历史检索：工具结果只进临时消息，不进正文；事件带工具名。
+  const events5 = [];
+  const recallSeen = [];
+  const r5 = await runNarratorSegmented({
+    ...base,
+    recall: ({ query, limit }) => {
+      recallSeen.push({ query, limit });
+      return { text: '【历史检索：旧仓库】第 2 轮 · 旁白：凌玥领你走进旧仓库。' };
+    },
+    stream: fakeStream([
+      [toolEv(0, 'recall_history', { query: '旧仓库', limit: 2 }, 'call_recall'), metaEv(usage(3, 1))],
+      [contentEv('她想起来了。'), metaEv(usage(3, 2))],
+    ]),
+    onEvent: (e) => events5.push(e),
+  });
+  eq(recallSeen, [{ query: '旧仓库', limit: 2 }], '完整循环把历史检索参数传给回调');
+  eq(r5.narration.tools, 1, '历史检索计入工具调用次数');
+  eq(r5.content, '她想起来了。', '历史检索结果不混进正文');
+  ok(events5.some((e) => e.type === 'tool_call' && e.name === 'recall_history' && e.ok), '历史检索发出工具状态事件');
+
+  // 6) 取消必须向上抛，不能吞掉后继续写库。
   let abortName = '';
   try {
     await runNarratorSegmented({

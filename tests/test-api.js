@@ -298,6 +298,18 @@ console.log('\n=== 回滚 = 开新分支 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 历史检索接口 ===');
+{
+  const missing = await req('POST', '/api/sessions/nope/recall-history', { query: '雨' });
+  ok(missing.status === 404, '未知会话的历史检索 404');
+  const noQuery = await req('POST', `/api/sessions/${SESSION_ID}/recall-history`, {});
+  ok(noQuery.status === 400, '空 query 的历史检索 400');
+  const rh = await req('POST', `/api/sessions/${SESSION_ID}/recall-history`, { query: '雨' });
+  ok(rh.status === 200 && Array.isArray(rh.data.hits), '历史检索返回 hits 数组');
+  ok(typeof rh.data.text === 'string' && typeof rh.data.meta?.tokens === 'number', '历史检索返回文本与 token 统计');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 制卡素材 ===');
 {
   const m = await req('GET', '/api/smith/materials');

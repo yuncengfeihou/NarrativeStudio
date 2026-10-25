@@ -20,6 +20,7 @@ import { buildEffectiveWorld } from '../world/effective.js';
 import { resolveAgent } from '../model-registry.js';
 import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId, runEffectOnce } from '../memory/branch-guard.js';
 import { buildPlayerView } from '../memory/player-view.js';
+import { recallHistory } from '../memory/recall-history.js';
 import {
   accumulateUsage, addTurn, copyBranchState, createBranch, createSession,
   getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession,
@@ -202,6 +203,10 @@ async function runTurnInner({
           options: narratorOptions,
           onEvent: emit,
           signal,
+          // 模型主动发起的历史检索：只读已发生回合，按当前分支可见性过滤，不写库。
+          recall: ({ query, limit }) => recallHistory({
+            sessionId, branchId: session.branch_id || 'main', atTurn: turnNo, query, limit,
+          }),
         });
       } catch (err) {
         if (err?.name === 'AbortError' || signal?.aborted) throw err;

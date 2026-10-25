@@ -20,6 +20,7 @@ import {
   retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
   updateTurnContent,
 } from '../memory/store.js';
+import { recallHistory } from '../memory/recall-history.js';
 
 export const sessionsRouter = Router();
 
@@ -389,6 +390,26 @@ sessionsRouter.post('/sessions/:id/recall', async (req, res) => {
   try {
     const result = await recallSession({ sessionId: session.id, question });
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+sessionsRouter.post('/sessions/:id/recall-history', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const query = String(req.body?.query || '').trim();
+  if (!query) return res.status(400).json({ error: { message: 'query is required' } });
+  try {
+    const out = recallHistory({
+      sessionId: session.id,
+      branchId: session.branch_id || 'main',
+      atTurn: req.body?.at_turn != null ? intOr(req.body.at_turn, getMaxTurnNo(session.id)) : getMaxTurnNo(session.id),
+      query,
+      limit: req.body?.limit,
+      kinds: Array.isArray(req.body?.kinds) ? req.body.kinds : undefined,
+    });
+    res.json({ query: out.meta.query, hits: out.hits, text: out.text, meta: out.meta });
   } catch (err) {
     res.status(500).json({ error: { message: err.message } });
   }

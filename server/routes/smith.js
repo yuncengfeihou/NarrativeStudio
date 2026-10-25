@@ -43,6 +43,12 @@ smithRouter.get('/smith/materials', (req, res) => {
   res.json({ materials: out });
 });
 
+/** 逐章抽取并发：受上游限流约束，1-8 之间；默认 3。 */
+function concurrencyOr(v, fallback = 3) {
+  const n = Number(v);
+  return Number.isFinite(n) ? Math.max(1, Math.min(8, Math.trunc(n))) : fallback;
+}
+
 function sseHead(res) {
   res.writeHead(200, {
     'Content-Type': 'text/event-stream',
@@ -74,7 +80,7 @@ smithRouter.post('/smith/preview', async (req, res) => {
       title: String(body.title || path.basename(dir)),
       premise: String(body.premise || ''),
       maxChapters: Number(body.max_chapters) || 3,
-      concurrency: Number(body.concurrency) || 3,
+      concurrency: concurrencyOr(body.concurrency),
       startAt: Number(body.start_at) || 1,
       openingSeed: String(body.opening_seed || ''),
       player: body.player || null,
