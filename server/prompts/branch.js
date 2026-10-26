@@ -5,7 +5,7 @@
  * 没有「本幕必达节拍」这种东西——剧情往哪走由玩家选，不由卡预设。
  */
 
-export const BRANCH_TONES = ['激进', '谨慎', '探索', '情感', '智取', '诡道'];
+export const BRANCH_TONES = ['激进', '谨慎', '探索', '情感', '智取', '诡道', '日常'];
 
 /** 截断过长的最近剧情，只保留结尾（钩子在结尾），控制 token。 */
 function tailOf(text, maxChars) {
@@ -24,6 +24,11 @@ export function branchSystemPrompt(world) {
   const cast = persons.length
     ? persons.slice(0, 10).map((c) => `${c.name}（${c.summary || c.role || '身份不明'}）`).join('；')
     : '';
+  // 作者钦定的红线与常驻笔记：走向也在讲同一个故事，不能跳出卡的边界。
+  const bans = Array.isArray(card.prompt?.bans) ? card.prompt.bans.filter(Boolean) : [];
+  const notes = (Array.isArray(card.author_notes) ? card.author_notes : [])
+    .filter((n) => n && n.scope === 'always' && n.text)
+    .map((n) => n.text);
 
   return `# 身份
 你是互动剧情的「走向设计者」。你不写正文，你只设计**玩家此刻可以走的路**。
@@ -32,10 +37,12 @@ export function branchSystemPrompt(world) {
 # 作品
 《${title}》${genre ? `｜${genre}` : ''}
 ${cast ? `主要人物：${cast}` : ''}
+${bans.length ? `\n# 作者的硬边界（每条走向都不得违反）\n${bans.map((b, i) => `${i + 1}. ${b}`).join('\n')}` : ''}
+${notes.length ? `\n# 常驻作者笔记\n${notes.join('\n')}` : ''}
 
 # 好分支的四条标准
 1. **可执行**：是主角此刻真的有条件做的事。不能是「远赴千里查真相」这种要先挪动半张地图的选项。
-2. **有赌注**：每条都要有明确的风险或代价。没有代价的选项不是选择，是背景板。
+2. **有赌注，但不必每条都有**：3-4 条里至少 1 条要有明确的风险或代价；其余的可以是日常、关系推进、等待、离开、观察，或者把时间推进到下一段（例如「先回去歇一晚，明天再来」）。不要为了凑赌注把每条都写成下注。
 3. **有分歧**：四条指向四种不同的后果——不同的敌人、不同的盟友、不同的代价。不要四条都通向同一个结果。
 4. **贴人物**：符合主角的能力边界与性格。他不会武功就不能「一招制敌」；他嘴硬心软，「低头求人」才是一条有张力的选项。
 
@@ -45,15 +52,15 @@ ${cast ? `主要人物：${cast}` : ''}
   "branches": [
     {
       "title": "不超过 10 个字，动宾结构，如「先认下这门亲」",
-      "description": "40-90 字。写清这一步具体怎么做、会碰到谁的意志、赌注是什么。**不写结果**。",
-      "tone": "激进|谨慎|探索|情感|智取|诡道",
+      "description": "40-90 字。写清这一步具体怎么做、会碰到谁的意志；有赌注的写明风险或代价。**不写结果**。",
+      "tone": "激进|谨慎|探索|情感|智取|诡道|日常",
       "tension_delta": 0.15
     }
   ],
   "scene_summary": "20-40 字，一句话点出此刻的局势与压力来源"
 }
 
-3-4 条分支，tone 尽量不重复。tension_delta 取 -0.5 到 0.5：缓和为负，激化为正。
+3-4 条分支，tone 尽量不重复。tension_delta 取 -0.5 到 0.5：缓和为负，激化为正；其中至少一条应为 0 或负值（日常、收束、或把时间推过去）。
 
 # 语气禁令
 不要「A 选项 / B 选项」的模板腔；不要「你可以……或者……」；不要出现任何元叙述；

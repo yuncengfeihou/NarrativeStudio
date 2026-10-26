@@ -26,6 +26,7 @@ const { currentPlan, planContext } = await import('../server/memory/context-plan
 const { comparePromptMessages } = await import('../server/memory/prompt-drift.js');
 const sceneSheet = await import('../server/world/scene-sheet.js');
 const { narratorTailInstruction } = await import('../server/prompts/narrator.js');
+const { branchSystemPrompt, BRANCH_TONES } = await import('../server/prompts/branch.js');
 
 let pass = 0;
 let fail = 0;
@@ -204,6 +205,28 @@ console.log('\n=== 篇幅：作者可选 ===');
   });
   ok(lctx.messages[0].content.includes('篇幅：本轮 1800 字'), '作者写了篇幅：进契约');
   ok(narratorTailInstruction(lenCard).includes('篇幅 1800 字'), '作者写了篇幅：进尾注');
+}
+
+console.log('\n=== 走向层：卡红线进场 + 赌注不再是每条 ===');
+{
+  const branchCard = schema.normalizeCard({
+    title: '走向测试', premise: '一座旧城。', anchors: [],
+    prompt: { bans: ['不得让主角突然会武'] },
+    author_notes: [
+      { text: '保持市井气', scope: 'always' },
+      { text: '本场才用', scope: 'scene' },
+    ],
+    entities: [{ id: 'a-he', type: 'person', name: '阿禾', role: '守夜人' }],
+    player: { mode: 'original', name: '旅人' },
+  });
+  const bp = branchSystemPrompt({ card: branchCard });
+  ok(bp.includes('不得让主角突然会武'), '卡红线进走向提示词');
+  ok(bp.includes('保持市井气'), '常驻作者笔记进走向提示词');
+  ok(!bp.includes('本场才用'), 'scene 范围笔记不常驻');
+  ok(bp.includes('至少 1 条') && bp.includes('有赌注'), '赌注降为至少一条');
+  ok(bp.includes('日常'), '日常形态在标准/枚举里');
+  ok(BRANCH_TONES.includes('日常'), '受控语气含日常');
+  ok(!bp.includes('每条都要有明确的风险或代价'), '删掉了「每条都要赌注」');
 }
 
 console.log('\n=== 前史不依赖 anchor.snapshot ===');
