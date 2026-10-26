@@ -60,11 +60,24 @@ try {
   console.log(`title        ${session.title}｜world ${settings.world_id || '?'}`);
   console.log(`回合         turn_count=${session.turn_count}｜turns 行 ${turns.length}（player ${players.length} / narrator ${narr.length}）`);
   if (narr.length) {
+    const pctile = (p) => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * p))];
+    const buckets = [0, 500, 1000, 1600, 2600, Infinity];
+    const dist = [];
+    for (let i = 0; i < buckets.length - 1; i++) {
+      const lo = buckets[i];
+      const hi = buckets[i + 1];
+      dist.push(`${lo}-${hi === Infinity ? '∞' : hi}:${lens.filter((n) => n >= lo && n < hi).length}`);
+    }
     console.log(`正文         总 ${totalChars} 字｜均 ${Math.round(totalChars / narr.length)}｜最短 ${sorted[0]}｜中位 ${sorted[Math.floor(sorted.length / 2)]}｜最长 ${sorted[sorted.length - 1]}`);
+    console.log(`字数分位     p25=${pctile(0.25)} p50=${pctile(0.5)} p75=${pctile(0.75)} p90=${pctile(0.9)}`);
+    console.log(`字数分布     ${dist.join(' · ')}`);
   }
   const places = [...new Set(scenes.map((s) => s.place).filter(Boolean))];
   const whens = [...new Set(scenes.map((s) => s.when_label).filter(Boolean))];
+  const whenSeq = scenes.map((s) => s.when_label).filter(Boolean);
+  const whenChanges = whenSeq.slice(1).filter((w, i) => w !== whenSeq[i]).length;
   console.log(`场景         ${scenes.length} 场｜地点 ${places.length} 个｜时间标签 ${whens.length} 种`);
+  console.log(`时间推进     when 标签变化 ${whenChanges} 次（相邻场时间不同即算一次）`);
   for (const s of scenes) {
     const hooks = safeJson(s.hooks_json);
     console.log(`  ${s.scene_id} t${s.turn_from}-${s.turn_to} ${s.when_label || '—'} @ ${s.place || '—'}` +
@@ -110,6 +123,20 @@ try {
     }
     console.log(`叙事点名     ${hit}/${card.entities.length}（${pct(hit, card.entities.length)}）｜${JSON.stringify(byType)}`);
     if (neverNamed.length) console.log(`未登场角色   ${neverNamed.length} 人：${neverNamed.slice(0, 20).join('、')}${neverNamed.length > 20 ? ' …' : ''}`);
+
+    // 按卡自带 weight 分档统计覆盖率：分档不是新字段，只是给已有 weight 一个可读口径。
+    // high = 作者/制卡标出的主线级人物（weight ≥ 0.8）。
+    const tiers = { high: { hit: 0, total: 0 }, mid: { hit: 0, total: 0 }, low: { hit: 0, total: 0 } };
+    const tierHits = (e) => [e.name, ...(e.aliases || [])]
+      .filter((f) => f && String(f).length > 1).some((f) => text.includes(f));
+    for (const e of card.entities.filter((x) => x.type === 'person')) {
+      const t = Number(e.weight) >= 0.8 ? 'high' : Number(e.weight) >= 0.5 ? 'mid' : 'low';
+      tiers[t].total += 1;
+      if (tierHits(e)) tiers[t].hit += 1;
+    }
+    const tierText = Object.entries(tiers)
+      .map(([k, v]) => `${k} ${v.hit}/${v.total}`).join('｜');
+    console.log(`分档点名     ${tierText}（high=weight≥0.8）`);
   }
 
   /* ── 3. 节奏：分支与结尾 ── */
@@ -118,10 +145,14 @@ try {
   const tds = [];
   let copied = 0;
   let gamble = 0;
+  let risk = 0;
+  let calm = 0;
+  const RISK_TONES = new Set(['激进', '智取', '诡道', '探索']);
   for (const p of players) {
     const c = safeJson(p.branch_choice_json);
     if (c && c.title) {
       tones.set(c.tone || '(none)', (tones.get(c.tone || '(none)') || 0) + 1);
+      if (RISK_TONES.has(c.tone)) risk += 1; else calm += 1;
       if (typeof c.tension_delta === 'number') tds.push(c.tension_delta);
       if (c.description && String(p.content || '').trim() === String(c.description).trim()) copied += 1;
     }
@@ -129,6 +160,8 @@ try {
   }
   const mean = tds.length ? tds.reduce((a, b) => a + b, 0) / tds.length : 0;
   console.log(`分支选择     ${tds.length}/${players.length} 轮有分支｜tones ${JSON.stringify([...tones.entries()].sort((a, b) => b[1] - a[1]))}`);
+  // 只统计玩家实际选中的那条：生成出来的全部选项没有落库，不能在这里二次统计。
+  console.log(`走向形态     冒险面 ${risk}｜日常/关系/时间面 ${calm}（选中项口径）`);
   console.log(`张力         mean=${mean.toFixed(3)}｜>0 ${tds.filter((x) => x > 0).length}｜<0 ${tds.filter((x) => x < 0).length}｜=0 ${tds.filter((x) => x === 0).length}｜范围 ${Math.min(...tds)}..${Math.max(...tds)}`);
   console.log(`玩家行动     含「赌」${gamble}/${players.length}｜= 分支描述原文 ${copied}/${players.length}`);
   let must = 0;
@@ -165,6 +198,22 @@ try {
   if (patchKinds.length) console.log('patches      ' + patchKinds.map((p) => `${p.agent}/${p.kind}/${p.status}=${p.c}`).join(' · '));
   const assertStat = db.prepare('select status, count(*) c from assertions where session_id = :sid group by status').all({ sid: sessionId });
   if (assertStat.length) console.log('assertions   ' + assertStat.map((a) => `${a.status}=${a.c}`).join(' '));
+  const threadStat = db.prepare('select status, count(*) c from threads where session_id = :sid group by status').all({ sid: sessionId });
+  if (threadStat.length) console.log('threads      ' + threadStat.map((t) => `${t.status}=${t.c}`).join(' '));
+  const tickThreads = db.prepare("select count(*) c from threads where session_id = :sid and note = '世界呼吸推演'").get({ sid: sessionId });
+  console.log(`线索来源     世界呼吸写入 ${tickThreads.c} 条`);
+  // 场外流言是否真的被后文接住：offstage_event 的 who 之后是否在旁白正文里再出现。
+  const offstage = db.prepare(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'offstage_event' order by turn_no, id"
+  ).all({ sid: sessionId });
+  let cited = 0;
+  for (const p of offstage) {
+    const pl = safeJson(p.payload_json);
+    const names = [].concat(pl.who || []).map(String).filter(Boolean);
+    if (names.length && narr.some((t) => Number(t.turn_no) > Number(p.turn_no) &&
+      names.some((w) => String(t.content || '').includes(w)))) cited += 1;
+  }
+  if (offstage.length) console.log(`场外事件     ${offstage.length} 条｜被后文正文点名 ${cited}（${pct(cited, offstage.length)}）`);
 
   /* ── 6. 用量 ── */
   console.log(h('6. 模型用量（session.usage_json）'));
