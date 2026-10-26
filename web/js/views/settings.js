@@ -39,8 +39,8 @@ const AGENT_META = {
   branch: ['走向生成', '回合末给 3–4 条走向'],
   cardSmith: ['世界卡生成', '小说 → 世界卡'],
 };
-const EFFORT_LABELS = { low: '低', medium: '中', high: '高' };
-const EFFORTS_LOCAL = ['low', 'medium', 'high'];
+const EFFORT_LABELS = { low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' };
+const EFFORTS_LOCAL = Object.keys(EFFORT_LABELS);
 
 
 // 字体列表在进程内缓存：设置页重新挂载、反复打开选择器都不用再扫一次。
@@ -853,12 +853,17 @@ export default {
       const item = existing || {
         id: null, providerId: draft.providers[0]?.id || '', model: '', label: '',
         contextWindow: 200000, maxOutput: 12000,
-        supportsReasoning: true, reasoningEfforts: ['low', 'medium', 'high'],
+        supportsReasoning: true, reasoningEfforts: [...EFFORTS_LOCAL],
         supportsTemperature: true, enabled: true,
       };
       let enabled = item.enabled !== false;
       let supportsReasoning = item.supportsReasoning !== false;
       let supportsTemperature = item.supportsTemperature !== false;
+      const effortsSel = new Set(
+        Array.isArray(item.reasoningEfforts) && item.reasoningEfforts.length
+          ? item.reasoningEfforts
+          : (item.supportsReasoning === false ? [] : EFFORTS_LOCAL),
+      );
 
       const labelIn = el('input.field', { type: 'text', value: item.label || '', placeholder: '例如：主力大模型' });
       const modelIn = el('input.field', { type: 'text', value: item.model || '', placeholder: '上游 model 名，例如 step-5-preview' });
@@ -876,6 +881,14 @@ export default {
           body.appendChild(formLine('上下文窗口（token）', ctxIn, '决定这一局能读多长；超过这里的值会被硬上限拦住。'));
           body.appendChild(formLine('单次最大输出（token）', outIn, 'Agent 没有单独设置 maxTokens 时用它。'));
           body.appendChild(toggleRow('支持推理强度', '关掉后不向上游发送 reasoning_effort', supportsReasoning, (v) => { supportsReasoning = v; }));
+          const effortsBox = el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;' });
+          for (const e of EFFORTS_LOCAL) {
+            const cb = el('input', { type: 'checkbox' });
+            cb.checked = effortsSel.has(e);
+            cb.addEventListener('change', () => { if (cb.checked) effortsSel.add(e); else effortsSel.delete(e); });
+            effortsBox.appendChild(el('label', { style: 'display:flex;align-items:center;gap:4px;font-size:var(--fs-caption);' }, cb, EFFORT_LABELS[e]));
+          }
+          body.appendChild(formLine('可选的推理强度', effortsBox, '按上游实际支持勾选；Agent 的推理强度只能从这里选，都不勾则由上游取默认档。'));
           body.appendChild(toggleRow('支持温度', '关掉后不向上游发送 temperature', supportsTemperature, (v) => { supportsTemperature = v; }));
           body.appendChild(toggleRow('启用', '停用后引用它的 Agent 会回落到 .env 默认模型', enabled, (v) => { enabled = v; }));
           if (!isNew) {
@@ -900,6 +913,8 @@ export default {
           const maxOutput = Number(outIn.value);
           if (!Number.isFinite(contextWindow) || contextWindow <= 0) { toast('上下文窗口需要是正整数', { type: 'error' }); return false; }
           if (!Number.isFinite(maxOutput) || maxOutput <= 0) { toast('最大输出需要是正整数', { type: 'error' }); return false; }
+          const efforts = EFFORTS_LOCAL.filter((e) => effortsSel.has(e));
+          if (supportsReasoning && !efforts.length) { toast('至少勾选一档推理强度', { type: 'error' }); return false; }
           const record = {
             id: item.id || `model-${Date.now().toString(36)}`,
             providerId: providerSel.value,
@@ -908,7 +923,7 @@ export default {
             contextWindow: Math.trunc(contextWindow),
             maxOutput: Math.trunc(maxOutput),
             supportsReasoning,
-            reasoningEfforts: supportsReasoning ? ['low', 'medium', 'high'] : [],
+            reasoningEfforts: supportsReasoning ? efforts : [],
             supportsTemperature,
             enabled,
           };

@@ -21,10 +21,12 @@ export const AGENT_KEYS = [
 export const PROTOCOLS = ['openai'];
 
 /**
- * 推理强度枚举：保存的配置只接受这三档。
- * .env 里可能写了别的值（历史配置有 `max`），env 默认原样透传、不在这里改。
+ * 推理强度枚举：保存的配置接受这五档。
+ * 上游能力不同：StepFun 只认 low/medium/high，MiniMax-M3.1-Flash 还支持 xhigh/max
+ * （省略时默认 max）。这里只做「保存配置」的枚举校验，具体某模型支持哪些档
+ * 由 model.reasoningEfforts 声明、设置页按模型展示。
  */
-export const EFFORTS = ['low', 'medium', 'high'];
+export const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'];
 
 const META_KEY = 'runtime_config_v1';
 const CONFIG_VERSION = 1;
@@ -461,7 +463,7 @@ function normalizeModels(input, providers) {
       } else {
         reasoningEfforts = [...new Set(m.reasoningEfforts.map(str))];
         const illegal = reasoningEfforts.find((e) => !EFFORTS.includes(e));
-        if (illegal) throw bad(`模型「${id}」的 reasoningEfforts 含非法值：${illegal}（只支持 low / medium / high）`);
+        if (illegal) throw bad(`模型「${id}」的 reasoningEfforts 含非法值：${illegal}（只支持 low / medium / high / xhigh / max）`);
       }
     }
 
@@ -494,7 +496,7 @@ function normalizeAgents(input, models) {
 
     const effort = value.effort == null || value.effort === '' ? null : str(value.effort);
     if (effort && !EFFORTS.includes(effort)) {
-      throw bad(`Agent「${key}」的推理强度必须是 low / medium / high`);
+      throw bad(`Agent「${key}」的推理强度必须是 low / medium / high / xhigh / max`);
     }
 
     const temperature = value.temperature == null || value.temperature === '' ? null : Number(value.temperature);

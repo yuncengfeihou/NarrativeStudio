@@ -77,8 +77,8 @@ export const config = {
     toolHistoryTokens: int(env.BUDGET_TOOL_RESULTS, 1200),
   },
 
-  // ---- Agent defaults (reasoning_effort: low | medium | high) ----
-  // 注意：step-5-preview 的推理过程计入 max_tokens。旁路 Agent 的 JSON 在推理之后才输出，
+  // ---- Agent defaults (reasoning_effort: low | medium | high | xhigh | max) ----
+  // 注意：上游模型的推理过程计入 max_tokens。旁路 Agent 的 JSON 在推理之后才输出，
   // 预算必须给推理留足空间；否则会得到「completion_tokens 用满、content 为空」的假成功。
   // 分工：narrator 只管正文，永远不输出 JSON；记账全部交给史官与校勘。
   agents: {

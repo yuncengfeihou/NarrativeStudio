@@ -215,7 +215,7 @@ console.log('\n=== 4. 保存校验：非法输入一律 400 ===');
   expectBad({ ...baseConfig(), models: [{ ...baseModel(), model: '  ' }] }, '模型上游名为空');
   expectBad({ ...baseConfig(), models: [{ ...baseModel(), reasoningEfforts: ['low', 'extreme'] }] }, 'reasoningEfforts 非法值');
   expectBad({ ...baseConfig(), models: [{ ...baseModel(), reasoningEfforts: [] }] }, '支持推理的模型 reasoningEfforts 空数组');
-  expectBad({ ...baseConfig(), agents: { narrator: { effort: 'max' } } }, "Agent effort='max'（.env 可写，DB 不收）");
+  expectBad({ ...baseConfig(), agents: { narrator: { effort: 'extreme' } } }, "Agent effort='extreme'（不在 low/medium/high/xhigh/max 内）");
   expectBad({ ...baseConfig(), agents: { narrator: { temperature: 3 } } }, 'Agent 温度越界');
   expectBad({ ...baseConfig(), agents: { narrator: { maxTokens: 0 } } }, 'Agent maxTokens 非正数');
   expectBad({ ...baseConfig(), agents: { seniorArchivist: { effort: 'low' } } }, '未知 Agent key');
