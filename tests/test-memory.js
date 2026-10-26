@@ -25,7 +25,7 @@ const schema = await import('../server/world/schema.js');
 const effective = await import('../server/world/effective.js');
 const playerView = await import('../server/memory/player-view.js');
 const recall = await import('../server/memory/recall-history.js');
-const { pickOffstagePersons } = await import('../server/agents/memory-pipeline.js');
+const { pickOffstagePersons, detectSceneChange, isSubstantivePlaceShift } = await import('../server/agents/memory-pipeline.js');
 const { worldTickUserPrompt } = await import('../server/prompts/archivist.js');
 
 let pass = 0;
@@ -1186,6 +1186,35 @@ console.log('\n=== 世界呼吸：不在场候选按「份量/关系/私心」�
     turnNo: 9, offstage: [], recentSummary: '', place: '茶楼', when: '次日 · 清晨',
   });
   ok(prompt.includes('【本场时间】次日 · 清晨'), '世界呼吸拿到这一场的时间');
+}
+
+console.log('\n=== 切场只认实质变化：同场景措辞不封场 ===');
+{
+  ok(isSubstantivePlaceShift('黑色商务车', '黑色商务车内') === false, '车 → 车内：同一场地的措辞变化');
+  ok(isSubstantivePlaceShift('凌府门口', '凌府门口 → 凌府天井') === false, '同一院内的位置变化不算换地点');
+  ok(isSubstantivePlaceShift('茶楼', '司楼门口') === true, '互不包含才是真的换地点');
+
+  const sid = `scene-change-${Date.now()}`;
+  store.createSession({ id: sid, title: 'scene-change' });
+  store.createBranch(sid, { branchId: 'main' });
+  const session = { id: sid, branch_id: 'main' };
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 1,
+    when_label: '初冬 · 午后', place: '黑色商务车',
+  });
+
+  // 史官报了 changed，但账本里地点只是「车 → 车内」——不封场。
+  store.setState(sid, 2, { time: '初冬 · 午后', place: '黑色商务车内' }, 'main');
+  eq(detectSceneChange(session, { scene_change: { changed: true } }, 2), false,
+    '同场景措辞变化 + 史官 changed:true 也不封场');
+
+  // 真的换了地方才封场。
+  store.setState(sid, 3, { time: '初冬 · 午后', place: '茶楼' }, 'main');
+  eq(detectSceneChange(session, { scene_change: { changed: true } }, 3), true, '实质换地点封场');
+
+  // 时间跳到另一段也封场（跨日）。
+  store.setState(sid, 4, { time: '第二天 · 清晨', place: '茶楼' }, 'main');
+  eq(detectSceneChange(session, { scene_change: { changed: true } }, 4), true, '时间跳到次日封场');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

@@ -159,23 +159,40 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
   };
 }
 
+/** 地点是否真的换了一处（而不是同一场地的措辞变化）。 */
+export function isSubstantivePlaceShift(prevPlace, nextPlace) {
+  const norm = (v) => str(v).replace(/[\s·・,，。、；;：:（）()【】\[\]—\-–~～→>]/g, '');
+  const a = norm(prevPlace);
+  const b = norm(nextPlace);
+  if (!a || !b || a === b) return false;
+  // 互相包含视为同一场地的措辞变化（「黑色商务车」/「黑色商务车内」、
+  // 「凌府门口」/「凌府门口 → 凌府天井」）；互不包含才算真的换了地方。
+  return !a.includes(b) && !b.includes(a);
+}
+
 /**
  * 是否需要切场。
  *
- * 三种触发：史官报告场景变化 / 地点变了 / **到了强制封场上限**。
+ * 只认「实质变化」：时间真的换了一段，或地点真的换了一处。
+ * 不再直接采信史官的 scene_change.changed——它会因为同一场地的措辞变化
+ * （「黑色商务车 → 黑色商务车内」）报 changed，44 轮长跑里 12 场有 7 场就是这么切碎的。
  *
- * 强制封场是关键补充：`SCENE_EVERY=0` 时只有地点变化才切，于是角色在同一个地点
+ * 强制封场是关键补充：`SCENE_EVERY=0` 时只有实质变化才切，于是角色在同一个地点
  * 待 100 轮就一场都不关，「最近一场」永远未归档，场次索引根本建不起来。
  * token 上限同理：单场原文无限增长会把场记 Agent 的输入撑爆。
+ *
+ * `_update` 保留在签名里是调用约定（史官 update）；是否切场只看落库后的账本。
  */
-export function detectSceneChange(session, update, turnNo) {
+export function detectSceneChange(session, _update, turnNo) {
   const { sessionId, branchId, forkTurn } = branchCtx(session);
   const prev = latestScene(sessionId, branchId);
   if (!prev) return true;
-  const sc = update?.scene_change || {};
-  if (sc.changed) return true;
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
-  if (str(ledger.place) && str(prev.place) && str(ledger.place) !== str(prev.place)) return true;
+  if (isSubstantivePlaceShift(prev.place, ledger.place)) return true;
+  const prevWhen = str(prev.when_label);
+  const nextWhen = str(ledger.time);
+  // 时间标签变了就是跨了一段（史官只该在真正跳跃时写 when；同刻续写由提示词约束）。
+  if (prevWhen && nextWhen && prevWhen !== nextWhen) return true;
 
   // 强制封场：按轮数
   const every = config.context.sceneEvery;
