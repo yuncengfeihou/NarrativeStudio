@@ -99,8 +99,8 @@ async function sse(p, body, onEvent) {
 
 const norm = (s) => String(s || '').replace(/\s+/g, ' ').trim();
 const tailOf = (s, n = 110) => norm(s).slice(-n);
-const whenOf = (sheet) => (String(sheet || '').match(/时间[：:]\s*([^\n｜]*)/) || [])[1]?.trim() || '';
-const placeOf = (sheet) => (String(sheet || '').match(/地点[：:]\s*([^\n｜]*)/) || [])[1]?.trim() || '';
+const whenOf = (sheet) => (String(sheet || '').match(/时间[：: ]\s*([^\n｜]*)/) || [])[1]?.trim() || '';
+const placeOf = (sheet) => (String(sheet || '').match(/地点[：: ]\s*([^\n｜]*)/) || [])[1]?.trim() || '';
 const rumorsOf = (sheet) => String(sheet || '').match(/幕外：[^\n]*/g) || [];
 
 const stamp = new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
