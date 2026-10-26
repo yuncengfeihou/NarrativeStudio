@@ -202,6 +202,15 @@ try {
   if (threadStat.length) console.log('threads      ' + threadStat.map((t) => `${t.status}=${t.c}`).join(' '));
   const tickThreads = db.prepare("select count(*) c from threads where session_id = :sid and note = '世界呼吸推演'").get({ sid: sessionId });
   console.log(`线索来源     世界呼吸写入 ${tickThreads.c} 条`);
+  // 生命体征：life_state 是代码唯一能判定死亡/离场的字段。正文出现死亡表述却没有
+  // dead/gone 写入，就是下一拍「死人还会开口」的风险（语义漂移的独立口径）。
+  const lifeStates = db.prepare(
+    "select value, count(*) c from character_states where session_id = :sid and field = 'life_state' group by value"
+  ).all({ sid: sessionId });
+  const lifeMap = Object.fromEntries(lifeStates.map((r) => [r.value, r.c]));
+  const deathTurns = narr.filter((t) => /死|断气|咽气|身亡|离世|尸体|尸首/.test(String(t.content || '')));
+  const deadWrites = (lifeMap.dead || 0) + (lifeMap.gone || 0);
+  console.log(`生命体征     life_state ${lifeStates.length ? JSON.stringify(lifeMap) : '(无)'}｜正文含死亡表述 ${deathTurns.length} 轮｜dead/gone 写入 ${deadWrites} 行`);
   // 场外流言是否真的被后文接住：offstage_event 的 who 之后是否在旁白正文里再出现。
   const offstage = db.prepare(
     "select turn_no, payload_json from patches where session_id = :sid and kind = 'offstage_event' order by turn_no, id"
