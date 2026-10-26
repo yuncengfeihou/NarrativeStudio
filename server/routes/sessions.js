@@ -22,33 +22,13 @@ import {
   updateTurnContent,
 } from '../memory/store.js';
 import { recallHistory } from '../memory/recall-history.js';
-import { CRAFT_AXES, DEFAULT_CRAFT } from '../world/craft.js';
+import { craftCatalog, normalizeCraftSettings } from '../world/craft.js';
 
 export const sessionsRouter = Router();
 
 function intOr(v, fallback) {
   const n = Number(v);
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
-}
-
-/**
- * 工艺层三个轴的取值归一：非法值回退默认。
- * @param {object} settings
- * @param {boolean} [fill] true 时把缺省的轴也补成默认（建会话用；PATCH 只校验已给的键，
- *   避免用户只想改 pacing 时把另外两个轴一并写死）
- */
-function normalizeCraftSettings(settings, { fill = false } = {}) {
-  const s = { ...settings };
-  const fixed = {
-    craft_preset: [DEFAULT_CRAFT.preset, 'preset'],
-    craft_dialogue: [DEFAULT_CRAFT.dialogue, 'dialogue'],
-    pacing: [DEFAULT_CRAFT.pacing, 'pacing'],
-  };
-  for (const [key, [def, axis]] of Object.entries(fixed)) {
-    if (s[key] === undefined) { if (fill) s[key] = def; continue; }
-    s[key] = CRAFT_AXES[axis].includes(s[key]) ? s[key] : def;
-  }
-  return s;
 }
 
 /** 生效配置视图 + 预算规划：窗口是硬事实，硬上限/软目标/各层配额从它推导。 */
@@ -116,6 +96,9 @@ sessionsRouter.get('/config', (req, res) => {
       tool_history_tokens: config.narration.toolHistoryTokens,
       tool_result_max_tokens: config.narration.toolResultMaxTokens,
     },
+    // 工艺层的轴与取值由 craft.js 独家提供：前端不再自带一份选项清单，
+    // 加/删预设只改后端一处（见 AGENTS.md §11.8）。
+    craft: craftCatalog(),
     runtime: runtimeWithPlan(),
   });
 });

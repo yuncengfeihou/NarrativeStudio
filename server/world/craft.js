@@ -31,6 +31,55 @@ export const CRAFT_AXES = Object.freeze({
   pacing: Object.freeze(['steady', 'adventurous', 'bold']),
 });
 
+/**
+ * 轴的界面元数据（标签 / 说明 / 对应的会话 settings 键）。
+ *
+ * 存在的唯一理由：**取值清单只能有一个主人**。前端曾自己抄了一份选项列表，
+ * 结果是「后端加了预设、前端还显示旧选项」，用户点旧选项被 pick() 静默回退成默认——
+ * 看起来选中了、其实没生效。现在前端一律读 craftCatalog()，不再手写清单。
+ */
+const AXIS_META = Object.freeze({
+  preset: {
+    key: 'craft_preset',
+    label: '文风取向',
+    hint: '卡的「文风」里写了内容时，以卡为准，这里只兜底。',
+  },
+  dialogue: { key: 'craft_dialogue', label: '对白形态', hint: '' },
+  pacing: {
+    key: 'pacing',
+    label: '推进尺度',
+    hint: '同时作用于正文与「走向」选项，保证选项的风险水位与正文一致。',
+  },
+});
+
+/**
+ * 前端渲染「演绎工艺」抽屉所需的全部数据（含每个取值的标签与一句话说明）。
+ *
+ * @returns {{axes: Array<{key:string, axis:string, label:string, hint:string,
+ *   default:string, options:Array<{value:string, label:string, desc:string}>}>}}
+ */
+export function craftCatalog() {
+  const sources = { preset: STYLES, dialogue: DIALOGUES, pacing: PACINGS };
+  return {
+    axes: Object.keys(CRAFT_AXES).map((axis) => {
+      const meta = AXIS_META[axis];
+      const table = sources[axis];
+      return {
+        axis,
+        key: meta.key,
+        label: meta.label,
+        hint: meta.hint,
+        default: DEFAULT_CRAFT[axis],
+        options: CRAFT_AXES[axis].map((value) => ({
+          value,
+          label: (table[value] || {}).name || value,
+          desc: (table[value] || {}).desc || '',
+        })),
+      };
+    }),
+  };
+}
+
 export const DEFAULT_CRAFT = Object.freeze({
   preset: 'default',
   dialogue: 'default',
@@ -72,31 +121,38 @@ const TIME = '文字长不等于时间过去了很久。按事情实际要花的
 const STYLES = Object.freeze({
   default: {
     name: '默认（不额外指定）',
+    // 界面副标题：一句话说清「选它会怎样」，供前端渲染，不进提示词。
+    desc: '只留通用底线',
     text: '',
   },
   light: {
     name: '轻喜剧·快节奏',
+    desc: '短句、对白密、语气轻',
     text: '短句为主，句均不长；对白密度高，叙述让位于对话。允许主角视角的短促吐槽，但不写成段内心独白。'
       + '环境描写只给推动这一拍的那一两个细节，不铺陈。整体语气偏轻松，冲突也用轻的方式写。',
   },
   literary: {
     name: '文学·细腻留白',
+    desc: '句长有变化、感官密、多留白',
     text: '句长有变化，允许长句与从句；感官密度高，用具体的物与身体感觉承载情绪。'
       + '多留白：把解释删掉，让动作与停顿承担意义。比喻要新、要贴此刻，禁止「某种/说不出/难以名状」。'
       + '不写成段心理分析，情绪用可见的行为外化。',
   },
   webnovel: {
     name: '网文·强推进',
+    desc: '段短、钩子密、冲突直接',
     text: '段落短，每段都要有信息或推进，不写原地打转的过渡段。钩子密：每一段末尾留一个让人想看下一段的点。'
       + '对白带信息量与立场，少大段内心。冲突直接、代价明确、不拖。',
   },
   gufeng: {
     name: '古风·克制',
+    desc: '半文半白、称谓讲究、不用现代词',
     text: '半文半白，句子偏短，用文言虚词但不用生僻典故。称谓、礼数、身份称呼讲究且前后一致。'
       + '不用现代口语与网络词。情绪克制，重动作、器物与礼节。写景用古典意象但不堆砌。',
   },
   plain: {
     name: '白描·冷硬',
+    desc: '几乎无形容词、只写动作与事实',
     text: '几乎不用形容词与比喻。只写动作、对白与可观察的事实，句子极短。'
       + '不写内心、不写解释、不写判断。留白靠不写，而不是靠抒情。',
   },
@@ -104,13 +160,15 @@ const STYLES = Object.freeze({
 
 /** 对白形态：单选。 */
 const DIALOGUES = Object.freeze({
-  default: { name: '默认', text: '' },
+  default: { name: '默认', desc: '不做额外要求', text: '' },
   separated: {
     name: '对白独立成段',
+    desc: '叙述和对白不挤在同一段',
     text: '对白独立成段：一段里只有对白，不把对白和叙述挤在同一段。',
   },
   long: {
     name: '长对白',
+    desc: '不为了短把话切碎',
     text: '允许长对白：人物可以把一件事一口气说完，不为了「短」把话切碎。',
   },
 });
@@ -125,16 +183,19 @@ const DIALOGUES = Object.freeze({
 const PACINGS = Object.freeze({
   steady: {
     name: '保守',
+    desc: '只推一小步，不引入新事件',
     tail: '这一拍只推进一小步：把情势推到需要有人回应的位置就停。不引入新的外部事件，不让人物做出改变局势的决定。',
     branch: '走向按「保守」给：多数是观察、试探、等待、关系上的小位移，最多一条带风险。',
   },
   adventurous: {
     name: '正常',
+    desc: '局势可以有变化',
     tail: '这一拍正常推进一幕：局势可以有变化，有人可以做出决定，新信息可以进来。但不要跳到结局，也不要把这一场收束掉。',
     branch: '走向按「正常」给：至少一条有明确代价或风险，其余可以是日常、关系推进或把时间推过去。',
   },
   bold: {
     name: '激进',
+    desc: '允许意外与明显转折，代价要落到人身上',
     tail: '这一拍可以让意外发生、让关系或局势明显转折，代价要真的落到人身上。仍然不替主角做决定，也不替玩家收场。',
     branch: '走向按「激进」给：允许多条高风险、强对抗、可能伤到人的选项；不要为了稳而把选项写软。',
   },
@@ -160,6 +221,48 @@ export const CRAFT_CHECKLIST = [
 function pick(axis, value) {
   const allowed = CRAFT_AXES[axis];
   return allowed.includes(value) ? value : DEFAULT_CRAFT[axis];
+}
+
+/**
+ * 写入会话 settings 前的归一：非法值回退默认，不留脏值。
+ *
+ * 放在这里而不是路由里，是因为「哪些取值合法」的唯一主人是 `CRAFT_AXES`。
+ * 曾经这段逻辑只存在于一条路由（`POST /api/sessions`），另一条开局路由
+ * （`POST /api/worlds/:id/sessions`）绕过它——于是从世界卡页开局时工艺设置
+ * 既不校验也不填默认，看起来「每开一局都回默认」。
+ *
+ * @param {object} settings
+ * @param {{fill?:boolean}} [opts] fill=true 时把缺省的轴也补成默认（开局用）；
+ *   false 时只校验已给的键，避免用户只想改 pacing 却把另两轴一并写死。
+ */
+export function normalizeCraftSettings(settings, { fill = false } = {}) {
+  const s = { ...(settings || {}) };
+  const fixed = {
+    craft_preset: ['preset', DEFAULT_CRAFT.preset],
+    craft_dialogue: ['dialogue', DEFAULT_CRAFT.dialogue],
+    pacing: ['pacing', DEFAULT_CRAFT.pacing],
+  };
+  for (const [key, [axis, def]] of Object.entries(fixed)) {
+    if (s[key] === undefined) { if (fill) s[key] = def; continue; }
+    s[key] = pick(axis, s[key]);
+  }
+  return s;
+}
+
+/**
+ * 从一组会话 settings 里摘出三个工艺轴（含非法值归一）。
+ * 用于「同一张卡再开一局时继承上一局的写法」——只搬这三项，
+ * 不搬温度/预算/指令等其余会话参数。
+ *
+ * @returns {{craft_preset:string, craft_dialogue:string, pacing:string}}
+ */
+export function pickCraftSettings(settings) {
+  const s = settings || {};
+  return {
+    craft_preset: pick('preset', s.craft_preset),
+    craft_dialogue: pick('dialogue', s.craft_dialogue),
+    pacing: pick('pacing', s.pacing),
+  };
 }
 
 /**

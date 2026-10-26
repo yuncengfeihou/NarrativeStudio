@@ -16,14 +16,28 @@
 import { Router } from 'express';
 import { randomUUID } from 'node:crypto';
 import {
-  deleteWorld, getEntities, getWorld, listSessions, listWorlds, saveWorld, setEntityPinned,
+  deleteWorld, getEntities, getLatestSessionSettings, getWorld, listSessions, listWorlds, saveWorld,
+  setEntityPinned,
 } from '../memory/store.js';
 import { normalizeCard, renderCardText } from '../world/schema.js';
 import { lintCard } from '../world/lint.js';
 import { createSessionWithSettings } from '../agents/orchestrator.js';
 import { currentPlan } from '../memory/context-plan.js';
+import { normalizeCraftSettings, pickCraftSettings } from '../world/craft.js';
 
 export const worldsRouter = Router();
+
+/**
+ * 同一张卡上一局用过的工艺设置。
+ *
+ * 「再开一局」是这张卡的常见操作，而工艺（文风/对白/推进）是这张卡的写法偏好、
+ * 不是某一局的偶然参数——每局都退回默认等于让用户每次重新选一遍。
+ * 只继承三个工艺轴，设备参数（温度/预算/指令）不跨局继承。
+ */
+function inheritedCraft(worldId) {
+  const prev = getLatestSessionSettings(worldId);
+  return prev ? pickCraftSettings(prev) : {};
+}
 
 /** 从卡片生成会话的初始 settings。 */
 function settingsFromWorld(world, overrides = {}) {
@@ -36,8 +50,13 @@ function settingsFromWorld(world, overrides = {}) {
     title: overrides.title || card.title || world.title,
     narrator_effort: overrides.narrator_effort || 'high',
     style_tags: card.genre,
+    // 先铺上一局的写法，再让本次 overrides 覆盖：显式传入的轴优先于继承值。
+    ...inheritedCraft(world.id),
     ...overrides,
   };
+  // 工艺层取值归一：非法值不静默落库。缺省轴在这里补齐（开局要有确定值），
+  // 与 `POST /api/sessions` 走同一个函数，避免两条开局路径对「什么算合法」分叉。
+  Object.assign(settings, normalizeCraftSettings(settings, { fill: true }));
   // 会话级上限只能是模型窗口内的一次收窄；超过窗口按窗口处理（装配层还会再 clamp）。
   const requested = Number(settings.context_max_tokens);
   settings.context_max_tokens = Number.isFinite(requested) && requested > 0 ? Math.min(requested, cap) : cap;

@@ -75,13 +75,20 @@ export default {
       onclick: () => openTimeline(),
     }, icon('history', { size: 16 }));
 
+    // 工艺层（文风 / 对白 / 推进）：一局只设一两次，但一旦想找就必须找得到。
+    // 曾经藏在「更多」的 13 项行动单第三项里，实测用户找不到——所以提到顶栏。
+    const craftBtn = el('button.icon-btn', {
+      type: 'button', title: '演绎工艺（文风 / 对白 / 推进）', 'aria-label': '演绎工艺',
+      onclick: () => openCraft(),
+    }, icon('palette', { size: 16 }));
+
     const nav = el('header.topbar', {},
       el('button.icon-btn.mobile-only', {
         type: 'button', 'aria-label': '目录',
         onclick: () => import('../shell.js').then((m) => m.openDrawer()),
       }, icon('sidebar', { size: 17 })),
       el('div.topbar-title', {}, navTitle, navSub),
-      el('div.topbar-actions', {}, timelineBtn, memBtn, moreBtn),
+      el('div.topbar-actions', {}, craftBtn, timelineBtn, memBtn, moreBtn),
     );
 
     // 场景信息条：只读展示服务端投影好的 playerView，默认收起。
@@ -1117,47 +1124,41 @@ export default {
     /* =====================================================================
      * 演绎工艺（文风取向 / 对白形态 / 推进尺度）
      *
+     * 轴的取值清单**不在前端**：一律读 GET /api/config 的 craft 段
+     * （由 server/world/craft.js 的 craftCatalog() 生成）。前端曾自己抄过一份，
+     * 结果后端加了预设、前端还显示旧选项，点旧选项被静默回退成默认——
+     * 看起来选中了、其实没生效。不要再把清单写回这里。
+     *
      * 三个轴都落在既有通道里：preset/dialogue 只改 system，pacing 只改尾注与走向。
      * 这里只做「选」，不做自由文本——作者的具体文风写在世界卡的 prompt.style_guide，
      * 卡的优先级永远压过这里的预设（界面文案要让人看得出来这一点）。
      * ===================================================================== */
-    const CRAFT_OPTIONS = {
-      craft_preset: {
-        label: '文风取向',
-        hint: '卡的「文风」里写了内容时，以卡为准，这里只兜底。',
-        items: [
-          ['default', '默认', '只留通用底线'],
-          ['light', '轻喜剧 · 快节奏', '短句、对白密、语气轻'],
-          ['literary', '文学 · 细腻留白', '句长有变化、感官密、多留白'],
-          ['webnovel', '网文 · 强推进', '段短、钩子密、冲突直接'],
-          ['gufeng', '古风 · 克制', '半文半白、称谓讲究、不用现代词'],
-          ['plain', '白描 · 冷硬', '几乎无形容词、只写动作与事实'],
-        ],
-      },
-      craft_dialogue: {
-        label: '对白形态',
-        items: [
-          ['default', '默认', ''],
-          ['separated', '对白独立成段', '叙述和对白不挤在同一段'],
-          ['long', '允许长对白', '不为了短把话切碎'],
-        ],
-      },
-      pacing: {
-        label: '推进尺度',
-        hint: '同时作用于正文与「走向」选项，保证选项的风险水位与正文一致。',
-        items: [
-          ['steady', '保守', '只推一小步，不引入新事件'],
-          ['adventurous', '正常', '局势可以有变化'],
-          ['bold', '激进', '允许意外与明显转折，代价要落到人身上'],
-        ],
-      },
-    };
+    let craftCatalogCache = null;
+
+    async function loadCraftCatalog() {
+      if (craftCatalogCache) return craftCatalogCache;
+      const cfg = await api.getConfig();
+      craftCatalogCache = cfg?.craft || { axes: [] };
+      return craftCatalogCache;
+    }
 
     function craftValue(key) {
       return detail?.session?.settings?.[key];
     }
 
     async function openCraft() {
+      let catalog;
+      try {
+        catalog = await loadCraftCatalog();
+      } catch (err) {
+        toast(err.message || '读取工艺选项失败', { type: 'error' });
+        return null;
+      }
+      if (!catalog.axes?.length) {
+        toast('服务端没有提供工艺选项', { type: 'error' });
+        return null;
+      }
+
       const dirty = {};
       const sheet = openSheet({
         title: '演绎工艺',
@@ -1179,25 +1180,25 @@ export default {
           }
         },
         render: (body) => {
-          for (const [key, cfg] of Object.entries(CRAFT_OPTIONS)) {
-            const cur = craftValue(key);
+          for (const axis of catalog.axes) {
+            const cur = craftValue(axis.key);
             const group = el('div.craft-group');
-            group.appendChild(el('div.craft-label', {}, cfg.label));
-            if (cfg.hint) group.appendChild(el('div.craft-hint', {}, cfg.hint));
+            group.appendChild(el('div.craft-label', {}, axis.label));
+            if (axis.hint) group.appendChild(el('div.craft-hint', {}, axis.hint));
             const list = el('div.craft-list');
-            for (const [value, label, desc] of cfg.items) {
-              const active = cur === value;
+            for (const opt of axis.options || []) {
+              const active = cur === opt.value;
               const btn = el('button.craft-option' + (active ? '.is-active' : ''), { type: 'button' },
                 el('span.craft-option-main', {},
-                  el('span.craft-option-label', {}, label),
-                  desc ? el('span.craft-option-desc', {}, desc) : null,
-                  // 未显式设置任何值时，显示哪一项是默认（否则第一次打开看不出「当前」）。
-                  cur === undefined && value === (key === 'pacing' ? 'adventurous' : 'default')
+                  el('span.craft-option-label', {}, opt.label),
+                  opt.desc ? el('span.craft-option-desc', {}, opt.desc) : null,
+                  // 未显式设置任何值时，标出哪一项是默认（否则第一次打开看不出「当前」）。
+                  cur === undefined && opt.value === axis.default
                     ? el('span.craft-option-tag', {}, '默认') : null,
                 ),
               );
               btn.addEventListener('click', () => {
-                dirty[key] = value;
+                dirty[axis.key] = opt.value;
                 for (const sib of list.querySelectorAll('.craft-option')) sib.classList.remove('is-active');
                 btn.classList.add('is-active');
               });

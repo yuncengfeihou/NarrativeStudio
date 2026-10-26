@@ -568,6 +568,18 @@ export function listSessions({ worldId = null } = {}) {
   }));
 }
 
+/**
+ * 这张卡最近一局会话的 settings（只读，供「同卡再开一局」继承写法用）。
+ * 不返回整条会话：调用方只需要 settings，没必要把 card_snapshot 一起拉出来。
+ */
+export function getLatestSessionSettings(worldId) {
+  if (!worldId) return null;
+  const row = getDb().prepare(`
+    SELECT settings_json FROM sessions WHERE world_id=? ORDER BY updated_at DESC, created_at DESC LIMIT 1
+  `).get(worldId);
+  return row ? JSON.parse(row.settings_json || '{}') : null;
+}
+
 export function updateSession(id, { title, settings, status, worldId } = {}) {
   const s = getSession(id);
   if (!s) return null;

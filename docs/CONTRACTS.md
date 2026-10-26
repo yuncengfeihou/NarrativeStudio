@@ -279,7 +279,8 @@ renderCodexHit(entry)                              // 单条渲染；person 额�
 ## 工艺层接口（`server/world/craft.js`，纯函数，不读库）
 
 ```js
-import { CRAFT_AXES, DEFAULT_CRAFT, resolveCraft, renderCraftBlock, CRAFT_CHECKLIST }
+import { CRAFT_AXES, DEFAULT_CRAFT, resolveCraft, renderCraftBlock, CRAFT_CHECKLIST,
+         craftCatalog, normalizeCraftSettings, pickCraftSettings }
   from './world/craft.js';
 
 CRAFT_AXES         // { preset:[...], dialogue:[...], pacing:[...] } 三轴取值白名单
@@ -288,6 +289,12 @@ resolveCraft(settings, overrides?)   // 会话 settings + 本拍覆盖 -> 归一
 renderCraftBlock(craft, { capTokens, includeStyle })   // -> {text, meta}
   // 取舍优先级 floor → time → style → dialogue（超 system 预算时整条丢，不留半句）
 CRAFT_CHECKLIST    // 构思清单 4 问；只进分段演绎的固定尾部 user，不进 system、不占层预算
+craftCatalog()     // -> {axes:[{axis, key, label, hint, default, options:[{value,label,desc}]}]}
+  // 前端「演绎工艺」抽屉的唯一数据源（GET /api/config 的 craft 段）。前端不得自抄清单。
+normalizeCraftSettings(settings, { fill })   // 写库前归一：非法值回退默认
+  // fill=true 把缺省轴补成默认（开局用）；fill=false 只校验已给的键（PATCH 用，
+  // 避免用户只想改 pacing 时把另两轴一并写死）
+pickCraftSettings(settings)        // 只摘三个工艺轴（同卡再开一局继承写法用，不搬设备参数）
 ```
 
 `resolveCraft()` 返回 `{preset, name, style:{id,name,text}, dialogue, dialogueText, pacing,
@@ -689,7 +696,11 @@ POST   /api/worlds                        body:{id?, title?, card, source?}
 PATCH  /api/worlds/:id                     // 同上，blocker 拒绝保存（422）
 DELETE /api/worlds/:id
 POST   /api/worlds/:id/entities/:entityId/pin body:{pinned}   // -> {entities}；muted 随整卡保存
-POST   /api/worlds/:id/sessions           body:{anchor_id?}
+POST   /api/worlds/:id/sessions           body:{anchor_id?, settings?}
+                                          // 工艺三轴（craft_preset / craft_dialogue / pacing）
+                                          // 缺省时继承这张卡最近一局的值；显式传入的轴压过继承值；
+                                          // 非法值归一成默认（normalizeCraftSettings）。
+                                          // 其余会话参数（context_max_tokens 等）不跨局继承。
 
 GET    /api/sessions?world_id=
 POST   /api/sessions                      body:{world_id?, anchor_id?}
@@ -697,6 +708,7 @@ GET    /api/sessions/:id                  -> {session, card, world, turns, state
 PATCH  /api/sessions/:id                  body:{scene_directive?, title?, settings?}
                                           // settings 合并写入；narration_mode:'single'|'segmented'；
                                           // status_bar:'on'|'off'（场景信息条，默认 on）
+                                          // 工艺三轴只校验已给的键，不把未涉及的轴写死。
 DELETE /api/sessions/:id
 GET    /api/sessions/:id/turns            ?from=&to=&limit=
 GET    /api/sessions/:id/search           ?q=

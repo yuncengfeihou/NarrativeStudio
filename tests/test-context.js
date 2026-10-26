@@ -1722,6 +1722,46 @@ console.log('\n=== 工艺层：三个轴 / 预算降级 / 优先级 ===');
   eq(cctx2.messages[0].content, csys, '缓存：工艺块不破坏 system 逐字节冻结');
 }
 
+console.log('\n=== 工艺层：取值归一 / 同一真源 / 同卡继承 ===');
+{
+  // 1) normalizeCraftSettings 是唯一归一入口：非法值回退，fill 与否是两种语义。
+  const { normalizeCraftSettings, pickCraftSettings, craftCatalog, DEFAULT_CRAFT } = await import('../server/world/craft.js');
+  const bad = normalizeCraftSettings({ craft_preset: 'nope', pacing: 'nope' }, { fill: true });
+  eq(bad.craft_preset, DEFAULT_CRAFT.preset, 'normalize：非法 preset 回退默认');
+  eq(bad.pacing, DEFAULT_CRAFT.pacing, 'normalize：非法 pacing 回退默认');
+  eq(bad.craft_dialogue, DEFAULT_CRAFT.dialogue, 'normalize(fill)：缺省轴补成默认');
+  const partial = normalizeCraftSettings({ pacing: 'bold' }, { fill: false });
+  ok(!('craft_preset' in partial) && !('craft_dialogue' in partial),
+    'normalize(不 fill)：不把未涉及的轴写死（PATCH 只改一个轴时不能顺带覆盖另两个）');
+  eq(partial.pacing, 'bold', 'normalize(不 fill)：合法值原样保留');
+
+  // 2) 前端清单来自后端：catalog 与 CRAFT_AXES 必须同源，
+  //    否则后端加了取值、前端还显示旧选项，点旧项会被静默回退成默认。
+  const catalog = craftCatalog();
+  const { CRAFT_AXES } = await import('../server/world/craft.js');
+  for (const axis of catalog.axes) {
+    eq(catalog.axes.length, Object.keys(CRAFT_AXES).length, 'catalog：轴数量与 CRAFT_AXES 一致');
+    eq(axis.options.length, CRAFT_AXES[axis.axis].length, `catalog/${axis.axis}：选项数与 CRAFT_AXES 一致`);
+    for (const opt of axis.options) {
+      ok(CRAFT_AXES[axis.axis].includes(opt.value), `catalog/${axis.axis}：${opt.value} 在 CRAFT_AXES 里`);
+      ok(!!opt.label, `catalog/${axis.axis}：${opt.value} 有标签（前端没有兜底文案）`);
+    }
+    eq(axis.default, DEFAULT_CRAFT[axis.axis], `catalog/${axis.axis}：默认值与 DEFAULT_CRAFT 一致`);
+    ok(axis.options.some((o) => o.value === axis.default), `catalog/${axis.axis}：默认值是合法选项`);
+  }
+
+  // 3) 同卡再开一局继承上一局的写法：只搬三个工艺轴。
+  const picked = pickCraftSettings({
+    craft_preset: 'literary', craft_dialogue: 'long', pacing: 'steady', context_max_tokens: 1234,
+  });
+  eq(picked.craft_preset, 'literary', 'pick：继承 preset');
+  eq(picked.craft_dialogue, 'long', 'pick：继承 dialogue');
+  eq(picked.pacing, 'steady', 'pick：继承 pacing');
+  ok(!('context_max_tokens' in picked), 'pick：不继承设备参数（预算/温度等留在各自会话）');
+  eq(pickCraftSettings({ craft_preset: 'nope' }).craft_preset, DEFAULT_CRAFT.preset,
+    'pick：非法值归一，不把脏值搬进新会话');
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-context: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
