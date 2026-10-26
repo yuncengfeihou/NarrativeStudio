@@ -426,6 +426,7 @@ async function runTurnInner({
         recentNarrative: narrative,
         present: context.meta?.present || [],
         sceneSheet: context.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '',
+        craft: context.craft || null,
         options: options.branch || {},
         signal,
       }));
@@ -497,6 +498,7 @@ function buildAssemblyMeta(context, narrator) {
     plan: meta.plan || null,
     recall: meta.recall || null,
     index: meta.system_blocks?.index || null,
+    craft: meta.system_blocks?.craft || null,
     dropped_sections: meta.dropped_sections || [],
     // P0-2/P0-1 的可观测结果随回合持久化：缓存前缀归因与硬上限处置。
     cache: meta.cache || null,

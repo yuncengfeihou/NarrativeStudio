@@ -293,6 +293,38 @@ console.log('\n=== 场记单 ===');
   ok(!out.text.includes('这一幕不要做'), '没有忌避清单');
   ok(!out.text.includes('第 1/2 幕'), '没有幕进度');
 
+  // 人物声音与价值排序：lexicon 给「用词」、exemplars 给「说话像这样」、values 给「看重」。
+  // 三者都只在作者写了才有；没写就不出现（不生成占位行）。
+  const voiced = schema.normalizeCard({
+    title: 'v',
+    entities: [{
+      id: 'xy', type: 'person', name: '谢云',
+      voice: {
+        rhythm: '先笑后刺',
+        lexicon: ['本座', '听好', '不妨'],
+        exemplars: ['「本座说过，不妨再听一遍。」', '「听好——只这一次。」', '「不必了。」'],
+      },
+      psyche: { traits: ['护短'], values: ['门第', '旧约', '不欠人情'] },
+    }],
+  });
+  const voicedOut = sheet.renderSceneSheet({
+    ledger: { place: '廊下' }, present: personsOf(voiced), capTokens: 2000,
+  });
+  ok(voicedOut.text.includes('用词：本座'), 'voice.lexicon 渲染成「用词」');
+  ok(voicedOut.text.includes('说话像这样：「本座说过，不妨再听一遍。」'), 'voice.exemplars 渲染成原话示范');
+  ok(!voicedOut.text.includes('不必了'), 'exemplars 只取前两条（不无界堆叠）');
+  ok(voicedOut.text.includes('看重：门第、旧约、不欠人情'), 'psyche.values 渲染成「看重」');
+
+  const unvoiced = schema.normalizeCard({
+    title: 'nv', entities: [{ id: 'q', type: 'person', name: '钱四', voice: { rhythm: '急' }, psyche: { traits: ['贪'] } }],
+  });
+  const unvoicedOut = sheet.renderSceneSheet({
+    ledger: { place: '廊下' }, present: personsOf(unvoiced), capTokens: 2000,
+  });
+  ok(!unvoicedOut.text.includes('用词：'), '没写 lexicon 就不出「用词」行');
+  ok(!unvoicedOut.text.includes('说话像这样：'), '没写 exemplars 就不出原话行');
+  ok(!unvoicedOut.text.includes('看重：'), '没写 values 就不出「看重」行');
+
   // 空状态
   const empty = sheet.renderSceneSheet({ present: [], capTokens: 1000 });
   eq(empty.text, '', '无在场者时返回空');

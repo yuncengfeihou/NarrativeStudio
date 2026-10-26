@@ -1114,6 +1114,103 @@ export default {
       }
     }
 
+    /* =====================================================================
+     * 演绎工艺（文风取向 / 对白形态 / 推进尺度）
+     *
+     * 三个轴都落在既有通道里：preset/dialogue 只改 system，pacing 只改尾注与走向。
+     * 这里只做「选」，不做自由文本——作者的具体文风写在世界卡的 prompt.style_guide，
+     * 卡的优先级永远压过这里的预设（界面文案要让人看得出来这一点）。
+     * ===================================================================== */
+    const CRAFT_OPTIONS = {
+      craft_preset: {
+        label: '文风取向',
+        hint: '卡的「文风」里写了内容时，以卡为准，这里只兜底。',
+        items: [
+          ['default', '默认', '只留通用底线'],
+          ['light', '轻喜剧 · 快节奏', '短句、对白密、语气轻'],
+          ['literary', '文学 · 细腻留白', '句长有变化、感官密、多留白'],
+          ['webnovel', '网文 · 强推进', '段短、钩子密、冲突直接'],
+          ['gufeng', '古风 · 克制', '半文半白、称谓讲究、不用现代词'],
+          ['plain', '白描 · 冷硬', '几乎无形容词、只写动作与事实'],
+        ],
+      },
+      craft_dialogue: {
+        label: '对白形态',
+        items: [
+          ['default', '默认', ''],
+          ['separated', '对白独立成段', '叙述和对白不挤在同一段'],
+          ['long', '允许长对白', '不为了短把话切碎'],
+        ],
+      },
+      pacing: {
+        label: '推进尺度',
+        hint: '同时作用于正文与「走向」选项，保证选项的风险水位与正文一致。',
+        items: [
+          ['steady', '保守', '只推一小步，不引入新事件'],
+          ['adventurous', '正常', '局势可以有变化'],
+          ['bold', '激进', '允许意外与明显转折，代价要落到人身上'],
+        ],
+      },
+    };
+
+    function craftValue(key) {
+      return detail?.session?.settings?.[key];
+    }
+
+    async function openCraft() {
+      const dirty = {};
+      const sheet = openSheet({
+        title: '演绎工艺',
+        confirmText: '保存',
+        onConfirm: async () => {
+          if (!Object.keys(dirty).length) return;
+          try {
+            const updated = await api.patchSession(sessionId, { settings: dirty });
+            if (detail?.session) {
+              detail.session = updated || {
+                ...detail.session,
+                settings: { ...(detail.session.settings || {}), ...dirty },
+              };
+            }
+            toast('已更新演绎工艺（下一拍生效）', { type: 'success' });
+          } catch (err) {
+            toast(err.message || '保存失败', { type: 'error' });
+            return false;
+          }
+        },
+        render: (body) => {
+          for (const [key, cfg] of Object.entries(CRAFT_OPTIONS)) {
+            const cur = craftValue(key);
+            const group = el('div.craft-group');
+            group.appendChild(el('div.craft-label', {}, cfg.label));
+            if (cfg.hint) group.appendChild(el('div.craft-hint', {}, cfg.hint));
+            const list = el('div.craft-list');
+            for (const [value, label, desc] of cfg.items) {
+              const active = cur === value;
+              const btn = el('button.craft-option' + (active ? '.is-active' : ''), { type: 'button' },
+                el('span.craft-option-main', {},
+                  el('span.craft-option-label', {}, label),
+                  desc ? el('span.craft-option-desc', {}, desc) : null,
+                  // 未显式设置任何值时，显示哪一项是默认（否则第一次打开看不出「当前」）。
+                  cur === undefined && value === (key === 'pacing' ? 'adventurous' : 'default')
+                    ? el('span.craft-option-tag', {}, '默认') : null,
+                ),
+              );
+              btn.addEventListener('click', () => {
+                dirty[key] = value;
+                for (const sib of list.querySelectorAll('.craft-option')) sib.classList.remove('is-active');
+                btn.classList.add('is-active');
+              });
+              list.appendChild(btn);
+            }
+            group.appendChild(list);
+            body.appendChild(group);
+          }
+        },
+      });
+      return sheet;
+    }
+
     async function openMore() {
       const action = await openActionSheet({
         title: detail.session?.title || '剧情',
@@ -1124,6 +1221,7 @@ export default {
             value: 'segmented',
             icon: 'sparkles',
           },
+          { label: '演绎工艺（文风 / 对白 / 推进）', value: 'craft', icon: 'palette' },
           { label: statusBarLabel(), value: 'statusbar', icon: 'layers' },
           { label: '换一批选项', value: 'branches', icon: 'compass' },
           { label: '搜索本段剧情', value: 'search', icon: 'search' },
@@ -1138,6 +1236,7 @@ export default {
       });
       if (action === 'continue') send({ silent: true, generateBranches: true });
       else if (action === 'segmented') toggleSegmentation();
+      else if (action === 'craft') openCraft();
       else if (action === 'statusbar') toggleStatusBar();
       else if (action === 'branches') regenerateBranches();
       else if (action === 'search') openSearch();

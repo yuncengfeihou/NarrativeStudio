@@ -14,7 +14,7 @@ function tailOf(text, maxChars) {
   return `……（前略）\n${t.slice(-maxChars)}`;
 }
 
-export function branchSystemPrompt(world) {
+export function branchSystemPrompt(world, { pacing = null } = {}) {
   const card = world?.card || {};
   const title = card.title || '未命名剧情';
   const genre = Array.isArray(card.genre) && card.genre.length ? card.genre.join('、') : '';
@@ -29,6 +29,11 @@ export function branchSystemPrompt(world) {
   const notes = (Array.isArray(card.author_notes) ? card.author_notes : [])
     .filter((n) => n && n.scope === 'always' && n.text)
     .map((n) => n.text);
+  // 推进尺度与 narrator 共读同一个值（craft.js）：选项的风险水位必须和正文同尺度，
+  // 否则会出现「选项都是温和日常、正文却突然翻盘」的错位。
+  const pacingNote = pacing
+    ? `\n# 推进尺度（与正文同一水位）\n${pacing}`
+    : '';
 
   return `# 身份
 你是互动剧情的「走向设计者」。你不写正文，你只设计**玩家此刻可以走的路**。
@@ -45,6 +50,7 @@ ${notes.length ? `\n# 常驻作者笔记\n${notes.join('\n')}` : ''}
 2. **有赌注，但不必每条都有**：3-4 条里至少 1 条要有明确的风险或代价；其余的可以是日常、关系推进、等待、离开、观察，或者把时间推进到下一段（例如「先回去歇一晚，明天再来」）。不要为了凑赌注把每条都写成下注。
 3. **有分歧**：四条指向四种不同的后果——不同的敌人、不同的盟友、不同的代价。不要四条都通向同一个结果。
 4. **贴人物**：符合主角的能力边界与性格。他不会武功就不能「一招制敌」；他嘴硬心软，「低头求人」才是一条有张力的选项。
+${pacingNote}
 
 # 输出格式（硬性）
 只输出一个纯 JSON 对象，禁止 Markdown：

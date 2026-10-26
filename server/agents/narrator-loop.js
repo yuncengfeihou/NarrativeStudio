@@ -21,6 +21,7 @@ import { estimateTokens } from '../tokens.js';
 import { lookupCodex, renderCodexHit } from '../world/scene-sheet.js';
 import { buildNarratorMessages } from './narrator.js';
 import { segmentedInstruction } from '../prompts/narrator.js';
+import { CRAFT_CHECKLIST } from '../world/craft.js';
 
 /**
  * 会话设置优先于进程默认值；只认 single / segmented，其他值按默认处理。
@@ -349,7 +350,7 @@ export async function runNarratorSegmented({
     world,
     context,
     guidance: options.guidance,
-    segmentedNote: segmentedInstruction({ maxRounds }),
+    segmentedNote: segmentedInstruction({ maxRounds, checklist: CRAFT_CHECKLIST }),
   });
   const baseLen = messages.length;
 

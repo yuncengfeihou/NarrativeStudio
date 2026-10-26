@@ -142,6 +142,60 @@
 .action-desc { font-size: var(--fs-caption); color: var(--ink-3); }
 
 /* -------------------------------------------------------------------------
+ * 演绎工艺选择（play 视图的「更多」→ 演绎工艺）
+ *
+ * 三个轴各一组，单选列表。刻意不做成滑杆/多选：
+ * 这几项是「换一种写法」，不是程度调节，混选会互相抵消。
+ * ---------------------------------------------------------------------- */
+.craft-group { margin-bottom: 20px; }
+.craft-group:last-child { margin-bottom: 4px; }
+.craft-label {
+  font-size: var(--fs-label);
+  font-weight: 600;
+  color: var(--ink-1);
+  margin-bottom: 3px;
+}
+.craft-hint {
+  font-size: var(--fs-caption);
+  color: var(--ink-3);
+  line-height: 1.5;
+  margin-bottom: 8px;
+}
+.craft-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 8px;
+}
+.craft-option {
+  display: block;
+  width: 100%;
+  text-align: left;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper-raised);
+  transition: border-color var(--dur) var(--ease), background-color var(--dur) var(--ease);
+}
+.craft-option:hover { background: var(--paper-hover); }
+.craft-option.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+.craft-option-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px; }
+.craft-option-label { font-size: var(--fs-label); font-weight: 500; color: var(--ink-1); }
+.craft-option.is-active .craft-option-label { color: var(--accent); }
+.craft-option-desc { font-size: var(--fs-caption); color: var(--ink-3); }
+.craft-option-tag {
+  font-size: var(--fs-caption);
+  color: var(--ink-4);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 0 6px;
+  line-height: 1.5;
+}
+
+/* -------------------------------------------------------------------------
  * Dialog
  * ---------------------------------------------------------------------- */
 .dialog {

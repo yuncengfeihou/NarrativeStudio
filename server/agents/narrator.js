@@ -38,7 +38,9 @@ export function buildNarratorMessages({
     : [];
 
   if (!messages.some((m) => m?.role === 'system')) {
-    messages.unshift({ role: 'system', content: buildContract(session, world) });
+    // 兜底路径：context 里没有 system 时现算一份。带上 context.craft，
+    // 否则这段兜底会丢掉工艺层（system 里有、兜底里没有，两条路径不一致）。
+    messages.unshift({ role: 'system', content: buildContract(session, world, undefined, { craft: context?.craft || null }) });
   }
 
   const note = String(guidance || '').trim();

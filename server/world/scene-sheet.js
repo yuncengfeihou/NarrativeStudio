@@ -291,6 +291,22 @@ function renderCastLine(c, ledgerChar, voices) {
     if (addr) lines.push(`  称呼：${addr}`);
   }
   if (c.voice.never?.length) lines.push(`  绝不说：${join(c.voice.never, '／')}`);
+  // 用词与语气：lexicon（口头禅/惯用词）比 rhythm 更具体、更能立刻复现口吻。
+  if (c.voice.lexicon?.length) {
+    lines.push(`  用词：${truncateToTokens(join(c.voice.lexicon.slice(0, 5), '、'), 28)}`);
+  }
+  // 原话示范：作者写下的 exemplars 是抗 OOC 最直接的锚点——
+  // 「绝不说」只划否定边界，exemplars 给出正面样式，两者配对才防得住「谁都在说同一种话」。
+  // 作者常自带引号（「……」），已经带引号的就不再套一层，避免出现「「…」」。
+  if (c.voice.exemplars?.length) {
+    const quote = (s) => (/^[「『“‘"']/.test(s) ? s : `「${s}」`);
+    const ex = c.voice.exemplars.slice(0, 2).map((s) => quote(String(s))).join('／');
+    if (ex) lines.push(`  说话像这样：${truncateToTokens(ex, 80)}`);
+  }
+  // 价值排序：决定「两难时他先保哪一头」，比 traits 更可行动。
+  if (c.psyche?.values?.length) {
+    lines.push(`  看重：${truncateToTokens(join(c.psyche.values.slice(0, 4), '、'), 28)}`);
+  }
   if (c.agenda?.length) {
     const ag = c.agenda
       .slice()

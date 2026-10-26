@@ -156,7 +156,7 @@ console.log('\n=== 删干净的证据 ===');
   ok(!all.includes('禁止平稳收尾'), '没有「禁止平稳收尾」');
   ok(!all.includes('结尾必须留钩子'), '没有强制钩子');
   ok(!all.includes('每一段都必须推动情势'), '没有「每段必须推动」');
-  ok(all.includes('也可以让这一拍自然走完'), '收束改为许可式（自然走完/推进时间都合法）');
+  ok(all.includes('结尾用在场者的动作、台词或一个未完成的场景收住'), '收束改为许可式（自然走完/推进时间都合法）');
   ok(all.includes('可以直接用一句过渡把时间推到'), '尾注给出时间推进通道（许可，不是强制）');
   ok(all.includes('不必把中间的每一分钟都演完'), '明确不必逐分钟演');
   ok(all.includes('玩家明确要做的动作'), '玩家明说要做的动作先发生（不被每拍拦回原地）');
@@ -196,7 +196,7 @@ console.log('\n=== 篇幅：作者可选 ===');
   const sys0 = c0.messages[0].content;
   ok(!sys0.includes('篇幅'), '未写篇幅：契约不出现篇幅');
   ok(!narratorTailInstruction(card).includes('篇幅'), '未写篇幅：尾注不出现篇幅');
-  ok(/3\. 时态/.test(sys0), '未写篇幅：演出范式编号连续（篇幅不占号）');
+  ok(/2\. 时态/.test(sys0), '未写篇幅：演出范式编号连续（篇幅不占号）');
 
   // 作者写了篇幅 → 原样进契约与尾注；这是作者的自由，不是引擎默认。
   const lenCard = schema.normalizeCard({
@@ -1621,6 +1621,105 @@ console.log('\n=== 世界呼吸：幕外流言进场记单（hidden 永不外泄
   ok(sheet.includes('幕外：谢沐'), 'rumor 事件进入压力段');
   ok(!sheet.includes('凌璇'), 'hidden 事件不进提示词');
   ok(rctx.meta.scene_sheet.rumors === 1, 'meta 记录渲染的流言条数');
+}
+
+console.log('\n=== 工艺层：三个轴 / 预算降级 / 优先级 ===');
+{
+  const craftMod = await import('../server/world/craft.js');
+
+  // 轴取值：非法值一律回退默认，不静默生效。
+  const bad = craftMod.resolveCraft({ craft_preset: 'nope', craft_dialogue: 'nope', pacing: 'nope' });
+  eq(bad.preset, craftMod.DEFAULT_CRAFT.preset, 'craft：非法 preset 回退默认');
+  eq(bad.dialogue, craftMod.DEFAULT_CRAFT.dialogue, 'craft：非法 dialogue 回退默认');
+  eq(bad.pacing, craftMod.DEFAULT_CRAFT.pacing, 'craft：非法 pacing 回退默认');
+
+  // 底线常驻、与 preset 无关：任何预设都有 floor 与 time。
+  for (const p of craftMod.CRAFT_AXES.preset) {
+    const c = craftMod.resolveCraft({ craft_preset: p });
+    const b = craftMod.renderCraftBlock(c);
+    ok(b.text.includes('只给证据，不写判决'), `craft/${p}：通用底线常驻`);
+    ok(b.text.includes('文字长不等于时间过去了很久'), `craft/${p}：时间流速常驻`);
+    eq(b.meta.preset, p, `craft/${p}：meta 记录预设`);
+  }
+  // 不同文风产出不同文本（否则「可单选的轴」是假的）。
+  const lightText = craftMod.renderCraftBlock(craftMod.resolveCraft({ craft_preset: 'light' })).text;
+  const plainText = craftMod.renderCraftBlock(craftMod.resolveCraft({ craft_preset: 'plain' })).text;
+  ok(lightText !== plainText, 'craft：不同文风产出不同文本');
+  ok(!lightText.includes('几乎不用形容词与比喻'), 'craft：light 不串入 plain 的规则');
+
+  // 预算降级：底线硬保留，其余按 time → style → dialogue 的优先级整条丢，绝不留半句。
+  const c3 = craftMod.resolveCraft({ craft_preset: 'literary', craft_dialogue: 'separated' });
+  const tight = craftMod.renderCraftBlock(c3, { capTokens: 400 });
+  ok(tight.meta.dropped.includes('style'), 'craft：预算不足时先丢文风');
+  ok(tight.meta.dropped.includes('dialogue'), 'craft：预算不足时丢对白形态');
+  ok(!tight.text.includes('【文风取向'), 'craft：被丢的段不出现半句');
+  ok(tight.text.includes('只给证据，不写判决'), 'craft：底线是硬保留，永不被丢');
+  ok(tight.meta.capped === true, 'craft：meta 标记 capped');
+  // 连底线都放不下的极端上限：仍保留底线，但 meta 暴露 over_floor（不静默降级成没有底线）。
+  const extreme = craftMod.renderCraftBlock(c3, { capTokens: 50 });
+  ok(extreme.text.includes('只给证据，不写判决'), 'craft：极端上限下底线仍在');
+  ok(extreme.meta.over_floor === true, 'craft：极端上限记 over_floor');
+  const roomy = craftMod.renderCraftBlock(c3, { capTokens: 1800 });
+  ok(roomy.meta.dropped.length === 0 && roomy.meta.capped === false, 'craft：预算充足不丢弃');
+
+  // 作者写了文风 → 预设文风不渲染（优先级：卡 > 预设 > 默认）。
+  const styleCard = schema.normalizeCard({
+    title: '文风优先级', premise: '一座旧城。', anchors: [],
+    prompt: { style_guide: '作者钦定的文风：通篇用第二人称短句。' },
+    entities: [{ id: 'a-he', type: 'person', name: '阿禾', role: '守夜人' }],
+    player: { mode: 'original', name: '旅人' },
+  });
+  const contract = engine.buildContract(
+    { settings: { craft_preset: 'literary' } }, { card: styleCard }, styleCard,
+  );
+  ok(contract.includes('作者钦定的文风'), 'buildContract：作者文风进契约');
+  ok(!contract.includes('【文风取向'), 'buildContract：作者文风存在时不渲染预设文风');
+  ok(contract.includes('只给证据，不写判决'), 'buildContract：通用底线与作者文风并存');
+  // 旧契约里被工艺层接管的规则不应再重复出现（替换而不是叠加）。
+  ok(!contract.includes('收束：可以停在需要立刻回应'), 'buildContract：旧收束条已移交给工艺层');
+  ok(!contract.includes('不得替主角做决定'), 'buildContract：旧「不替主角决定」条已移交');
+
+  // 推进尺度：尾注与走向共读同一个值。
+  const steady = craftMod.resolveCraft({ pacing: 'steady' });
+  ok(steady.pacingText.includes('只推进一小步'), 'craft：steady 尾注文本');
+  ok(steady.pacingBranch.includes('保守'), 'craft：steady 走向文本');
+  const bold = craftMod.resolveCraft({ pacing: 'bold' });
+  ok(bold.pacingText.includes('让意外发生'), 'craft：bold 尾注文本');
+  ok(bold.pacingBranch.includes('激进'), 'craft：bold 走向文本');
+
+  // 尾注：推进尺度与结尾落点都在最贴近生成点的位置。
+  const tail = narratorTailInstruction(schema.normalizeCard({}), { craft: bold });
+  ok(tail.includes('【推进尺度·激进】'), '尾注：带推进尺度');
+  ok(tail.includes('【怎么收尾】'), '尾注：带结尾落点');
+  ok(!narratorTailInstruction(schema.normalizeCard({})).includes('【推进尺度'), '尾注：无 craft 时不出现推进尺度');
+
+  // 会话 settings 真的改变了 system（否则工艺层等于没接上）。
+  const craftCard = schema.normalizeCard({
+    title: '工艺接线', premise: '一座旧城。', anchors: [],
+    prompt: { pov: '第三人称' },
+    entities: [{ id: 'a-he', type: 'person', name: '阿禾', role: '守夜人' }],
+    player: { mode: 'original', name: '旅人' },
+  });
+  const cw = { id: `w-craft-${Date.now()}`, title: '工艺', card: craftCard };
+  store.saveWorld(cw);
+  const cs = store.createSession({
+    id: `s-craft-${Date.now()}`, title: 'c', worldId: cw.id,
+    settings: { craft_preset: 'plain', pacing: 'bold' },
+  });
+  store.createBranch(cs.id, { branchId: 'main' });
+  const csess = { ...cs, branch_id: 'main' };
+  const cctx = await engine.assembleContext({ session: csess, world: cw, turnNo: 1 });
+  const csys = cctx.messages[0].content;
+  ok(csys.includes('【文风取向·白描·冷硬】'), 'assembly：settings.craft_preset 进 system');
+  ok(csys.includes('【推进尺度·激进】') || cctx.messages[cctx.messages.length - 1].content.includes('【推进尺度·激进】'),
+    'assembly：settings.pacing 进尾注');
+  eq(cctx.craft.preset, 'plain', 'assembly：返回 craft 供走向 Agent 共读');
+  eq(cctx.meta.system_blocks.craft.preset, 'plain', 'meta：工艺块落位记录');
+  ok(typeof cctx.meta.system_blocks.craft.tokens === 'number', 'meta：工艺块 token 数');
+
+  // system 冻结不变量仍然成立：连续两轮 system 逐字节相等。
+  const cctx2 = await engine.assembleContext({ session: csess, world: cw, turnNo: 2 });
+  eq(cctx2.messages[0].content, csys, '缓存：工艺块不破坏 system 逐字节冻结');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

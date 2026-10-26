@@ -156,12 +156,12 @@ function parseBranchPayload(content) {
  * @returns {Promise<{branches, scene_summary, usage}>}
  */
 export async function runBranchAgent({
-  world, state, recentNarrative, present, sceneSheet, options = {}, signal,
+  world, state, recentNarrative, present, sceneSheet, craft = null, options = {}, signal,
 } = {}) {
   const sceneSummary = summarizeScene(state);
 
   const messages = [
-    { role: 'system', content: branchSystemPrompt(world) },
+    { role: 'system', content: branchSystemPrompt(world, { pacing: craft?.pacingBranch || null }) },
     {
       role: 'user',
       content: branchUserPrompt({

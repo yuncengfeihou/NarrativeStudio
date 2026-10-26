@@ -15,6 +15,7 @@ NarrativeStudio/
 │   ├── world/
 │   │   ├── schema.js       v5 卡形状归一（entities 单命名空间）+ 实体链接
 │   │   ├── scene-sheet.js  世界索引 / 辞书挑选 / 场记单渲染 / 辞书检索（纯函数）
+│   │   ├── craft.js        演绎工艺层：底线 / 文风取向 / 对白形态 / 推进尺度 / 结尾落点（纯函数）
 │   │   ├── effective.js    EffectiveWorld 投影（模板 + world_state）
 │   │   └── state-paths.js  world_state 路径白名单
 │   ├── agents/
@@ -275,6 +276,24 @@ lookupCodex(card, queries, { limit })              // 模型主动检索：遍�
 renderCodexHit(entry)                              // 单条渲染；person 额外渲染身份/口吻/性格/知识边界
 ```
 
+## 工艺层接口（`server/world/craft.js`，纯函数，不读库）
+
+```js
+import { CRAFT_AXES, DEFAULT_CRAFT, resolveCraft, renderCraftBlock, CRAFT_CHECKLIST }
+  from './world/craft.js';
+
+CRAFT_AXES         // { preset:[...], dialogue:[...], pacing:[...] } 三轴取值白名单
+DEFAULT_CRAFT      // { preset:'default', dialogue:'default', pacing:'adventurous' }
+resolveCraft(settings, overrides?)   // 会话 settings + 本拍覆盖 -> 归一后的工艺配置
+renderCraftBlock(craft, { capTokens, includeStyle })   // -> {text, meta}
+  // 取舍优先级 floor → time → style → dialogue（超 system 预算时整条丢，不留半句）
+CRAFT_CHECKLIST    // 构思清单 4 问；只进分段演绎的固定尾部 user，不进 system、不占层预算
+```
+
+`resolveCraft()` 返回 `{preset, name, style:{id,name,text}, dialogue, dialogueText, pacing,
+pacingText, pacingBranch, floor, time, ending}`。`pacingText` 进尾注、`pacingBranch` 进走向 Agent，
+两者必须共读同一个 `pacing` 值。
+
 ## Context Engine 接口
 
 ```js
@@ -285,10 +304,13 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
                                     branchChoice, isOpening, directive, retrieval,
                                     previousMessages });
 // retrieval        = { text, queries, entries } | null   // 模型主动检索的辞书全文（当拍）
+// buildContract(session, world, card?, { craft }) — craft 缺省时按 session.settings 现算；
+//   作者 `prompt.style_guide` 存在时不渲染预设文风（优先级：卡 > 预设 > 默认）。
 // previousMessages = 上一轮真实发出的 messages | null     // 仅用于计算前缀复用率，不影响装配内容
 // -> { messages,
 //      budget:{system,archive,summary,recent,scene,retrieval,current,total},   // 本轮**实际渲染**体积；summary 恒为 0（层已移除）
 //      state, ledger, anchor, recentTurns, echoes,
+//      craft,   // 本轮工艺配置（resolveCraft 的结果；走向 Agent 与正文共读 pacing，保证同尺度）
 //      meta:{present, mentioned, theme_tags, codex, codex_candidates,
 //            codex_rendered, codex_dropped, codex_brief_candidates,
 //            codex_brief_rendered, graph:{entities,edges},
@@ -298,7 +320,8 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //            timeline_past, timeline_future_held,
 //            system_blocks:{timeline_past:{count, rendered, tokens, dropped, cap},
 //                           index:{total, rendered, muted, dropped, dropped_names[<=20],
-//                                  tokens, cap, mode:'tree'|'flat'}},   // 世界索引覆盖率（事后统计，不参与注入）
+//                                  tokens, cap, mode:'tree'|'flat'},   // 世界索引覆盖率（事后统计，不参与注入）
+//                           craft:{preset, style, dialogue, tokens, dropped[], capped}},  // 工艺块落位与降级
 //            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}], rumors},
 //            dropped_sections, branch,
 //            coverage:{summary_to /* = 场次覆盖边界，保留旧名 */, recent_from, recent_to, turns,
@@ -318,14 +341,28 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 装配顺序（缓存友好）：**冻结前缀 → 只追加历史 → 易变尾部**
 
 ```
-1. system   契约 + 命题 + 宪章 + 世界索引 + 前史（canon=past）+ 主角 + 作者笔记（**只读模板快照，绝不读运行态**）
+1. system   契约（含工艺块：通用底线 + 时间流速 [+ 预设文风/对白形态]）+ 命题 + 宪章 + 世界索引
+            + 前史（canon=past）+ 主角 + 作者笔记（**只读模板快照，绝不读运行态**）
 2. user     【本局场次索引】一行一场，只追加
 3. …        当前场次逐字原文 = 上一场 turn_to + 1 起，到本轮之前（player/assistant 交替）
 4. user     【刚才这一场怎么收的】最近 1–2 场细节
 5. user     场记单（T0 全量设定 + T1 一句邻域 + 在场者 voice + 断言 + 知识矩阵；每场变一次）
 6. user     【检索结果】（模型主动查阅的辞书全文，当拍蒸发）
-7. user     本场指令 + 本轮行动 + 尾注
+7. user     本场指令 + 本轮行动 + 尾注（含【推进尺度】【怎么收尾】）
 ```
+
+**工艺层落位（`server/world/craft.js`）**：三个可单选的轴——`preset`（文风取向，见
+`CRAFT_AXES.preset`）· `dialogue`（对白形态）· `pacing`（推进尺度）。取值来自会话
+`settings.craft_preset / craft_dialogue / pacing`，非法值回退默认（不静默生效）。
+优先级恒定：**世界卡 `prompt.style_guide` > 工艺预设 > 程序默认**（作者写了文风，
+预设文风就不渲染，避免同一层两套写法互相打架）。
+
+- `preset` / `dialogue` 只影响 system，必须**整会话恒定**（每拍可变会破坏 system 的缓存前缀）。
+- `pacing` 只进尾注与走向 Agent，可按拍不同语义使用；它同时决定 `branch` 选项的风险水位——
+  narrator 推多少、branch 给多险的选项必须同尺度，否则「选项温和、正文翻盘」。
+- 工艺块受 system 预算约束，超了按 `floor → time → style → dialogue` 的**优先级**整条丢
+  （阅读顺序仍是 底线→文风→对白→时间流速），绝不留半句；结果记 `meta.system_blocks.craft`。
+  之所以允许丢：世界索引是 canon，工艺是可选的表达层——挤掉索引换文风是错的。
 
 `meta.cache` 是缓存归因：`prefix_shared_tokens` 是与上一轮消息序列的最长公共前缀（估算 tok），
 `first_divergence` 指出第一个断点落在哪一层（system/archive/recent/scene/retrieval/current），
@@ -354,7 +391,9 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 场次索引 + 原文 + 场记单 + 检索）里出现的数量，返回 `{total, visible, rate, by_type}`。
 近似指标，只进 `turns.meta_json`；世界索引的完整渲染情况另有 `meta.system_blocks.index`。
 
-`buildSystemLayer(...)` 返回 `{ text, meta:{ index_coverage } }`（不再是裸字符串）。
+`buildSystemLayer(...)` 返回 `{ text, meta:{ index_coverage, craft } }`（不再是裸字符串）。
+`craft` 是工艺块的落位证据 `{preset, style, dialogue, tokens, dropped[], capped}`
+（`dropped` 是在 system 预算不足时被整条丢掉的部分，`capped` = 有丢弃）。
 `index_coverage` 是世界索引的覆盖率事后统计：`total` 卡内实体数、`rendered` 名字出现在
 最终索引文本里的实体数、`muted` 被静音的设定集条目数、`dropped` 未出现的数量、
 `dropped_names`（最多 20 个，便于排查）、`tokens` / `cap` / `mode:'tree'|'flat'`。

@@ -34,6 +34,7 @@ import { lintState } from './lint-state.js';
 import { comparePromptMessages } from './prompt-drift.js';
 import { evaluateFates, renderOmens } from '../world/fates.js';
 import { narratorTailInstruction } from '../prompts/narrator.js';
+import { resolveCraft, renderCraftBlock } from '../world/craft.js';
 import {
   getAssertions, getBranch, getRelations, getRecentTextForBranch,
   getScenes, getState, getThreads, getTurnsForBranch, getVoiceMap, getWorldState, listPatches,
@@ -57,10 +58,20 @@ function hashText(text) {
 /**
  * 契约只留「怎么演」，不留世界观细节——细节走宪章、索引和场记单。
  * 硬性规则控制在 10 条以内：规则越多，越没有一条被真正执行。
+ *
+ * 工艺层（`server/world/craft.js`）与这里是**替换关系**，不是叠加：
+ *   - 「收束」「不替主角做决定」「专名一致」原先散在范式里，现归 craft 的通用底线 + 结尾落点，
+ *     范式里相应删掉，避免同一条规则换两种说法各说一遍。
+ *   - 「文风」优先级恒定：卡的 `prompt.style_guide` > 工艺预设 > 无。作者写了就不再注入预设文风。
+ *
+ * @param {object} [craft] resolveCraft() 的结果；缺省则按默认轴现算（单独调用也能用）。
  */
-export function buildContract(session, world, card = normalizeCard(world?.card || {})) {
+export function buildContract(session, world, card = normalizeCard(world?.card || {}), { craft = null } = {}) {
   const p = card.prompt;
   const title = card.title || session?.title || '未命名剧情';
+  const c = craft || resolveCraft(session?.settings || {});
+  // 作者在卡里写了文风，就以卡为准；工艺预设的文风不再出现（否则同一层里两套写法互相打架）。
+  const authorStyle = str(p.style_guide);
 
   const lines = [
     '你是一部互动小说的「世界本身」。你不是助手、不是评论员、不是写作教练。',
@@ -77,14 +88,10 @@ export function buildContract(session, world, card = normalizeCard(world?.card |
   // 篇幅只有作者在卡里写了才渲染；不写就不出现这一条（编号顺延，不留空号）。
   const paradigm = [
     `视角：${p.pov}。主角不在场的信息只能通过痕迹、传闻、他人转述呈现，不得直接叙述。`,
-    `文风：${p.style_guide || '短句为主，一段不超过三行；对白与动作交错，少用形容词堆砌'}`,
     p.length ? `篇幅：本轮 ${p.length}。` : '',
     `时态：${p.tense}。不写纯装饰性描写。`,
-    '收束：可以停在需要立刻回应的情势前，也可以让这一拍自然走完——收在余波里，或把时间推进到下一段；不要总结、不要预告。',
     '不得出现元叙述：不写「作为 AI」「本章」「综上所述」「作者」，不解释、不总结、不预告。',
-    '不得替主角做决定，不代写主角的台词与内心。主角的行动由玩家给出。',
     '不得让任何角色说出他不可能知道的信息；不得为了推进剧情让角色降智。',
-    '专有名词一次定义、终身一致：人名、地名、称谓、器物名不得漂移或改写。',
     '只输出剧情正文。不要标题、不要章节号、不要 Markdown 标记、不要任何前后缀说明。',
   ].filter(Boolean);
 
@@ -94,6 +101,13 @@ export function buildContract(session, world, card = normalizeCard(world?.card |
     ...paradigm.map((rule, i) => `${i + 1}. ${rule}`),
   );
 
+  // 通用底线 + 时间流速 + 对白形态（+ 预设文风）：全部落在 system，不新增注入通道。
+  const block = renderCraftBlock(c, { includeStyle: !authorStyle });
+  if (block.text) lines.push('', block.text);
+
+  if (authorStyle) {
+    lines.push('', '# 文风（作者钦定）', authorStyle);
+  }
   if (p.narrator_notes) {
     lines.push('', '# 作者给演绎的附注', p.narrator_notes);
   }
@@ -124,10 +138,15 @@ export function buildSystemLayer(
     indexCap = currentPlan().layers.system,
     graph = null,
     pastText = '',
+    craft = null,
   } = {},
 ) {
   /* ---- 必需单元：契约 + 宪章 + 主角 + 常驻作者笔记。它们先占预算，永不参与尾部截断。 ---- */
-  const fixed = [buildContract(session, world, card)];
+  // meta 必须记录「实际渲染的那一块」：作者写了 style_guide 时预设文风不渲染，
+  // 这里也要用同一个 includeStyle 口径，否则 meta 会报一条没进提示词的文风。
+  const authorStyle = str(card.prompt?.style_guide);
+  const craftBlock = renderCraftBlock(craft || resolveCraft(session?.settings || {}), { includeStyle: !authorStyle });
+  const fixed = [buildContract(session, world, card, { craft })];
   const charter = (card.charter || [])
     .map((c, i) => `${i + 1}. ${c.rule}`)
     .join('\n');
@@ -179,7 +198,11 @@ export function buildSystemLayer(
   return {
     text,
     // 覆盖率跟着「最终送进 system 的那段索引」测量，而不是渲染前的候选。
-    meta: { index_coverage: measureIndexCoverage(card, index, indexCapNow, indexMode) },
+    meta: {
+      index_coverage: measureIndexCoverage(card, index, indexCapNow, indexMode),
+      // 工艺块：渲染了几段、被 system 预算挤掉了哪几段（整条丢，不留半句）。
+      craft: craftBlock.meta,
+    },
   };
 }
 
@@ -555,8 +578,8 @@ function buildCurrent(playerText, images, branchChoice, extra, tail) {
 }
 
 /** 尾注：最后一条指令，紧贴玩家行动，影响力最强。只放此刻的事。 */
-function buildTail(card, { directive, isOpening }) {
-  return narratorTailInstruction(card, { directive, isOpening });
+function buildTail(card, { directive, isOpening, craft }) {
+  return narratorTailInstruction(card, { directive, isOpening, craft });
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -630,6 +653,11 @@ export async function assembleContext({
   });
 
   const card = buildEffectiveWorld(templateCard, deltas, fateState.unlocked);
+  // 工艺层：会话 settings 决定文风/对白/推进尺度；世界卡的 style_guide 永远压过预设文风。
+  // 它只影响「怎么写」，不参与「世界里有什么」。注意只允许**推进尺度**按拍覆盖
+  // （它只进尾注，不影响 system）；preset/dialogue 会改 system 文本，必须整会话恒定，
+  // 否则 system 逐字节冻结的缓存前缀就断了。
+  const craft = resolveCraft(session?.settings || {});
   // 辞书图谱：实体去重、包含关系、1 跳邻域都从投影后的世界计算。
   const graph = buildWorldGraph(card);
 
@@ -793,6 +821,7 @@ export async function assembleContext({
     indexCap: budget.system,
     graph: buildWorldGraph(templateCard),
     pastText: timelinePast.text,
+    craft,
   });
   const systemMsg = { role: 'system', content: systemLayer.text };
 
@@ -850,7 +879,7 @@ export async function assembleContext({
       ? `【开场】这是剧情的第一轮。请从下面的开场种子起笔：交代环境、主角处境与第一个可回应的情势，让在场的人物以各自的方式登场，并埋下核心悬念。\n\n${anchor.opening_seed}`
       : '【开场】这是剧情的第一轮。请依据世界宪章与主角设定，自行起笔一个强有力的开场。';
   }
-  const currentMsg = buildCurrent(playerText, images, branchChoice, extra, buildTail(card, { directive: directiveText, isOpening }));
+  const currentMsg = buildCurrent(playerText, images, branchChoice, extra, buildTail(card, { directive: directiveText, isOpening, craft }));
 
   /* ---- 汇总：system → 场次索引 → 最近原文 → 场次细节 → 场记单 → 检索 → 本轮 ---- */
   // 缓存友好的顺序：稳定前缀（system）→ 只追加的历史（场次索引 + 逐字原文）→
@@ -1018,6 +1047,8 @@ export async function assembleContext({
     budget: breakdown,
     // 本轮投影后的世界：下游 Agent（史官/世界呼吸/走向）用它，而不是模板。
     card,
+    // 本轮工艺配置：走向 Agent 与正文必须同尺度（见 craft.js）。
+    craft,
     state: ledger,
     ledger,
     anchor: anchor ? { id: anchor.id, label: anchor.label } : null,
@@ -1047,6 +1078,8 @@ export async function assembleContext({
         timeline_past: { ...timelinePast.meta, cap: pastCap },
         // 世界索引的覆盖率：卡越大，被截断的实体越多。只进 meta，不进提示词。
         index: systemLayer.meta.index_coverage,
+        // 工艺块落位：落进 system，被 system 预算约束，按 floor→time→style→dialogue 整条丢。
+        craft: systemLayer.meta.craft,
       },
       world_state_changes: deltas.length,
       facts: factsRendered,
