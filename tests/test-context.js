@@ -309,7 +309,7 @@ console.log('\n=== 装配清单：系统层索引覆盖 + 场记单元信息 ===
   ok(idx.rendered > 0 && idx.rendered <= idx.total, 'rendered 落在 0..total');
   ok(idx.tokens > 0 && idx.cap > 0, '索引自带 token 与容量');
   ok(Array.isArray(idx.dropped_names), '被截断的实体名可审计');
-  eq(ctx.meta.scene_sheet, { cast_mode: 'full', absentees: [] }, '场记单元信息：完整在场、无缺席者');
+  eq(ctx.meta.scene_sheet, { cast_mode: 'full', absentees: [], rumors: 0 }, '场记单元信息：完整在场、无缺席者');
 }
 
 console.log('\n=== 死亡：life_state 让死亡进入提示词 ===');
@@ -1571,6 +1571,53 @@ console.log('\n=== 分段演绎：完整工具循环（假流，无网络） ===
     abortName = err?.name || '';
   }
   eq(abortName, 'AbortError', '分段循环向上抛取消');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 世界呼吸：幕外流言进场记单（hidden 永不外泄） ===');
+{
+  const rumorCard = schema.normalizeCard({
+    title: '流言测试',
+    premise: '一座旧城，消息比雨下得快。',
+    entities: [
+      { id: 'wu-qing', type: 'person', name: '伍卿', weight: 1 },
+      { id: 'xie-mu', type: 'person', name: '谢沐', weight: 0.9 },
+      { id: 'ling-xuan', type: 'person', name: '凌璇', weight: 0.9 },
+      { id: 'chalou', type: 'place', name: '茶楼' },
+    ],
+    anchors: [{
+      id: 'prologue', label: '序章',
+      snapshot: { time: '初冬 · 黄昏', place: '茶楼', weather: '冷雨', tension: 0.3, characters: {} },
+      opening_seed: '雨停了。',
+    }],
+    player: { mode: 'original', name: '伍卿' },
+  });
+  const rumorWorld = { id: `w-rumor-${Date.now()}`, title: rumorCard.title, card: rumorCard };
+  store.saveWorld(rumorWorld);
+  const rumorSession = store.createSession({ id: `s-rumor-${Date.now()}`, title: 'r', worldId: rumorWorld.id });
+  store.createBranch(rumorSession.id, { branchId: 'main' });
+  store.setSessionAnchor(rumorSession.id, 'prologue', 'main');
+  const RS = { ...rumorSession, branch_id: 'main', anchor_id: 'prologue' };
+
+  store.addPatch(rumorSession.id, {
+    branch_id: 'main', agent: 'world-tick', kind: 'offstage_event', turn_no: 1, status: 'open',
+    severity: 'minor',
+    payload: { who: '谢沐', what: '在茶楼窗边朝这边看了很久', visibility: 'rumor' },
+    evidence: '测试：幕外流言',
+  });
+  store.addPatch(rumorSession.id, {
+    branch_id: 'main', agent: 'world-tick', kind: 'offstage_event', turn_no: 1, status: 'open',
+    severity: 'info',
+    payload: { who: '凌璇', what: '在祠堂烧掉一封信', visibility: 'hidden' },
+    evidence: '测试：幕后秘密',
+  });
+
+  const rctx = await engine.assembleContext({ session: RS, world: rumorWorld, turnNo: 2 });
+  const sheet = rctx.messages
+    .find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  ok(sheet.includes('幕外：谢沐'), 'rumor 事件进入压力段');
+  ok(!sheet.includes('凌璇'), 'hidden 事件不进提示词');
+  ok(rctx.meta.scene_sheet.rumors === 1, 'meta 记录渲染的流言条数');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

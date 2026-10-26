@@ -259,14 +259,16 @@ selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlac
   // 只在事实实体里选（人物由在场判定带出）；-> [{entry, score, why[]}]
   // 实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20；muted 条目不进入候选（静音 ≠ 删除）
 renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices, echoes,
-                   facts, knowledgeMatrix, omens, worldRuntime, playerNow, directive,
+                   facts, knowledgeMatrix, omens, rumors, worldRuntime, playerNow, directive,
                    absentees, capTokens })
   // codex = T0 全量事实条目，codexBrief = T1 一句；人物走 present 的 renderCastLine
   // absentees = [{name, state:'dead'|'gone', note}] —— 已故/离场者，渲染成「已故／离场：…」一行
+  // rumors = [{who, what, visibility:'rumor'|'public'}] —— 世界呼吸切场推演出的幕外流言，
+  //          最多渲染 2 条进既有「压力」段（`幕外：…`），不新增段落；hidden 由装配层挡掉
   // 预算：need 段（when/world/player/cast）先占，可选段后占。
   //   cast 段内部按 完整 → 紧凑(renderCastCompact) → 极简(renderCastMinimal) 降级，
   //   档位不足时截断极简文本；**cast 永不整段丢弃**（人群场不能没有在场锚点）。
-  // -> {text, meta}  meta:{ present, codex, codex_brief, echoes, facts, kept[], dropped[],
+  // -> {text, meta}  meta:{ present, codex, codex_brief, echoes, facts, rumors, kept[], dropped[],
   //                          codex_rendered, codex_brief_rendered, cast_mode:'full'|'compact'|'minimal',
   //                          absentees:[{name,state}], tokens }
 lookupCodex(card, queries, { limit })              // 模型主动检索：遍历全部实体（含 person）
@@ -297,7 +299,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //            system_blocks:{timeline_past:{count, rendered, tokens, dropped, cap},
 //                           index:{total, rendered, muted, dropped, dropped_names[<=20],
 //                                  tokens, cap, mode:'tree'|'flat'}},   // 世界索引覆盖率（事后统计，不参与注入）
-//            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}]},
+//            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}], rumors},
 //            dropped_sections, branch,
 //            coverage:{summary_to /* = 场次覆盖边界，保留旧名 */, recent_from, recent_to, turns,
 //                      scene_count, scene_to, scene_index_rendered,

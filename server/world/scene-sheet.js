@@ -421,6 +421,7 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  * @param {Array}  args.codex       选中的辞书条目（selectCodex 的 entry）
  * @param {object} args.voices      castId -> [原声台词]
  * @param {Array}  args.echoes      [{who,text,turn_no}]
+ * @param {Array}  args.rumors     世界呼吸推演的幕外流言 [{who,what,visibility}]
  * @param {string} args.directive   用户的本场指令
  * @param {number} args.capTokens
  * @returns {{text:string, meta:object}}
@@ -428,7 +429,7 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
 export function renderSceneSheet({
   ledger = {}, present = [], relations = [], threads = [], codex = [], codexBrief = [],
   voices = {}, echoes = [], facts = [], worldRuntime = {}, playerNow = null,
-  knowledgeMatrix = null, omens = null, directive = '', absentees = [], capTokens = 2200,
+  knowledgeMatrix = null, omens = null, rumors = [], directive = '', absentees = [], capTokens = 2200,
 } = {}) {
   const L = ledger || {};
   const meta = {
@@ -437,6 +438,7 @@ export function renderSceneSheet({
     codex_brief: codexBrief.length,
     echoes: echoes.length,
     facts: facts.length,
+    rumors: (rumors || []).length,
     kept: [],
     dropped: [],
     codex_rendered: 0,
@@ -508,6 +510,11 @@ export function renderSceneSheet({
   // 它复用压力段（不新增注入通道），且只对已解锁阶段生效。
   for (const o of (omens || []).slice(0, 2)) {
     pressure.push(`${o.who}正在往「${o.text}」的方向变`);
+  }
+  // 世界呼吸在切场时推演出的幕外动静：这是「这段时间世界上发生了什么」的可见面，
+  // 只以听来的/看见的流言形态出现（hidden 事件在装配层就被挡掉，永不外泄）。
+  for (const r of (rumors || []).slice(0, 2)) {
+    pressure.push(`幕外：${r.who}${r.what}`);
   }
   if ((threads || []).filter((t) => t.status === 'open').length) {
     pressure.push(`仍未回收的线索有 ${(threads || []).filter((t) => t.status === 'open').length} 条，本轮至少要动其中一条，或制造新的压力。`);

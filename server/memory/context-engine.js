@@ -36,7 +36,7 @@ import { evaluateFates, renderOmens } from '../world/fates.js';
 import { narratorTailInstruction } from '../prompts/narrator.js';
 import {
   getAssertions, getBranch, getRelations, getRecentTextForBranch,
-  getScenes, getState, getThreads, getTurnsForBranch, getVoiceMap, getWorldState,
+  getScenes, getState, getThreads, getTurnsForBranch, getVoiceMap, getWorldState, listPatches,
 } from './store.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v));
@@ -686,6 +686,37 @@ export async function assembleContext({
   /* ---- 关系 / 线索 / 已成立的事实 ---- */
   const relations = getRelations(sessionId, { branchId, limit: 60 });
   const threads = getThreads(sessionId, { branchId, limit: 40 });
+  // 场次边界：既用于「最近一次封场之后」的流言窗口，也用于下面的场次索引与原文窗口。
+  // 只取「本轮之前」已经封场的场次；当前这一场还在写，不能进索引。
+  const allScenes = getScenes(sessionId, { branchId, limit: 4000 });
+  const closedScenes = (Number.isInteger(turnNo) && turnNo > 0)
+    ? allScenes.filter((s) => s.turn_to < turnNo)
+    : allScenes;
+  const lastClosedTo = closedScenes.length
+    ? Number(closedScenes[closedScenes.length - 1].turn_to) || 0
+    : 0;
+
+  /* ---- 世界呼吸：把「幕外流言」送进场记单 ---- */
+  // 世界呼吸在切场时推演「这段时间世界上发生了什么」；设计意图一直是让这些事件
+  // 作为压力与流言进入下一场的场记单，但此前只写库、没有消费者。这里只取最近一次
+  // 封场及之后、rumor/public 且仍 open 的事件：hidden 永不外泄；每轮最多 2 条、
+  // 按人去过重，渲染进既有「压力」段（不新增段/层，也不动 system 缓存前缀）。
+  const rumors = [];
+  {
+    const seen = new Set();
+    for (const p of listPatches(sessionId, { branchId, status: 'open', limit: 24 })) {
+      if (p.kind !== 'offstage_event') continue;
+      const pl = p.payload || {};
+      if (pl.visibility !== 'rumor' && pl.visibility !== 'public') continue;
+      if ((Number(p.turn_no) || 0) < lastClosedTo) continue;
+      const who = str(pl.who);
+      const what = str(pl.what);
+      if (!who || !what || seen.has(who)) continue;
+      seen.add(who);
+      rumors.push({ who, what, visibility: pl.visibility });
+      if (rumors.length >= 2) break;
+    }
+  }
   const presentKeys = new Set(present.flatMap((c) => [c.id, c.name]));
   const allFacts = getAssertions(sessionId, { branchId, atTurn: Number.isInteger(turnNo) ? turnNo : 0, limit: 300 })
     .filter((a) => a.visibility !== 'secret' || presentKeys.has(a.subject));
@@ -731,6 +762,7 @@ export async function assembleContext({
     facts,
     knowledgeMatrix,
     omens,
+    rumors,
     worldRuntime: card.runtime || {},
     // 主角运行态从 system 搬到场记单：信息不丢，但 system 得以逐字节冻结。
     playerNow: {
@@ -765,12 +797,7 @@ export async function assembleContext({
   const systemMsg = { role: 'system', content: systemLayer.text };
 
   /* ---- 场次索引（长程记忆的载体，只追加） ---- */
-  // 只取「本轮之前」已经封场的场次；当前这一场还在写，不能进索引。
-  // 索引是缓存友好的：老场次的行永远不变，只有末尾追加新行。
-  const allScenes = getScenes(sessionId, { branchId, limit: 4000 });
-  const closedScenes = (Number.isInteger(turnNo) && turnNo > 0)
-    ? allScenes.filter((s) => s.turn_to < turnNo)
-    : allScenes;
+  // 场次边界已在上面算好（closedScenes）：索引只追加老场次行，末尾随封场增长。
   const sceneIndex = renderSceneIndex(closedScenes, budget.archive);
   const archiveMsg = sceneIndex.text ? { role: 'user', content: sceneIndex.text } : null;
 
@@ -1041,6 +1068,8 @@ export async function assembleContext({
       scene_sheet: {
         cast_mode: sheet.meta?.cast_mode || null,
         absentees: absentees.map((a) => ({ name: a.name, state: a.state })),
+        // 世界呼吸的幕外流言：进 pressure 段的条数（hidden 不计）。
+        rumors: rumors.length,
       },
       branch: branchId,
       // 覆盖清单：场次索引边界 + 原文窗口。两者应当首尾相接：
