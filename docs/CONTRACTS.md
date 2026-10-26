@@ -784,6 +784,12 @@ DELETE /api/sessions/:id/notes/:id
 POST   /api/sessions/:id/audit            -> 校勘报告
 POST   /api/sessions/:id/recall           body:{question} -> {found, answer, citations}
 POST   /api/sessions/:id/recall-history   body:{query, limit?, kinds?, at_turn?} -> {query, hits, text, meta}
+PATCH  /api/sessions/:id/turns/:turnNo    body:{kind?:'player'|'narrator', content}
+                                          // 手工改正文（红线 4 的唯一例外）。缺省 kind='narrator'；
+                                          // content 去空白后为空 -> 400；回合不存在 -> 404。
+                                          // 只改 turns.content 并置 edited，**不自动重跑记忆**
+                                          // （场次/断言仍是旧正文抽出来的，需要时手工重跑）。
+                                          // -> {turn}
 
 GET    /api/presets / GET /api/presets/:id
 POST   /api/presets                       body:{id, card}（只接受 v5 卡）
@@ -792,6 +798,29 @@ GET    /api/smith/materials
 POST   /api/smith/preview                 -> SSE  body:{dir, title, premise, max_chapters}
 POST   /api/smith/save                    body:{id?, card}
 ```
+
+### OpenAI 兼容层（`/v1`，`server/routes/openai.js`）
+
+不带 `session_id` 时是**透传**，带 `session_id` 时跑 orchestrator。
+
+```
+GET  /v1/models            -> {object:'list', data:[…]}
+                            // 运行期配置里 enabled 的模型 + 两个 roleplay 虚拟模型
+                            // ('roleplay-narrator' / 'roleplay-branch')，按 id 去重
+POST /v1/chat/completions
+  无 session_id  -> 透传上游（流式直接 pipe SSE，不经过 chatStream）
+                    // sanitizeBody() 负责剥掉本项目自定义字段：
+                    // session_id / settings / generate_branches / branch_choice /
+                    // roleplay / world_id / is_opening / directive
+                    // model 缺省时用运行期配置补；采样字段只在客户端显式给了才转发
+  有 session_id  -> 跑 runTurn()；正文作 content，推理作 reasoning_content/reasoning，
+                    走向附在正文末尾（也作纯文本，否则通用客户端看不到）
+                    // session_id === 'new' | 'auto'，或给了 settings 且该 id 不存在 -> 先建会话
+→ {error:{message, type?, code?}}（复用 OpenAI 错误形状）
+```
+
+**新增自定义请求字段时必须加进 `sanitizeBody()` 的解构名单**，否则会被原样转发给上游。
+新增 SSE 事件时，如果对 `/v1` 客户端有意义，还要同步这里的流式翻译。
 
 ## 前端契约
 
