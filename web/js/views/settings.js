@@ -942,7 +942,30 @@ export default {
       const modelOptions = [['', `跟随 .env（${effective.model || '—'}）`],
         ...draft.models.map((m) => [m.id, `${m.label || m.model} · ${draft.providers.find((p) => p.id === m.providerId)?.name || m.providerId}`])];
       const modelSel = makeSelect(modelOptions, binding.modelId || '');
-      const effortSel = makeSelect([['', `跟随 .env（${effective.effort ? (EFFORT_LABELS[effective.effort] || effective.effort) : '—'}）`], ...Object.entries(EFFORT_LABELS)], binding.effort || '');
+      const envAllowed = Array.isArray(cfg.models?.reasoning_efforts) && cfg.models.reasoning_efforts.length
+        ? cfg.models.reasoning_efforts
+        : EFFORTS_LOCAL;
+      const allowedFor = (modelId) => {
+        const m = modelId ? draft.models.find((x) => x.id === modelId) : null;
+        return m && Array.isArray(m.reasoningEfforts) && m.reasoningEfforts.length ? m.reasoningEfforts : envAllowed;
+      };
+      const effortSel = makeSelect(
+        [['', `跟随 .env（${effective.effort ? (EFFORT_LABELS[effective.effort] || effective.effort) : '—'}）`],
+          ...allowedFor(modelSel.value).map((e) => [e, EFFORT_LABELS[e] || e])],
+        binding.effort || '',
+      );
+      modelSel.addEventListener('change', () => {
+        const allowed = allowedFor(modelSel.value);
+        const current = effortSel.value;
+        effortSel.textContent = '';
+        effortSel.appendChild(el('option', { value: '' }, `跟随 .env（${effective.effort ? (EFFORT_LABELS[effective.effort] || effective.effort) : '—'}）`));
+        for (const e of allowed) {
+          const opt = el('option', { value: e }, EFFORT_LABELS[e] || e);
+          if (e === current) opt.selected = true;
+          effortSel.appendChild(opt);
+        }
+        if (!allowed.includes(current)) effortSel.value = '';
+      });
       const tempIn = el('input.field', {
         type: 'number', min: 0, max: 2, step: 0.05,
         value: typeof binding.temperature === 'number' ? binding.temperature : '',

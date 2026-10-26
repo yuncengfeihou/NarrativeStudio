@@ -92,7 +92,9 @@ function envModel() {
     contextWindow: config.context.maxTokens,
     maxOutput: envMaxOutput(),
     supportsReasoning: true,
-    reasoningEfforts: [...EFFORTS],
+    // .env 种子固定是 StepFun 上游（见 envProvider 的注释）；它只认三档。
+    // 其它服务商（MiniMax 等）走设置页配置，由 model.reasoningEfforts 自行声明。
+    reasoningEfforts: ['low', 'medium', 'high'],
     supportsTemperature: true,
     enabled: true,
   };
