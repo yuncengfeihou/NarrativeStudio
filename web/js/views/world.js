@@ -455,6 +455,33 @@ export default {
           : el('p.muted', {}, '（可以留空，让故事自己长。）'),
       ));
 
+      // canon_arc / divergence 没有运行时消费者：只在界面上标明「仅供参考」，
+      // 免得作者把它们当成引擎会强制执行的约束。
+      const arcs = card.canon_arc || [];
+      if (arcs.length) {
+        wrap.appendChild(el('div.sect', {},
+          el('h3.sect-title', {}, '参考弧线 · 仅供参考'),
+          el('p.sect-desc', {}, '改编时抓出的章级走向，只给作者对照：不注入提示词，引擎也不会强制按它演绎。'),
+          el('div.tl-list', {}, ...arcs.map((a) => el('div.tl-item', {},
+            el('span.tl-when', {}, a.chapter_from
+              ? `ch${a.chapter_from}${a.chapter_to && a.chapter_to !== a.chapter_from ? `–${a.chapter_to}` : ''}`
+              : (a.id || '—')),
+            el('span.tl-what', {}, a.label || a.summary || ''),
+          ))),
+        ));
+      }
+      const divergence = card.divergence || {};
+      const holds = divergence.must_hold || [];
+      const allows = divergence.allow || [];
+      if (holds.length || allows.length) {
+        wrap.appendChild(el('div.sect', {},
+          el('h3.sect-title', {}, '改编边界 · 仅供参考'),
+          el('p.sect-desc', {}, '制卡时记下的「必须保住 / 可以改」清单，同样不注入提示词，引擎不会强制执行。'),
+          holds.length ? el('p.sect-desc', {}, `必须保住：${holds.map((x) => (typeof x === 'string' ? x : x?.what || x?.note || '')).filter(Boolean).join('；')}`) : null,
+          allows.length ? el('p.sect-desc', {}, `可以改编：${allows.map((x) => (typeof x === 'string' ? x : x?.what || x?.note || '')).filter(Boolean).join('；')}`) : null,
+        ));
+      }
+
       return wrap;
     }
 

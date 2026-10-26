@@ -51,6 +51,14 @@ app.use((req, res, next) => {
   next();
 });
 
+// 运行期配置与会话状态随时可变：API 响应一律禁止缓存。
+// 只靠 express 默认 ETag 会让浏览器发条件请求、拿到 304 后继续用旧 JSON
+// （典型症状：设置页保存了模型配置，接口却仍是旧值）。
+app.use(['/api', '/v1'], (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 app.use('/api', worldsRouter);
 app.use('/api', sessionsRouter);
 app.use('/api', presetsRouter);

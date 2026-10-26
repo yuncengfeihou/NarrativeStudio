@@ -39,3 +39,7 @@ _work/real-10turn-report.json
 
 # 内部脚本说明
 /_work/README.md
+
+# 个人工具目录与临时探针输出（不入库）
+/.soloent/
+/_work/tmp-*.json

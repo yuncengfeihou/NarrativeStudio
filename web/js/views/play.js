@@ -44,6 +44,9 @@ export default {
     let statusView = null;
     let lastTurnNo = 0;
     let contextMeta = null;
+    // 普通回合不会全量刷新 detail（那只在挂载/重写/回滚时做），当前轮的轮数与字数
+    // 靠 SSE 增量预支；全量刷新拿到权威统计后再清零，避免 header 停在开局数据上。
+    let pendingStats = { turnNo: 0, chars: 0 };
     let assemblerBudget = null;
     let fallbackNotified = false;
 
@@ -201,7 +204,7 @@ export default {
     statusView = detail.playerView || null;
     paintStatusBar();
 
-    document.addEventListener('sessions:changed', onSessionsChanged);
+    window.addEventListener('sessions:changed', onSessionsChanged);
 
     async function loadWorldCard() {
       if (!detail.session?.world_id) return null;
@@ -222,9 +225,10 @@ export default {
     }
 
     function updateSub() {
-      const count = detail?.session?.turn_count ?? 0;
+      const count = pendingStats.turnNo || detail?.session?.turn_count || 0;
       const turns = detail?.turns || [];
-      const chars = turns.reduce((s, t) => s + (t.kind === 'narrator' ? (t.content || '').length : 0), 0);
+      const chars = turns.reduce((s, t) => s + (t.kind === 'narrator' ? (t.content || '').length : 0), 0)
+        + pendingStats.chars;
       const uso = detail?.usage;
       const parts = [];
       if (count) parts.push(`${count} 轮`);
@@ -453,6 +457,8 @@ export default {
       } finally {
         streaming = false;
         abortCtl = null;
+        // 取消/出错时占位行可能没被事件清掉；回合已结束，统一收尾。
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
         paintSend();
         updateSub();
         paintRing();
@@ -463,6 +469,25 @@ export default {
       let pendingGone = false;
       const dropPending = () => {
         if (!pendingGone) { pending.remove(); pendingGone = true; }
+      };
+
+      // 正文写完后，史官/走向/世界呼吸还要跑几分钟。这段窗口既没有正文增量也没有事件，
+      // 只在原地留一条「整理记忆与选项…」，避免看起来像卡死（不改协议、不加浮层）。
+      let postPending = null;
+      const showPostPending = () => {
+        if (postPending?.isConnected) return;
+        const host = scroll.querySelector('.play-body');
+        if (!host) return;
+        postPending = el('div.gen-pending', {},
+          el('span.typing-dots', {}, el('i'), el('i'), el('i')),
+          el('span', {}, '整理记忆与选项…'),
+        );
+        host.insertBefore(postPending, branchHost);
+        if (isNearBottom(scroll, 200)) scrollToBottom(false);
+      };
+      const dropPostPending = () => {
+        postPending?.remove();
+        postPending = null;
       };
 
       const ensureLive = () => {
@@ -477,7 +502,9 @@ export default {
         switch (evt.type) {
           case 'turn_start': {
             lastTurnNo = evt.turn_no || lastTurnNo + 1;
+            pendingStats = { turnNo: lastTurnNo, chars: 0 };
             fallbackNotified = false;
+            updateSub();
             const host = scroll.querySelector('.play-body');
             const mark = turnMark(lastTurnNo, Date.now());
             if (pending.parentNode) host.insertBefore(mark, pending);
@@ -563,8 +590,15 @@ export default {
             break;
           case 'narrative_done':
             if (live && evt.content) live.text = evt.content;
+            if (evt.content) {
+              pendingStats.chars = String(evt.content).length;
+              updateSub();
+            }
+            // 后处理（史官/走向/世界呼吸）可能还要几分钟：先把进度挂在原地。
+            if (live?.text?.trim()) showPostPending();
             break;
           case 'narrative_reset':
+            pendingStats.chars = 0;
             if (live) { live.text = ''; live.reasoning = ''; }
             if (live?.prose) live.prose.innerHTML = '';
             if (live?.thinkBody) live.thinkBody.textContent = '';
@@ -600,7 +634,11 @@ export default {
             break;
           }
           case 'done': {
+            dropPostPending();
             if (evt.usage && live) live.usage = evt.usage;
+            // 头部统计先用本轮的累计值兜底，随后 sessions:changed 会用服务端最新数据校正。
+            if (evt.session_usage && detail) detail.usage = evt.session_usage;
+            if (Number(evt.turn_no)) pendingStats.turnNo = Math.max(pendingStats.turnNo || 0, Number(evt.turn_no));
             finalize(evt);
             updateSub();
             paintRing();
@@ -608,6 +646,7 @@ export default {
             break;
           }
           case 'error':
+            dropPostPending();
             throw new Error(evt.message || '生成失败');
           default:
             break;
@@ -980,6 +1019,7 @@ export default {
         });
         finalize();
         detail = await api.getSession(sessionId);
+        pendingStats = { turnNo: 0, chars: 0 };
         renderTurns();
         updateSub();
         paintRing();
@@ -990,6 +1030,7 @@ export default {
       } finally {
         streaming = false;
         abortCtl = null;
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
         paintSend();
       }
     }
@@ -1034,6 +1075,7 @@ export default {
       try {
         await api.rollback(sessionId, turnNo);
         detail = await api.getSession(sessionId);
+        pendingStats = { turnNo: 0, chars: 0 };
         renderTurns();
         clearBranches();
         showContinue();
@@ -1437,6 +1479,7 @@ export default {
         });
         finalize();
         detail = await api.getSession(sessionId);
+        pendingStats = { turnNo: 0, chars: 0 };
         updateSub();
       } catch (err) {
         pending.remove();
@@ -1445,6 +1488,7 @@ export default {
       } finally {
         streaming = false;
         abortCtl = null;
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
         paintSend();
       }
     }
@@ -1453,6 +1497,8 @@ export default {
       api.getSession(sessionId).then((d) => {
         detail = d;
         statusView = d.playerView || null;
+        // 服务端统计已经是权威值，增量预支的当前轮清零，避免重复计数。
+        pendingStats = { turnNo: 0, chars: 0 };
         paintStatusBar();
         updateSub();
       }).catch(() => {});
@@ -1464,7 +1510,7 @@ export default {
     return {
       unmount() {
         abortCtl?.abort();
-        document.removeEventListener('sessions:changed', onSessionsChanged);
+        window.removeEventListener('sessions:changed', onSessionsChanged);
         document.title = '叙事台';
       },
     };

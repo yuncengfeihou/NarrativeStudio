@@ -59,6 +59,10 @@ function closeAllOverlays() {
     n.remove();
   });
   lockCount = 0;
+  // loading 也是浮层：视图在 showLoading 后中途被路由切走时，unmount 不会补 hideLoading，
+  // 计数一旦泄漏，「处理中」就会常驻在每一页（只能刷新才能清掉）。所有权跟着路由走。
+  loadingCount = 0;
+  $('#loading')?.classList.remove('is-visible');
   document.body.style.overflow = '';
 }
 

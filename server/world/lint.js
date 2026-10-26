@@ -228,6 +228,22 @@ export function lintCard(card) {
       { ids: notInIndex.slice(0, 20).map((e) => e.id), dropped: notInIndex.length });
   }
 
+  /* ---- 仅供作者参考的改编元数据（info）----
+   * canon_arc / divergence 当前没有任何运行时消费者：不注入提示词，也不参与校勘、解锁或
+   * 强制节拍。报告出来，避免作者把它们误当成「引擎会执行的约束」。 */
+  const arcs = Array.isArray(card.canon_arc) ? card.canon_arc : [];
+  if (arcs.length) {
+    push('info', 'canon_arc_reference_only',
+      `canon_arc 有 ${arcs.length} 条弧线（${arcs.slice(0, 3).map((a) => a.label || a.id || '未命名').join('、')}）：只作作者对照，不注入提示词，也不参与演绎与解锁`);
+  }
+  const divergence = card.divergence || {};
+  const mustHold = Array.isArray(divergence.must_hold) ? divergence.must_hold : [];
+  const allow = Array.isArray(divergence.allow) ? divergence.allow : [];
+  if (mustHold.length || allow.length) {
+    push('info', 'divergence_reference_only',
+      `改编边界（must_hold ${mustHold.length} 条 / allow ${allow.length} 条）同样只作作者对照：不注入提示词，引擎不会强制执行`);
+  }
+
   const bySeverity = { blocker: 0, major: 0, minor: 0, info: 0 };
   for (const issue of issues) bySeverity[issue.severity] = (bySeverity[issue.severity] || 0) + 1;
 
