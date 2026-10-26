@@ -33,8 +33,10 @@ export function narratorTailInstruction(card, { directive = '', isOpening = fals
   if (directive) {
     lines.push(`【本场指令】（作者对这一幕的要求，优先级高于上文一切默认规范）\n${directive}`);
   }
-  // 篇幅只跟作者写的卡走；没写就不提，避免默认区间变成字数填充任务。
-  lines.push(`【此刻的要求】从场记单接续，不要复述它。${p.length ? `篇幅 ${p.length}。` : ''}`);
-  lines.push('结尾停在一个必须立刻回应的情势前。不要总结，不要预告，不要平稳收尾。');
+  // 篇幅只跟作者写的卡走；没写就不提。
+  // 结尾不做强制：这一拍可以停在需要回应的情势前，也可以自然走完或把时间推进；
+  // 强制「必须立刻回应」会让时间永远停在同一个下午。
+  const len = p.length ? `篇幅 ${p.length}。` : '';
+  lines.push(`【此刻的要求】从场记单接续，不要复述它。不要总结，不要预告。${len}`);
   return lines.join('\n');
 }

@@ -151,6 +151,12 @@ console.log('\n=== 删干净的证据 ===');
   ok(!all.includes('【世界细节】'), '没有 lorebook 式的「世界细节」注入头');
   ok(!all.includes('keys'), '没有触发键概念');
   ok(!/第\s*\d+\s*幕/.test(all), '没有幕编号');
+  // 收束不再强制「每拍必须加压/必须立刻回应」——时间倒退与张力跑步机的两个源头。
+  ok(!all.includes('必须立刻回应'), '没有「必须立刻回应」的收束强制');
+  ok(!all.includes('禁止平稳收尾'), '没有「禁止平稳收尾」');
+  ok(!all.includes('结尾必须留钩子'), '没有强制钩子');
+  ok(!all.includes('每一段都必须推动情势'), '没有「每段必须推动」');
+  ok(all.includes('也可以让这一拍自然走完'), '收束改为许可式（自然走完/推进时间都合法）');
 
   // 未来剧情不注入
   ok(!all.includes('黎婆确诊癌症'), 'timeline 的 future 事件不进提示词');
