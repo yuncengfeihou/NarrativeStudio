@@ -893,6 +893,40 @@ console.log('\n=== 卡级 lint：future 信息泄漏 blocker（A-2） ===');
   ok(!noSource.issues.some((i) => i.code === 'future_leak'), '没有 source.canon_cutoff 的卡不做猜测');
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 卡级默认工艺：只存取值 id，不给正文留副本 ===');
+{
+  // 空卡没有 craft 字段 → 归一成空对象（不是 undefined，下游不用判空两遍）。
+  eq(schema.normalizeCard({}).craft, {}, '缺省 craft 归一成空对象');
+
+  // 只认三个轴；多余字段丢弃，正文绝不进卡（正文的主人只有 craft.js 的当前表）。
+  const c = schema.normalizeCard({
+    title: '带默认工艺',
+    craft: {
+      craft_preset: 'plain',
+      craft_dialogue: 'paragraph',
+      pacing: 'bold',
+      text: '这段正文不该被保存到卡里',
+      options: [{ value: 'x' }],
+    },
+  });
+  eq(c.craft, { craft_preset: 'plain', craft_dialogue: 'paragraph', pacing: 'bold' },
+    '只保留三个取值 id，正文与条目数组被丢弃');
+  ok(!('text' in c.craft) && !('options' in c.craft), '卡里不含工艺正文（正文单点归 craft.js）');
+
+  // 别名：卡里写成 preset/dialogue 也认（手写卡更自然）。
+  eq(schema.normalizeCard({ craft: { preset: 'light' } }).craft, { craft_preset: 'light' },
+    'preset 别名归一到 craft_preset');
+
+  // 空串被丢掉；数字这种非空值转成字符串（不静默丢）。
+  eq(schema.normalizeCard({ craft: { craft_preset: '', pacing: 42 } }).craft,
+    { pacing: '42' }, '空串被丢掉，数字转成字符串保留');
+
+  // 合法性不在这里判定：卡是纯形状层，取值是否存在归 resolveCraft。
+  eq(schema.normalizeCard({ craft: { craft_preset: '不存在的取值' } }).craft,
+    { craft_preset: '不存在的取值' }, 'schema 不判定取值合法性（交给 resolveCraft 回落）');
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-world-card: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

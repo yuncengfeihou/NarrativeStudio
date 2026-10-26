@@ -145,7 +145,10 @@ export function buildSystemLayer(
   // meta 必须记录「实际渲染的那一块」：作者写了 style_guide 时预设文风不渲染，
   // 这里也要用同一个 includeStyle 口径，否则 meta 会报一条没进提示词的文风。
   const authorStyle = str(card.prompt?.style_guide);
-  const craftBlock = renderCraftBlock(craft || resolveCraft(session?.settings || {}), { includeStyle: !authorStyle });
+  const craftBlock = renderCraftBlock(
+    craft || resolveCraft(session?.settings || {}, {}, card.craft),
+    { includeStyle: !authorStyle },
+  );
   const fixed = [buildContract(session, world, card, { craft })];
   const charter = (card.charter || [])
     .map((c, i) => `${i + 1}. ${c.rule}`)
@@ -653,11 +656,13 @@ export async function assembleContext({
   });
 
   const card = buildEffectiveWorld(templateCard, deltas, fateState.unlocked);
-  // 工艺层：会话 settings 决定文风/对白/推进尺度；世界卡的 style_guide 永远压过预设文风。
-  // 它只影响「怎么写」，不参与「世界里有什么」。注意只允许**推进尺度**按拍覆盖
-  // （它只进尾注，不影响 system）；preset/dialogue 会改 system 文本，必须整会话恒定，
+  // 工艺层：会话 settings > 世界卡卡级默认（`card.craft`）> 程序默认。
+  // 卡的 style_guide 永远压过预设文风。它只影响「怎么写」，不参与「世界里有什么」。
+  // 注意只允许**推进尺度**按拍覆盖（它只进尾注，不影响 system）；
+  // preset/dialogue 会改 system 文本，必须整会话恒定，
   // 否则 system 逐字节冻结的缓存前缀就断了。
-  const craft = resolveCraft(session?.settings || {});
+  const craft = resolveCraft(session?.settings || {}, {}, templateCard.craft);
+
   // 辞书图谱：实体去重、包含关系、1 跳邻域都从投影后的世界计算。
   const graph = buildWorldGraph(card);
 

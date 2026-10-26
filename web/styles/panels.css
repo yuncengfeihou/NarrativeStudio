@@ -194,6 +194,69 @@
   padding: 0 6px;
   line-height: 1.5;
 }
+/* 会话里存的取值已被作者删掉时的提示：不能装作「没设置过」。 */
+.craft-hint.is-warn { color: var(--warn, #b4690e); }
+.craft-foot {
+  margin-top: 14px;
+  padding-top: 10px;
+  border-top: 1px solid var(--line);
+  font-size: var(--fs-caption);
+  color: var(--ink-4);
+  line-height: 1.6;
+}
+
+/* -------------------------------------------------------------------------
+ * 设置页：演绎工艺编辑器
+ * 每条取值一张可展开的卡片；折叠时只看标题与副标题，展开才编辑正文。
+ * ---------------------------------------------------------------------- */
+.craft-edit-axis { margin-bottom: 22px; }
+.craft-edit-axis:last-child { margin-bottom: 0; }
+.craft-edit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.craft-edit-title { font-size: var(--fs-label); font-weight: 600; color: var(--ink-1); }
+.craft-edit-where { font-size: var(--fs-caption); color: var(--ink-4); }
+.craft-edit-note { font-size: var(--fs-caption); color: var(--ink-3); line-height: 1.5; margin-bottom: 10px; }
+.craft-edit-item {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--paper-raised);
+  padding: 10px 12px;
+  margin-bottom: 8px;
+}
+.craft-edit-item.is-default { border-color: var(--accent); background: var(--accent-soft); }
+.craft-edit-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.craft-edit-row + .craft-edit-row { margin-top: 8px; }
+.craft-edit-id {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: var(--fs-caption);
+  color: var(--ink-4);
+  flex: 0 0 auto;
+}
+.craft-edit-body {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--line);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.craft-edit-problems {
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  padding: 10px 12px;
+  margin-bottom: 14px;
+  font-size: var(--fs-caption);
+  line-height: 1.6;
+  color: var(--warn, #b4690e);
+}
 
 /* -------------------------------------------------------------------------
  * Dialog

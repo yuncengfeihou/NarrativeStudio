@@ -1133,13 +1133,11 @@ export default {
      * 这里只做「选」，不做自由文本——作者的具体文风写在世界卡的 prompt.style_guide，
      * 卡的优先级永远压过这里的预设（界面文案要让人看得出来这一点）。
      * ===================================================================== */
-    let craftCatalogCache = null;
-
     async function loadCraftCatalog() {
-      if (craftCatalogCache) return craftCatalogCache;
+      // 不缓存：作者可能在设置页改了取值表，缓存会让抽屉继续显示旧选项
+      // （这正是 D3 那个「抄第二份清单」bug 的另一种形状）。
       const cfg = await api.getConfig();
-      craftCatalogCache = cfg?.craft || { axes: [] };
-      return craftCatalogCache;
+      return cfg?.craft || { axes: [] };
     }
 
     function craftValue(key) {
@@ -1182,18 +1180,28 @@ export default {
         render: (body) => {
           for (const axis of catalog.axes) {
             const cur = craftValue(axis.key);
+            const options = axis.options || [];
+            // 会话里存的值可能已被作者在设置页删掉。此时既不能高亮任何一项，
+            // 也不能假装「没设置过」——前者是空白抽屉，后者会静默改掉用户的选择。
+            // 处理方式：照「未设置」渲染默认项，并在轴上显式说明那个取值没了。
+            const known = options.some((o) => o.value === cur);
+            const effective = known ? cur : undefined;
             const group = el('div.craft-group');
             group.appendChild(el('div.craft-label', {}, axis.label));
             if (axis.hint) group.appendChild(el('div.craft-hint', {}, axis.hint));
+            if (cur !== undefined && !known) {
+              group.appendChild(el('div.craft-hint.is-warn', {},
+                `本局用的取值「${cur}」已被删除，这里按默认演绎；保存后即以选中的为准。`));
+            }
             const list = el('div.craft-list');
-            for (const opt of axis.options || []) {
-              const active = cur === opt.value;
+            for (const opt of options) {
+              const active = effective === opt.value;
               const btn = el('button.craft-option' + (active ? '.is-active' : ''), { type: 'button' },
                 el('span.craft-option-main', {},
                   el('span.craft-option-label', {}, opt.label),
                   opt.desc ? el('span.craft-option-desc', {}, opt.desc) : null,
                   // 未显式设置任何值时，标出哪一项是默认（否则第一次打开看不出「当前」）。
-                  cur === undefined && opt.value === axis.default
+                  effective === undefined && opt.value === axis.default
                     ? el('span.craft-option-tag', {}, '默认') : null,
                 ),
               );
@@ -1207,6 +1215,8 @@ export default {
             group.appendChild(list);
             body.appendChild(group);
           }
+          body.appendChild(el('div.craft-foot', {},
+            '要增删这些条目或改它们的正文，去「设置 → 演绎工艺」。'));
         },
       });
       return sheet;

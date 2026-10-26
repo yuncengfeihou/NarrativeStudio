@@ -1762,6 +1762,51 @@ console.log('\n=== 工艺层：取值归一 / 同一真源 / 同卡继承 ===');
     'pick：非法值归一，不把脏值搬进新会话');
 }
 
+console.log('\n=== 工艺层：卡级默认的优先级 / 取值被删后的回落 ===');
+{
+  const craft = await import('../server/world/craft.js');
+  const { resolveCraft, pickCraftHint, renderCraftBlock } = craft;
+  const D = craft.DEFAULT_CRAFT;
+
+  // 优先级：本拍 overrides > 会话 settings > 卡级默认 > 程序默认。
+  eq(resolveCraft({}, {}, { craft_preset: 'plain' }).preset, 'plain',
+    '卡级默认：会话没设置时用它');
+  eq(resolveCraft({ craft_preset: 'literary' }, {}, { craft_preset: 'plain' }).preset, 'literary',
+    '会话 settings 压过卡级默认');
+  eq(resolveCraft({ craft_preset: 'literary' }, { preset: 'gufeng' }, { craft_preset: 'plain' }).preset, 'gufeng',
+    '本拍 overrides 压过会话 settings');
+  eq(resolveCraft({}, {}).preset, D.preset, '两者都没有：回程序默认');
+  eq(resolveCraft({}, {}, { craft_preset: '不存在的取值' }).preset, D.preset,
+    '卡级默认是坏值时回程序默认（不留无效值）');
+  eq(resolveCraft({ craft_preset: '不存在的取值' }).preset, D.preset,
+    '会话里是坏值时回程序默认');
+
+  // pickCraftHint：只摘非空的三个轴，别名合并。
+  eq(pickCraftHint({ preset: 'light', 'craft_dialogue': 'short', pacing: '' }),
+    { craft_preset: 'light', craft_dialogue: 'short' }, 'pickCraftHint：别名归一、空值丢弃');
+  eq(pickCraftHint(null), {}, 'pickCraftHint：null 安全');
+
+  // 卡级默认要真的进 system 文本：card.craft 设成 plain 时，
+  // 渲染出的工艺块里出现 plain 的正文，而不是默认 preset 的正文。
+  const plainText = craft.BUILTIN.preset.plain.text;
+  const block = renderCraftBlock(resolveCraft({}, {}, { craft_preset: 'plain' })).text;
+  ok(block.includes(plainText), '卡级默认（plain）的正文真的渲染进了工艺块');
+  // 「default」这个取值的正文是空串（＝不额外指定），所以用另一条有正文的预设做对照。
+  ok(!block.includes(craft.BUILTIN.preset.literary.text),
+    '卡级默认生效时，没选中的预设正文不出现（不是把所有预设都塞进去）');
+
+  // 世界卡的 style_guide 压过预设文风：此时工艺块里不该出现预设正文。
+  const withAuthor = renderCraftBlock(resolveCraft({}, {}, { craft_preset: 'plain' }), { includeStyle: false }).text;
+  ok(!withAuthor.includes(plainText), '作者写了文风时，预设文风正文不渲染');
+  ok(withAuthor.includes('怎么写'), '但通用底线仍然渲染（它是硬保留）');
+
+  // pacing 的两段正文分别去尾注与走向，不能串台。
+  const p = resolveCraft({ pacing: 'bold' });
+  eq(p.pacingText, craft.BUILTIN.pacing.bold.tail, 'pacing 尾注正文取 tail');
+  eq(p.pacingBranch, craft.BUILTIN.pacing.bold.branch, 'pacing 走向正文取 branch');
+  ok(p.pacingText !== p.pacingBranch, 'tail 与 branch 是两段不同的文本（不是同一份复用）');
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-context: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

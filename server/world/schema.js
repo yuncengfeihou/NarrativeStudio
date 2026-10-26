@@ -81,6 +81,24 @@ function normalizePrompt(raw) {
   };
 }
 
+/**
+ * 卡级默认工艺（可选）。
+ *
+ * 只存三个取值 id，不存正文——正文的唯一主人在 `server/world/craft.js` 的当前表。
+ * 卡里写的是「这张卡默认用什么写法」，取值被作者在设置页删掉时由
+ * `resolveCraft()` 回落到程序默认（不在这里判定合法性：schema 是纯形状层，
+ * 不该知道当前有哪些取值）。
+ */
+function normalizeCardCraft(raw) {
+  const c = obj(raw);
+  const out = {};
+  for (const [key, alias] of [['craft_preset', 'preset'], ['craft_dialogue', 'dialogue'], ['pacing', 'pacing']]) {
+    const v = str(c[key] ?? c[alias]);
+    if (v) out[key] = v;
+  }
+  return out;
+}
+
 function normalizeCharter(raw) {
   return asArray(raw)
     .map((c) => {
@@ -591,6 +609,9 @@ export function normalizeCard(raw) {
       }
       : null,
     prompt,
+    // 卡级默认工艺：只存取值 id（正文归 craft.js）。开局时作会话 settings 的初始值，
+    // 会话内仍可随时改；作者改卡不会改写已开的会话（settings 是会话的，不是卡的）。
+    craft: normalizeCardCraft(c.craft),
     charter: normalizeCharter(c.charter),
     entities,
     timeline,

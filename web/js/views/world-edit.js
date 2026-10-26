@@ -444,7 +444,94 @@ export default {
       notesInput.addEventListener('input', () => { prompt.narrator_notes = notesInput.value; });
       wrap.appendChild(fgroup('演绎附注', notesInput, '比如「留白多于解释」「不要替玩家做决定」。'));
 
+      /* ---- 绝对禁止（prompt.bans）----
+         这些条目每一轮都进 system 的「# 绝对禁止（作者钦定）」段，
+         走向 Agent 也读同一份，作为「每条走向都不得违反」的硬边界。
+         以前只有渲染没有编辑口——卡里写了的改不了，只能手改 JSON 或打 API。 */
+      wrap.appendChild(bansGroup());
+
+      /* ---- 卡级默认工艺（card.craft）----
+         只存取值 id，正文归服务端的工艺表。会话开局时作初始值，
+         会话内仍可在演绎页改；改卡不会改已在跑的局（会话只读自己的快照）。 */
+      wrap.appendChild(cardCraftGroup());
+
       return wrap;
+    }
+
+    /** 「绝对禁止」编辑器：自由文本条目列表。 */
+    function bansGroup() {
+      const prompt = model.card.prompt;
+      if (!Array.isArray(prompt.bans)) prompt.bans = [];
+      const list = el('div', { style: 'display:flex;flex-direction:column;gap:7px;' });
+      const card = el('div.group-card', { style: 'padding:var(--sp-3);display:flex;flex-direction:column;gap:7px;' });
+      card.appendChild(list);
+      paintBans();
+
+      function paintBans() {
+        clear(list);
+        if (!prompt.bans.length) {
+          list.appendChild(el('div.charter-empty', {},
+            '还没有禁项。写「绝对不能发生的事」，一句一条。'));
+        }
+        prompt.bans.forEach((b, i) => {
+          const ta = growTextarea(el('textarea.field', {
+            rows: 2, placeholder: '例如：不得让伍卿突然会武。',
+          }), 120);
+          ta.value = b || '';
+          ta.addEventListener('input', () => { prompt.bans[i] = ta.value; markDirty(); });
+          list.appendChild(el('div.charter-edit-item', {},
+            el('span.charter-edit-idx', {}, String(i + 1).padStart(2, '0')),
+            ta,
+            el('button.btn-icon', {
+              type: 'button', title: '删除这条禁项',
+              onclick: () => { prompt.bans.splice(i, 1); markDirty(); paintBans(); },
+            }, icon('trash', { size: 13 })),
+          ));
+        });
+        list.appendChild(el('button.cast-add', {
+          type: 'button',
+          onclick: () => { prompt.bans.push(''); markDirty(); paintBans(); },
+        }, icon('plus', { size: 13 }), '添加一条禁项'));
+        paintTabBadges();
+      }
+
+      return fgroup('绝对禁止', card,
+        '每轮都写进契约，也约束「走向」选项。写事情，不写词表——禁词表那种做法会误伤正常台词。');
+    }
+
+    /** 卡级默认工艺：三轴各一个下拉。选项从 /api/config 的 craft 段读，前端不留清单。 */
+    function cardCraftGroup() {
+      if (!model.card.craft || typeof model.card.craft !== 'object') model.card.craft = {};
+      const craft = model.card.craft;
+      const box = el('div.group-card', { style: 'padding:var(--sp-3);display:flex;flex-direction:column;gap:7px;' });
+      const note = el('div.fgroup-hint', {}, '读取工艺选项中…');
+      box.appendChild(note);
+
+      api.getConfig().then((cfg) => {
+        const axes = cfg?.craft?.axes || [];
+        if (!axes.length) { note.textContent = '服务端没有提供工艺选项。'; return; }
+        clear(box);
+        for (const axis of axes) {
+          const sel = el('select.field', { style: 'font-size:var(--fs-caption);' });
+          // 空值 = 跟随程序默认；卡不强制任何写法。
+          sel.appendChild(el('option', { value: '' }, '跟随程序默认'));
+          for (const opt of axis.options || []) {
+            sel.appendChild(el('option', { value: opt.value }, opt.label));
+          }
+          sel.value = craft[axis.key] || '';
+          sel.addEventListener('change', () => {
+            const v = sel.value;
+            if (v) craft[axis.key] = v; else delete craft[axis.key];
+            markDirty();
+          });
+          box.appendChild(editorRow(axis.label, sel));
+          if (axis.hint) box.appendChild(el('div.fgroup-hint', {}, axis.hint));
+        }
+      }).catch(() => { note.textContent = '读取工艺选项失败。'; });
+
+      return fgroup('默认演绎工艺',
+        box,
+        '开局时用这套写法。会话内还能在演绎页随时改；只存取值，正文在「设置 → 演绎工艺」。');
     }
 
     /* ---- 世界规则 ---- */

@@ -23,7 +23,7 @@ import { normalizeCard, renderCardText } from '../world/schema.js';
 import { lintCard } from '../world/lint.js';
 import { createSessionWithSettings } from '../agents/orchestrator.js';
 import { currentPlan } from '../memory/context-plan.js';
-import { normalizeCraftSettings, pickCraftSettings } from '../world/craft.js';
+import { normalizeCraftSettings, pickCraftSettings, pickCraftHint } from '../world/craft.js';
 
 export const worldsRouter = Router();
 
@@ -50,13 +50,17 @@ function settingsFromWorld(world, overrides = {}) {
     title: overrides.title || card.title || world.title,
     narrator_effort: overrides.narrator_effort || 'high',
     style_tags: card.genre,
-    // 先铺上一局的写法，再让本次 overrides 覆盖：显式传入的轴优先于继承值。
+    // 工艺层三层兜底，优先级从低到高：卡的默认写法 → 上一局的写法 → 本次显式传入。
+    // 卡级默认回答「这张卡适合怎么写」，上一局回答「你上次为这张卡选了什么」——
+    // 后者是用户的选择，应当压过卡的默认；两者都缺才由归一函数补程序默认。
+    ...pickCraftHint(card.craft),
     ...inheritedCraft(world.id),
     ...overrides,
   };
   // 工艺层取值归一：非法值不静默落库。缺省轴在这里补齐（开局要有确定值），
   // 与 `POST /api/sessions` 走同一个函数，避免两条开局路径对「什么算合法」分叉。
-  Object.assign(settings, normalizeCraftSettings(settings, { fill: true }));
+  // `defaults` 传卡级默认：某一轴既没继承也没显式给时，落到这张卡自己偏好的写法。
+  Object.assign(settings, normalizeCraftSettings(settings, { fill: true, defaults: card.craft }));
   // 会话级上限只能是模型窗口内的一次收窄；超过窗口按窗口处理（装配层还会再 clamp）。
   const requested = Number(settings.context_max_tokens);
   settings.context_max_tokens = Number.isFinite(requested) && requested > 0 ? Math.min(requested, cap) : cap;

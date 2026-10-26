@@ -16,6 +16,7 @@ NarrativeStudio/
 │   │   ├── schema.js       v5 卡形状归一（entities 单命名空间）+ 实体链接
 │   │   ├── scene-sheet.js  世界索引 / 辞书挑选 / 场记单渲染 / 辞书检索（纯函数）
 │   │   ├── craft.js        演绎工艺层：底线 / 文风取向 / 对白形态 / 推进尺度 / 结尾落点（纯函数）
+│   │   ├── craft-store.js  工艺取值表的持久化（meta 表 craft_config_v1；校验失败不写库）
 │   │   ├── effective.js    EffectiveWorld 投影（模板 + world_state）
 │   │   └── state-paths.js  world_state 路径白名单
 │   ├── agents/
@@ -36,6 +37,7 @@ NarrativeStudio/
 │   │   ├── worlds.js       世界卡 + 辞书钉选 + 导出
 │   │   ├── sessions.js     会话 + 回合 + 记忆六表 + 分支 + 校勘 + 回忆
 │   │   ├── presets.js      世界卡种子（磁盘 ⇄ 数据库，只接受 v5 卡）
+│   │   ├── craft.js        工艺取值表编辑（GET/PUT/DELETE /api/craft）
 │   │   ├── smith.js        制卡流水线
 │   │   ├── openai.js       /v1 兼容层
 │   │   └── static.js       web 静态托管
@@ -78,6 +80,10 @@ NarrativeStudio/
   source: { kind, title, chapters, canon_cutoff, path } | null,
   prompt: { premise, tone[], style_guide, narrator_notes, bans[], pov, length, tense },
   // length 可选：空 = 不限定字数（引擎不注入篇幅要求）；有值才按作者写的渲染
+  // bans[] 是作者钦定的「绝对禁止」，每轮写进契约并约束走向；自由文本条目，不是逐字词表。
+  craft: { craft_preset?, craft_dialogue?, pacing? },
+  // 卡级默认工艺：只存三个取值 id，正文永远在 craft.js 的取值表里（不在卡里留副本）。
+  // 开局时作为 settings 的兜底；会话内仍可在演绎页改。空值/非法值会被丢弃，由 resolveCraft 兜底。
   charter: [{ rule, kind }],
   entities: [{           // 单一命名空间：人物与设定集条目同表，id 在整卡内唯一
     id, type: 'person|place|institution|item|faction|concept|custom',
@@ -276,30 +282,66 @@ lookupCodex(card, queries, { limit })              // 模型主动检索：遍�
 renderCodexHit(entry)                              // 单条渲染；person 额外渲染身份/口吻/性格/知识边界
 ```
 
-## 工艺层接口（`server/world/craft.js`，纯函数，不读库）
+## 工艺层接口（`server/world/craft.js` 纯函数 + `server/world/craft-store.js` 持久化）
+
+**取值表本身是可编辑的**：内置表是兜底，数据库里可以存一份覆盖（meta 表
+`craft_config_v1`）。`CRAFT_AXES` / `DEFAULT_CRAFT` 由当前生效的表**派生**，不是手写常量
+——这是「前后端各抄一份清单」那个 bug 的根治办法，不要再把它们改回硬编码。
 
 ```js
-import { CRAFT_AXES, DEFAULT_CRAFT, resolveCraft, renderCraftBlock, CRAFT_CHECKLIST,
-         craftCatalog, normalizeCraftSettings, pickCraftSettings }
+import { BUILTIN, CRAFT_AXES, DEFAULT_CRAFT, resolveCraft, renderCraftBlock, CRAFT_CHECKLIST,
+         normalizeCraftConfig, applyCraftConfig, craftConfigView, craftCatalog,
+         normalizeCraftSettings, pickCraftSettings, pickCraftHint }
   from './world/craft.js';
 
-CRAFT_AXES         // { preset:[...], dialogue:[...], pacing:[...] } 三轴取值白名单
-DEFAULT_CRAFT      // { preset:'default', dialogue:'default', pacing:'adventurous' }
-resolveCraft(settings, overrides?)   // 会话 settings + 本拍覆盖 -> 归一后的工艺配置
+BUILTIN            // 内置表快照 {preset, dialogue, pacing, defaults}，冻结；「恢复内置」的对照
+CRAFT_AXES         // 派生：{ preset:[{value,label,desc,text}], dialogue:[...], pacing:[{...,tail,branch}] }
+DEFAULT_CRAFT      // 派生：{ preset, dialogue, pacing } 各轴默认取值
+resolveCraft(settings?, overrides?, cardCraft?)   // -> 归一后的工艺配置
+  // 优先级：本拍 overrides > 会话 settings > 卡级默认（cardCraft）> 程序默认
 renderCraftBlock(craft, { capTokens, includeStyle })   // -> {text, meta}
   // 取舍优先级 floor → time → style → dialogue（超 system 预算时整条丢，不留半句）
 CRAFT_CHECKLIST    // 构思清单 4 问；只进分段演绎的固定尾部 user，不进 system、不占层预算
-craftCatalog()     // -> {axes:[{axis, key, label, hint, default, options:[{value,label,desc}]}]}
-  // 前端「演绎工艺」抽屉的唯一数据源（GET /api/config 的 craft 段）。前端不得自抄清单。
-normalizeCraftSettings(settings, { fill })   // 写库前归一：非法值回退默认
-  // fill=true 把缺省轴补成默认（开局用）；fill=false 只校验已给的键（PATCH 用，
-  // 避免用户只想改 pacing 时把另两轴一并写死）
-pickCraftSettings(settings)        // 只摘三个工艺轴（同卡再开一局继承写法用，不搬设备参数）
+
+normalizeCraftConfig(raw)          // -> {tables, defaults, problems}；校验失败**整轴**回落内置
+applyCraftConfig(raw, {source, extraProblems})   // 把配置装进模块状态 -> {source, problems}
+craftConfigView()   // 编辑器全体：每轴带 axis/key/label/hint/where/field/default/max_options/options[]
+craftCatalog()      // 抽屉骨架：{axes:[{axis,key,label,hint,default,options:[{value,label,desc}]}], source}
+  // GET /api/config 的 craft 段。前端「演绎工艺」抽屉的唯一数据源，前端不得自抄清单。
+normalizeCraftSettings(settings, { fill, defaults })   // 写库前归一：非法值回退默认
+  // fill=true 把缺省轴补成默认（开局用），defaults 传卡级默认时优先它
+  // fill=false 只校验已给的键（PATCH 用，避免用户只想改 pacing 时把另两轴一并写死）
+pickCraftSettings(settings, { strict })   // 只摘三个工艺轴（同卡再开一局继承写法用）
+pickCraftHint(card.craft)          // 卡级默认：只取非空且合法的轴，给 settingsFromWorld 用
 ```
 
 `resolveCraft()` 返回 `{preset, name, style:{id,name,text}, dialogue, dialogueText, pacing,
 pacingText, pacingBranch, floor, time, ending}`。`pacingText` 进尾注、`pacingBranch` 进走向 Agent，
 两者必须共读同一个 `pacing` 值。
+
+```js
+import { initCraftConfig, saveCraftConfig, resetCraftConfig, loadCraftConfigRaw }
+  from './world/craft-store.js';
+
+initCraftConfig()          // 启动装载（index.js 在 getDb() 之后调）；存储损坏 -> 回内置 + problems
+saveCraftConfig(body)      // 先校验 -> 生效 -> 最后落盘；校验失败绝不写库
+                           // -> {ok:true, view} | {ok:false, error, problems}
+resetCraftConfig()         // 删键 + 回内置 -> {ok:true, view}
+loadCraftConfigRaw()       // JSON 坏掉时返回 {__corrupt:true}，不抛错
+```
+
+**取值表的持久化契约**：`craft_config_v1` 不存在 = 从未自定义（用内置）；
+存在且合法 = 用库里的表；存在但坏掉 = 回内置并在 `view.problems` 里说明原因。
+保存时**整轴**回落到内置，不做「部分生效」——作者以为改了 5 条、实际生效 3 条是最坏的结果。
+
+| 路由 | 说明 |
+|---|---|
+| `GET /api/craft` | `{craft: craftConfigView(), catalog: craftCatalog()}` |
+| `PUT /api/craft` | body 为 `{axis:{default, options:[{value,label,desc,text|tail+branch}]}}`；400 带 `{error:{message}, problems}` |
+| `DELETE /api/craft` | 恢复内置表 |
+
+`GET /api/config` 的 `craft` 段给**选择器**（抽屉、卡级默认下拉）用的骨架，
+`GET /api/craft` 给**编辑器**用的全文；两者都来自 `craft.js` 的同一份模块状态。
 
 ## Context Engine 接口
 
@@ -697,9 +739,10 @@ PATCH  /api/worlds/:id                     // 同上，blocker 拒绝保存（42
 DELETE /api/worlds/:id
 POST   /api/worlds/:id/entities/:entityId/pin body:{pinned}   // -> {entities}；muted 随整卡保存
 POST   /api/worlds/:id/sessions           body:{anchor_id?, settings?}
-                                          // 工艺三轴（craft_preset / craft_dialogue / pacing）
-                                          // 缺省时继承这张卡最近一局的值；显式传入的轴压过继承值；
-                                          // 非法值归一成默认（normalizeCraftSettings）。
+                                          // 工艺三轴（craft_preset / craft_dialogue / pacing）取值的
+                                          // 优先级：本请求 settings > 这张卡最近一局的继承值 >
+                                          // 卡级默认（card.craft，作者在编辑器「默认演绎工艺」里选）
+                                          // > 程序默认。非法值归一成默认（normalizeCraftSettings）。
                                           // 其余会话参数（context_max_tokens 等）不跨局继承。
 
 GET    /api/sessions?world_id=

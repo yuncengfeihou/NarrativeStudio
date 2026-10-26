@@ -11,7 +11,9 @@ import { presetsRouter } from './routes/presets.js';
 import { smithRouter } from './routes/smith.js';
 import { fontsRouter } from './routes/fonts.js';
 import { staticRouter } from './routes/static.js';
+import { craftRouter } from './routes/craft.js';
 import { getDb } from './memory/store.js';
+import { initCraftConfig } from './world/craft-store.js';
 import { currentPlan } from './memory/context-plan.js';
 
 try {
@@ -24,6 +26,8 @@ try {
 
 // 触发建表（幂等）
 getDb();
+// 工艺取值表：存储里有自定义就装进来（校验失败该轴回落到内置，问题进 GET /api/craft）。
+initCraftConfig();
 
 const app = express();
 
@@ -61,6 +65,7 @@ app.use(['/api', '/v1'], (req, res, next) => {
 
 app.use('/api', worldsRouter);
 app.use('/api', sessionsRouter);
+app.use('/api', craftRouter);
 app.use('/api', presetsRouter);
 app.use('/api', smithRouter);
 app.use('/api', fontsRouter);

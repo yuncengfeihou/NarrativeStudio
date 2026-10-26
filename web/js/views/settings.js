@@ -23,6 +23,7 @@ const SECTIONS = [
   ['reading', '阅读'],
   ['telemetry', '遥测'],
   ['model', '模型'],
+  ['craft', '演绎工艺'],
   ['context', '上下文与记忆'],
   ['api', '接入'],
 ];
@@ -127,12 +128,14 @@ export default {
       telemetry.appendChild(telemetryGroup());
       const model = section('model', '模型', '选择服务商与模型，并给每个 Agent 分配。保存后立即生效，无需重启。');
       model.appendChild(modelGroup());
+      const craftSec = section('craft', '演绎工艺', '「怎么写」的三条轴：文风取向、对白形态、推进尺度。这里可以增删条目、改它们的正文与默认值。');
+      craftSec.appendChild(craftGroup());
       const contextSec = section('context', '上下文与记忆', '当前生效的预算与节奏。模型能读多长，取决于上面绑定的模型上下文窗口。');
       contextSec.appendChild(contextGroup());
       const apiSec = section('api', '接入', '把叙事台当成一个 OpenAI 兼容服务来用。');
       apiSec.appendChild(apiGroup());
 
-      sectionNodes = [appearance, type, reading, telemetry, model, contextSec, apiSec];
+      sectionNodes = [appearance, type, reading, telemetry, model, craftSec, contextSec, apiSec];
       content.append(...sectionNodes);
       content.appendChild(about());
 
@@ -1013,6 +1016,241 @@ export default {
     }
 
     /* ---- 上下文与记忆（只读） ---- */
+    /* ---- 演绎工艺（取值表本身：增删改条目与正文） ----
+       这一节与上面的运行时配置是两套独立的保存：工艺表走 PUT /api/craft，
+       有自己的「保存 / 恢复内置」。混进 cfg 的 draft 会让「保存模型配置」
+       顺手把工艺表也提交一遍，失败时不知道该报哪个错。 */
+    let craftEditor = null;   // {view, draft, dirty}
+
+    function craftGroup() {
+      const wrap = el('div.group');
+      const box = el('div');
+      wrap.appendChild(box);
+      paintCraftEditor(box);
+      return wrap;
+    }
+
+    function paintCraftEditor(box) {
+      clear(box);
+
+      // 工艺表是独立请求：首帧还没回来时先占位，不要解构 null。
+      if (!craftEditor) {
+        box.appendChild(el('div.group-card', {},
+          el('div.group-note', { style: 'margin:0;' }, '正在读取工艺表…')));
+        return;
+      }
+
+      const { view, draft } = craftEditor;
+      const card = el('div.group-card');
+
+      // 顶条：来源与问题。校验失败或存储损坏时必须让人看见，不能静默回落。
+      const head = el('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;' },
+        el('div.group-note', { style: 'margin:0;' },
+          view.source === 'db' ? '正在使用自定义工艺表（已保存到数据库）。'
+            : '正在使用内置工艺表。改动并保存后会成为自定义工艺表。'),
+        el('div', { style: 'display:flex;gap:8px;' },
+          el('button.btn.btn-ghost', {
+            type: 'button',
+            onclick: async () => {
+              if (!craftEditor.dirty || await confirmResetCraft()) {
+                try {
+                  const res = await api.resetCraft();
+                  craftEditor = { view: res.craft, draft: JSON.parse(JSON.stringify({ axes: res.craft.axes })), dirty: false };
+                  paintCraftEditor(box);
+                  toast('已恢复内置工艺表', { type: 'success' });
+                } catch (err) { toast(err.message || '恢复失败', { type: 'error' }); }
+              }
+            },
+          }, '恢复内置'),
+          el('button.btn.btn-primary', {
+            type: 'button',
+            onclick: () => saveCraftEditor(box),
+          }, '保存工艺表'),
+        ),
+      );
+      head.lastChild.lastChild.disabled = !craftEditor.dirty;
+      card.appendChild(head);
+
+      if (view.problems?.length) {
+        card.appendChild(el('div.craft-edit-problems', {},
+          '工艺表有问题，以下轴已回落内置：',
+          el('br'), ...view.problems.map((p) => el('div', {}, `· ${p}`))));
+      }
+
+      for (const axis of draft.axes) {
+        card.appendChild(craftAxisBlock(axis, box));
+      }
+      box.appendChild(card);
+    }
+
+    function craftAxisBlock(axis, box) {
+      const block = el('div.craft-edit-axis');
+      block.appendChild(el('div.craft-edit-head', {},
+        el('span.craft-edit-title', {}, axis.label),
+        el('span.craft-edit-where', {}, `→ ${axis.where || axis.field}`),
+      ));
+      if (axis.hint) block.appendChild(el('div.craft-edit-note', {}, axis.hint));
+      block.appendChild(el('div.craft-edit-note', {},
+        `这一轴最多 ${axis.max_options || 24} 条。默认值必须在条目里选；删掉一个正在用的取值，老会话会按新默认演绎并在抽屉里提示。`));
+
+      const list = el('div');
+      block.appendChild(list);
+
+      function paintList() {
+        clear(list);
+        const values = new Set(axis.options.map((o) => o.value));
+        for (const opt of axis.options) {
+          list.appendChild(craftOptionCard(axis, opt, values, paintList, box));
+        }
+        list.appendChild(el('button.btn.btn-ghost', {
+          type: 'button', style: 'width:100%;margin-top:2px;',
+          onclick: () => {
+            const n = axis.options.length + 1;
+            let v = `custom-${n}`;
+            const used = new Set(axis.options.map((o) => o.value));
+            while (used.has(v)) v = `custom-${++n}`;
+            const fresh = { value: v, label: '', desc: '', text: '' };
+            if (axis.axis === 'pacing') { fresh.tail = ''; fresh.branch = ''; delete fresh.text; }
+            axis.options.push(fresh);
+            markCraftDirty();
+            paintList();
+          },
+        }, '添加一条'));
+      }
+      paintList();
+      return block;
+    }
+
+    function craftOptionCard(axis, opt, values, repaint, box) {
+      const isDefault = axis.default === opt.value;
+      const item = el('div.craft-edit-item' + (isDefault ? '.is-default' : ''));
+
+      const labelInput = el('input.field', {
+        type: 'text', value: opt.label || '', placeholder: '名称（演绎页抽屉里显示）',
+        style: 'flex:1;min-width:0;',
+      });
+      labelInput.addEventListener('input', () => { opt.label = labelInput.value; markCraftDirty(); });
+
+      const defaultBtn = el('button.btn.btn-ghost', {
+        type: 'button', title: '把这个取值设为该轴的默认',
+        onclick: () => { axis.default = opt.value; markCraftDirty(); repaint(); },
+      }, isDefault ? '默认' : '设为默认');
+
+      const delBtn = el('button.btn.btn-ghost', {
+        type: 'button', title: '删除这条取值',
+        onclick: async () => {
+          if (axis.options.length <= 1) { toast('每一轴至少要留一条取值', { type: 'error' }); return; }
+          axis.options = axis.options.filter((o) => o !== opt);
+          if (axis.default === opt.value) axis.default = axis.options[0].value;
+          markCraftDirty();
+          repaint();
+        },
+      }, '删除');
+
+      item.appendChild(el('div.craft-edit-row', {},
+        el('span.craft-edit-id', {}, opt.value),
+        labelInput,
+        defaultBtn,
+        delBtn,
+      ));
+
+      const body = el('div.craft-edit-body');
+      const descInput = el('input.field', {
+        type: 'text', value: opt.desc || '', placeholder: '副标题（一句话说明这种写法的取向）',
+      });
+      descInput.addEventListener('input', () => { opt.desc = descInput.value; markCraftDirty(); });
+      body.appendChild(formLine('副标题', descInput));
+
+      if (axis.axis === 'pacing') {
+        // 推进尺度的正文分两处：尾注（影响正文）与走向（影响选项）。
+        // 拆成两个框是因为它们进的是不同的提示词位置，
+        // 作者需要能分别调——「正文敢推」和「选项敢给」不是一回事。
+        const tail = el('textarea.field', { rows: 3, placeholder: '尾注里怎么写（作用于正文）' });
+        tail.value = opt.tail || '';
+        tail.addEventListener('input', () => { opt.tail = tail.value; markCraftDirty(); });
+        body.appendChild(formLine('尾注正文', tail, '写进每一轮的尾注，决定这一拍推进多少。'));
+
+        const branch = el('textarea.field', { rows: 3, placeholder: '走向里怎么写（作用于选项）' });
+        branch.value = opt.branch || '';
+        branch.addEventListener('input', () => { opt.branch = branch.value; markCraftDirty(); });
+        body.appendChild(formLine('走向正文', branch, '写进走向 Agent 的提示词，决定选项的风险水位。'));
+      } else {
+        const text = el('textarea.field', { rows: 5, placeholder: '正文：这段文字会整段写进演绎契约（system）' });
+        text.value = opt.text || '';
+        text.addEventListener('input', () => { opt.text = text.value; markCraftDirty(); });
+        body.appendChild(formLine('正文', text,
+          axis.axis === 'preset'
+            ? '会写进 system 的「怎么写」段。世界卡的「文风」非空时以卡为准，这里不生效。'
+            : '会写进 system 的对白段。'));
+      }
+      item.appendChild(body);
+      return item;
+    }
+
+    function markCraftDirty() {
+      if (craftEditor) craftEditor.dirty = true;
+      // 顶栏保存按钮要跟着亮起来，否则改完不知道去哪保存。
+      const sec = document.getElementById('settings-craft');
+      const btn = sec?.querySelector('.btn-primary');
+      if (btn) btn.disabled = false;
+    }
+
+    function confirmResetCraft() {
+      return new Promise((resolve) => {
+        openSheet({
+          title: '放弃未保存的改动？',
+          confirmText: '放弃',
+          cancelText: '取消',
+          render(body) {
+            body.appendChild(el('div', { style: 'font-size:var(--fs-body);line-height:1.7;' },
+              '当前工艺表有未保存的改动，恢复内置会丢掉它们。'));
+          },
+          onConfirm() { resolve(true); },
+        });
+        // openSheet 没有 onCancel 回调；用户点取消或遮罩时靠 view 卸载感知不到。
+        // 这里只处理「确认」这一条路径，取消时 Promise 不 resolve 也就不会执行恢复。
+      });
+    }
+
+    async function saveCraftEditor(box) {
+      const payload = {};
+      for (const axis of craftEditor.draft.axes) {
+        payload[axis.axis] = {
+          default: axis.default,
+          options: axis.options.map((o) => {
+            const e = { value: o.value, label: o.label || '', desc: o.desc || '' };
+            if (axis.axis === 'pacing') { e.tail = o.tail || ''; e.branch = o.branch || ''; }
+            else e.text = o.text || '';
+            return e;
+          }),
+        };
+      }
+      try {
+        const res = await api.saveCraft(payload);
+        craftEditor = {
+          view: res.craft,
+          draft: JSON.parse(JSON.stringify({ axes: res.craft.axes })),
+          dirty: false,
+        };
+        paintCraftEditor(box);
+        toast('已保存。演绎页抽屉与卡级默认都会用新表', { type: 'success' });
+      } catch (err) {
+        // 400 时服务端会带 problems：逐条列出，让人知道哪一条不合法。
+        const problems = Array.isArray(err.problems) ? err.problems : [];
+        if (problems.length) {
+          toast(`保存失败：${problems[0]}`, { type: 'error' });
+          const box2 = document.querySelector('.craft-edit-problems');
+          if (box2) box2.remove();
+          const node = el('div.craft-edit-problems', {},
+            `保存失败，以下条目有问题（共 ${problems.length} 条）：`,
+            el('br'), ...problems.slice(0, 8).map((p) => el('div', {}, `· ${p}`)));
+          document.getElementById('settings-craft')?.querySelector('.group-card')?.prepend(node);
+        } else {
+          toast(err.message || '保存失败', { type: 'error' });
+        }
+      }
+    }
+
     function contextGroup() {
       if (!cfg) {
         return el('div.group', {}, el('div.group-card', {},
@@ -1130,6 +1368,25 @@ export default {
       render();
       scroll.scrollTop = keep;
     }).catch(() => {});
+
+    // 工艺表与运行时配置分开加载：一个坏了不该拖垮另一个。
+    api.getCraft().then((res) => {
+      craftEditor = {
+        view: res.craft,
+        draft: JSON.parse(JSON.stringify({ axes: res.craft.axes })),
+        dirty: false,
+      };
+      const keep = scroll.scrollTop;
+      render();
+      scroll.scrollTop = keep;
+    }).catch(() => {
+      const sec = document.getElementById('settings-craft');
+      const box = sec?.querySelector('.group');
+      if (box) {
+        clear(box);
+        box.appendChild(el('div.craft-edit-problems', {}, '读取工艺表失败。请确认服务端已重启。'));
+      }
+    });
 
     return {
       unmount() {

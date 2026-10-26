@@ -224,6 +224,23 @@ export const api = {
     return request('/api/fonts', { signal });
   },
 
+  /* ---------------- 演绎工艺（取值表本身，可增删改） ---------------- */
+
+  /** GET /api/craft -> { craft, catalog }（craft 带每条正文，编辑器用） */
+  getCraft(signal) {
+    return request('/api/craft', { signal });
+  },
+
+  /** PUT /api/craft  body:{preset:{default,options[]},dialogue:…,pacing:…}；空体 = 恢复内置 */
+  saveCraft(body, signal) {
+    return request('/api/craft', { method: 'PUT', body, signal });
+  },
+
+  /** DELETE /api/craft -> 回到内置表 */
+  resetCraft(signal) {
+    return request('/api/craft', { method: 'DELETE', signal });
+  },
+
   /* ---------------- 世界卡 ---------------- */
 
   /** GET /api/worlds -> [{id,title,subtitle,cover_hue,tags,card,session_count}] */

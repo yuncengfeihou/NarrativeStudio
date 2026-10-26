@@ -302,6 +302,93 @@ console.log('\n=== 7. meta 表读写（不写迁移，只有这一个键） ==='
   eq(store.deleteMeta('test-key'), false, '重复删除返回 false');
 }
 
+console.log('\n=== 8. 工艺取值表：可编辑、可校验、可恢复内置 ===');
+{
+  const craft = await import('../server/world/craft.js');
+  const cs = await import('../server/world/craft-store.js');
+  const store2 = await import('../server/memory/store.js');
+
+  // 起点：内置表（存储里没有这个键）。
+  store2.deleteMeta('craft_config_v1');
+  craft.applyCraftConfig(null);
+  eq(cs.loadCraftConfigRaw(), null, '从未自定义时读到 null');
+  eq(craft.CRAFT_AXES.preset.length, 6, '内置 preset 六条');
+  eq(craft.CRAFT_AXES.pacing.length, 3, '内置 pacing 三条');
+
+  // 存一份自定义：删两条、改一条正文、换默认。
+  const body = {
+    preset: {
+      default: 'light',
+      options: [
+        { value: 'light', label: '轻', desc: '短句', text: '写短句。' },
+        { value: 'gufeng', label: '古风', desc: '半文半白', text: '半文半白。' },
+      ],
+    },
+    dialogue: { default: 'default', options: [{ value: 'default', label: '默认', desc: '', text: '对白照常。' }] },
+    pacing: {
+      default: 'bold',
+      options: [
+        { value: 'bold', label: '激进', desc: '敢推', tail: '推一点。', branch: '给险一点的选项。' },
+        { value: 'adventurous', label: '正常', desc: '', tail: '照常。', branch: '照常。' },
+      ],
+    },
+  };
+  const saved = cs.saveCraftConfig(body);
+  eq(saved.ok, true, '保存合法配置成功');
+  eq(craft.CRAFT_AXES.preset.length, 2, '保存后 preset 只剩两条（删掉的真的没了）');
+  eq(craft.DEFAULT_CRAFT.preset, 'light', '保存后默认值换成 light');
+  eq(craft.DEFAULT_CRAFT.pacing, 'bold', '保存后 pacing 默认换成 bold');
+  ok(typeof store2.getMeta('craft_config_v1') === 'string', '配置落进 meta 表');
+  eq(cs.loadCraftConfigRaw().preset.options.length, 2, '读回存储：preset 两条');
+
+  // 正文进提示词：preset 文本替换、pacing 的两段分别到尾注与走向。
+  const r1 = craft.resolveCraft({ craft_preset: 'light', pacing: 'bold' });
+  eq(r1.style.text, '写短句。', 'preset 正文取自定义的那份');
+  eq(r1.pacingText, '推一点。', 'pacing 的尾注正文取自定义的那份');
+  eq(r1.pacingBranch, '给险一点的选项。', 'pacing 的走向正文取自定义的那份');
+
+  // 校验：坏值不落盘，且库里的配置保持不变。
+  const before = store2.getMeta('craft_config_v1');
+  const bad = cs.saveCraftConfig({
+    preset: { default: 'x', options: [{ value: 'x', label: '', desc: '', text: 't' }] },
+  });
+  eq(bad.ok, false, '缺 label 的条目被拒绝');
+  ok(Array.isArray(bad.problems) && bad.problems.length > 0, '拒绝时带 problems 说明');
+  eq(store2.getMeta('craft_config_v1'), before, '校验失败不写库（库里仍是上一份好的）');
+  eq(craft.DEFAULT_CRAFT.preset, 'light', '校验失败也不改正在生效的表');
+
+  const bad2 = cs.saveCraftConfig({
+    preset: { default: 'a', options: [{ value: 'A BAD', label: 'x', desc: '', text: 't' }] },
+  });
+  eq(bad2.ok, false, '取值 id 不合法（含空格/大写）被拒绝');
+
+  const bad3 = cs.saveCraftConfig({
+    pacing: { default: 'p1', options: [{ value: 'p1', label: 'x', desc: '', tail: '只有尾注' }] },
+  });
+  eq(bad3.ok, false, 'pacing 缺 branch 正文被拒绝');
+
+  // 恢复内置：删键 + 表回内置。
+  cs.resetCraftConfig();
+  eq(store2.getMeta('craft_config_v1'), null, 'reset 删除 meta 键');
+  eq(craft.CRAFT_AXES.preset.length, 6, 'reset 后 preset 回到六条');
+  eq(craft.DEFAULT_CRAFT.preset, 'default', 'reset 后默认回到 default');
+
+  // 存储损坏：不抛错，回内置，并留下可见的问题记录。
+  store2.setMeta('craft_config_v1', '{ 不是 JSON');
+  eq(cs.loadCraftConfigRaw().__corrupt, true, '损坏配置被识别为 corrupt');
+  const view = cs.initCraftConfig();
+  eq(view.source, 'builtin', '损坏配置启动后回内置');
+  ok(view.problems.some((p) => p.includes('不是合法 JSON')), '损坏原因进 problems（可在设置页看到）');
+  eq(craft.CRAFT_AXES.preset.length, 6, '损坏回落不影响内置表');
+
+  // 空对象保存 = 恢复内置（与 DELETE 同义）。
+  cs.saveCraftConfig(body);
+  eq(craft.CRAFT_AXES.preset.length, 2, '先存一份自定义');
+  cs.saveCraftConfig({});
+  eq(store2.getMeta('craft_config_v1'), null, '空对象保存等价于恢复内置');
+  eq(craft.CRAFT_AXES.preset.length, 6, '恢复内置后 preset 六条');
+}
+
 console.log(`\n结果：${pass} 通过，${fail} 失败`);
 try {
   fs.rmSync(DB_PATH, { force: true });
