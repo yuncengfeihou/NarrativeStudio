@@ -394,7 +394,7 @@ export default {
       const styleRows = [
         ['pov', '视角', '第三人称限知，镜头贴在主角身上'],
         ['style_guide', '文风', '短句为主，对白与动作交错'],
-        ['length', '篇幅', '1600-2600 字'],
+        ['length', '篇幅', '留空＝按这一拍的需要'],
         ['tense', '时态', '过去时叙述'],
       ];
       const styleCard = el('div.group-card');

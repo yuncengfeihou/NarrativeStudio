@@ -25,6 +25,7 @@ const { shouldPrecheckRetrieval } = await import('../server/agents/retrieval.js'
 const { currentPlan, planContext } = await import('../server/memory/context-plan.js');
 const { comparePromptMessages } = await import('../server/memory/prompt-drift.js');
 const sceneSheet = await import('../server/world/scene-sheet.js');
+const { narratorTailInstruction } = await import('../server/prompts/narrator.js');
 
 let pass = 0;
 let fail = 0;
@@ -175,6 +176,34 @@ console.log('\n=== 删干净的证据 ===');
   ok(all.includes('凌玥（'), '索引里有人物');
   ok(sys.indexOf('【前史】') > sys.indexOf('【世界索引】'), '前史排在世界索引之后');
   ok(sys.indexOf('【前史】') < sys.indexOf('【主角】'), '前史排在主角之前（canon 区）');
+}
+
+console.log('\n=== 篇幅：作者可选 ===');
+{
+  // 卡里没写篇幅 → 契约与尾注都不出现「篇幅」，字数由这一拍的内容需要决定。
+  eq(card.prompt.length, '', '未写篇幅时归一为空');
+  const c0 = await engine.assembleContext({ session: S, world, turnNo: 1, isOpening: true });
+  const sys0 = c0.messages[0].content;
+  ok(!sys0.includes('篇幅'), '未写篇幅：契约不出现篇幅');
+  ok(!narratorTailInstruction(card).includes('篇幅'), '未写篇幅：尾注不出现篇幅');
+  ok(/3\. 时态/.test(sys0), '未写篇幅：演出范式编号连续（篇幅不占号）');
+
+  // 作者写了篇幅 → 原样进契约与尾注；这是作者的自由，不是引擎默认。
+  const lenCard = schema.normalizeCard({
+    title: '篇幅测试', premise: '一座旧城。', anchors: [],
+    prompt: { length: '1800 字' },
+    entities: [{ id: 'a-he', type: 'person', name: '阿禾', role: '守夜人' }],
+    player: { mode: 'original', name: '旅人' },
+  });
+  const lenWorld = { id: `w-len-${Date.now()}`, title: '篇幅', card: lenCard };
+  store.saveWorld(lenWorld);
+  const lenSession = store.createSession({ id: `s-len-${Date.now()}`, title: 'l', worldId: lenWorld.id });
+  store.createBranch(lenSession.id, { branchId: 'main' });
+  const lctx = await engine.assembleContext({
+    session: { ...lenSession, branch_id: 'main' }, world: lenWorld, turnNo: 1,
+  });
+  ok(lctx.messages[0].content.includes('篇幅：本轮 1800 字'), '作者写了篇幅：进契约');
+  ok(narratorTailInstruction(lenCard).includes('篇幅 1800 字'), '作者写了篇幅：进尾注');
 }
 
 console.log('\n=== 前史不依赖 anchor.snapshot ===');

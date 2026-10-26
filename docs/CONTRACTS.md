@@ -76,6 +76,7 @@ NarrativeStudio/
   title, subtitle, genre[], tags[],
   source: { kind, title, chapters, canon_cutoff, path } | null,
   prompt: { premise, tone[], style_guide, narrator_notes, bans[], pov, length, tense },
+  // length 可选：空 = 不限定字数（引擎不注入篇幅要求）；有值才按作者写的渲染
   charter: [{ rule, kind }],
   entities: [{           // 单一命名空间：人物与设定集条目同表，id 在整卡内唯一
     id, type: 'person|place|institution|item|faction|concept|custom',

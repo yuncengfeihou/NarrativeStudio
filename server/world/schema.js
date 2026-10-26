@@ -74,7 +74,9 @@ function normalizePrompt(raw) {
     narrator_notes: str(p.narrator_notes),
     bans: asStringArray(p.bans),
     pov: str(p.pov) || '第三人称限知，镜头贴在主角身上',
-    length: str(p.length) || '1600-2600 字',
+    // 篇幅是作者可选项：留空 = 不限定字数，由这一拍的内容需要决定。
+    // 引擎不再给默认区间，避免把「篇幅」变成填充任务。
+    length: str(p.length),
     tense: str(p.tense) || '过去时叙述',
   };
 }

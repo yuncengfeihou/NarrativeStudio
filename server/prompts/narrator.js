@@ -33,7 +33,8 @@ export function narratorTailInstruction(card, { directive = '', isOpening = fals
   if (directive) {
     lines.push(`【本场指令】（作者对这一幕的要求，优先级高于上文一切默认规范）\n${directive}`);
   }
-  lines.push(`【此刻的要求】从场记单接续，不要复述它。篇幅 ${p.length || '1600-2600 字'}。`);
+  // 篇幅只跟作者写的卡走；没写就不提，避免默认区间变成字数填充任务。
+  lines.push(`【此刻的要求】从场记单接续，不要复述它。${p.length ? `篇幅 ${p.length}。` : ''}`);
   lines.push('结尾停在一个必须立刻回应的情势前。不要总结，不要预告，不要平稳收尾。');
   return lines.join('\n');
 }
