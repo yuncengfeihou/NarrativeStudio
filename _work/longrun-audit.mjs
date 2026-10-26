@@ -169,7 +169,8 @@ try {
   for (const t of narr) {
     const tail = String(t.content || '').slice(-120);
     if (/必须立刻|必须在这|必须出声|必须决定|必须选择|必须给出|必须回应|该抽手|该选/.test(tail)) must += 1;
-    if (/[一二三]声|[一二三]——|数到|倒数/.test(tail)) countdown += 1;
+    // 只认真正的倒数/数声；「哞了一声」这类动物叫声不算
+    if (/(第[一二三]声|数到|倒数|数了[一二三]|数[一二三]声)/.test(tail)) countdown += 1;
   }
   console.log(`结尾公式     含「必须…」${must}/${narr.length}｜含倒数/数声 ${countdown}/${narr.length}`);
 
