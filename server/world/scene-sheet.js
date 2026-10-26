@@ -516,9 +516,6 @@ export function renderSceneSheet({
   for (const r of (rumors || []).slice(0, 2)) {
     pressure.push(`幕外：${r.who}${r.what}`);
   }
-  if ((threads || []).filter((t) => t.status === 'open').length) {
-    pressure.push(`仍未回收的线索有 ${(threads || []).filter((t) => t.status === 'open').length} 条，本轮至少要动其中一条，或制造新的压力。`);
-  }
 
   // 知识边界优先用「按线索组织」的矩阵（谁知道/谁不知道同一件事），
   // 退回按角色罗列。前者直接回答「这一拍谁不能说什么」。

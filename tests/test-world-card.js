@@ -284,6 +284,7 @@ console.log('\n=== 场记单 ===');
   ok(out.text.includes('边界：'), '知识边界段');
   ok(out.text.includes('原声：「卿儿，过来。」'), '原声回声');
   ok(out.text.includes('未回收的线索'), '线索段');
+  ok(!out.text.includes('本轮至少要动其中一条'), '压力段不再命令「每轮至少动一条线索」');
   ok(out.text.includes('关系'), '关系段');
   ok(out.text.includes('压力'), '压力段');
   ok(out.text.includes('本场指令（作者钦定，优先级最高）'), '本场指令段');

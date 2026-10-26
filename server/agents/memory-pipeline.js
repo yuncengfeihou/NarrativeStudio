@@ -434,6 +434,47 @@ export async function runLibrarian({ session, question, signal }) {
 /* ══════════════════════════════════════════════════════════════════════ */
 
 /**
+ * 从卡里挑「此刻不在场、但最该推动世界」的人物。
+ *
+ * 纯函数、确定性排序。旧实现是卡内顺序 `.slice(0, 6)`：一张 55 人的卡里，
+ * 世界呼吸永远只推演前 6 个人物，后面的人（哪怕 weight 0.9）根本轮不到。
+ * 这里按「权重 + 与在场者的关系 + 私心压力」排序，让不在场的主角级人物
+ * 也有机会产生流言，从而获得入场通道。
+ *
+ * @param {Array} entities 卡实体（模板快照）
+ * @param {object} opts
+ * @param {Set} opts.presentIds 账本里的在场者（id 或名字）
+ * @param {string} opts.playerName 玩家名字（不得被推演）
+ * @returns {Array} 人物实体（最多 6 个，不修改输入）
+ */
+export function pickOffstagePersons(entities, { presentIds = new Set(), playerName = '', ledger = {}, limit = 6 } = {}) {
+  const present = new Set(presentIds || []);
+  for (const key of Object.keys(ledger.characters || {})) present.add(key);
+  const persons = (entities || [])
+    .filter((c) => c.type === PERSON_TYPE)
+    .filter((c) => !c.always_present && !present.has(c.id) && !present.has(c.name) && c.name !== playerName)
+    .filter((c) => (c.agenda?.length || c.psyche?.wants?.length || c.psyche?.hides?.length));
+
+  const score = (c) => {
+    const weight = Number(c.weight) || 0.5;
+    const pressure = Math.max(0, ...(c.agenda || []).map((a) => Number(a?.pressure) || 0));
+    const related = (c.relations || [])
+      .filter((r) => present.has(r.to)).length;
+    // 权重是「这个人对故事有多重要」；压力是「他自己的事有多急」；
+    // 与在场者的关系是「他有多可能被这一场卷进来」。
+    return weight + Math.min(pressure, 1) * 0.5 + Math.min(related, 2) * 0.35;
+  };
+
+  return persons
+    .map((c) => ({ c, s: score(c) }))
+    .sort((a, b) => b.s - a.s
+      || (Number(b.c.weight) || 0) - (Number(a.c.weight) || 0)
+      || String(a.c.name).localeCompare(String(b.c.name)))
+    .slice(0, Math.max(1, limit))
+    .map((x) => x.c);
+}
+
+/**
  * 玩家看不见的地方，人物按自己的私心行动。产出的事件只作为压力与流言
  * 进入下一场的场记单，不得改写已发生的剧情。
  */
@@ -444,11 +485,7 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const presentIds = new Set(Object.keys(ledger.characters || {}));
   const playerName = card.player?.name || '';
-  const offstage = (card.entities || [])
-    .filter((c) => c.type === PERSON_TYPE)
-    .filter((c) => !c.always_present && !presentIds.has(c.id) && !presentIds.has(c.name) && c.name !== playerName)
-    .filter((c) => (c.agenda?.length || c.psyche?.wants?.length || c.psyche?.hides?.length))
-    .slice(0, 6);
+  const offstage = pickOffstagePersons(card.entities, { presentIds, playerName, ledger });
   if (!offstage.length) return { events: [] };
 
   const last = latestScene(sessionId, branchId);
@@ -472,6 +509,7 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
             })),
             recentSummary: last ? `${last.scene_id}｜${last.question}｜${last.outcome}` : '',
             place: ledger.place,
+            when: ledger.time,
           }),
         },
       ],
@@ -491,7 +529,6 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
           what: str(o.what).slice(0, 200),
           visibility: ['rumor', 'hidden', 'public'].includes(o.visibility) ? o.visibility : 'rumor',
           affects: arr(o.affects).map(str).filter(Boolean).slice(0, 4),
-          thread: str(o.thread).slice(0, 80),
           pressure: Number.isFinite(Number(o.pressure)) ? Math.max(0, Math.min(1, Number(o.pressure))) : 0.4,
         };
       })
@@ -512,15 +549,6 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
       severity: e.visibility === 'hidden' ? 'info' : 'minor',
       payload: e, evidence: `第 ${turnNo} 轮幕后推演`,
     });
-    if (e.thread) {
-      const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
-      if (!open.some((t) => t.title === e.thread)) {
-        upsertThread(sessionId, {
-          branch_id: branchId, title: e.thread, status: 'open', weight: 0.5,
-          planted_turn: turnNo, turn_no: turnNo, note: '世界呼吸推演',
-        });
-      }
-    }
   }
   return { events, usage };
 }

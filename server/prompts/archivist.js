@@ -343,7 +343,6 @@ export function worldTickSystemPrompt() {
       "what": "她把南荣家的请柬压进了抽屉最底层",
       "visibility": "rumor|hidden|public",
       "affects": ["伍卿", "凌玥"],
-      "thread": "要不要去南荣的宴（没有就空字符串）",
       "pressure": 0.7
     }
   ]
@@ -361,9 +360,10 @@ export function worldTickSystemPrompt() {
 6. 不得推进「尚未发生的原著剧情」。你只推演这些人物**以自己的性格**会做的事。`;
 }
 
-export function worldTickUserPrompt({ turnNo, offstage, recentSummary, place }) {
+export function worldTickUserPrompt({ turnNo, offstage, recentSummary, place, when }) {
   return [
     `【推演到】第 ${turnNo} 轮`,
+    when ? `【本场时间】${when}` : '',
     place ? `【玩家当前所在】${place}` : '',
     '',
     '【不在场但活着的人物】（各带私心）',

@@ -25,6 +25,8 @@ const schema = await import('../server/world/schema.js');
 const effective = await import('../server/world/effective.js');
 const playerView = await import('../server/memory/player-view.js');
 const recall = await import('../server/memory/recall-history.js');
+const { pickOffstagePersons } = await import('../server/agents/memory-pipeline.js');
+const { worldTickUserPrompt } = await import('../server/prompts/archivist.js');
 
 let pass = 0;
 let fail = 0;
@@ -1155,6 +1157,35 @@ console.log('\n=== 史官解析失败：严格判定与失败回灌 ===');
   ok(retryMsgs[2].role === 'assistant' && retryMsgs[2].content.length <= 2000, '坏输出作为 assistant 回灌且截断');
   ok(retryMsgs[3].content.includes('JSON'), '纠正消息明确要求重发 JSON');
   ok(retryMsgs[3].content.includes('不要代码块'), '要求只输出 JSON 对象');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 世界呼吸：不在场候选按「份量/关系/私心」排序 ===');
+{
+  const entities = [
+    { id: 'ling-yue', type: 'person', name: '凌玥', weight: 1, always_present: true },
+    { id: 'wu-qing', type: 'person', name: '伍卿', weight: 1, agenda: [{ goal: '活下去', pressure: 0.9 }] },
+    { id: 'xie-mu', type: 'person', name: '谢沐', weight: 0.9,
+      agenda: [{ goal: '向凌家要个说法', pressure: 0.8 }],
+      relations: [{ to: '凌玥', kind: '旧识' }] },
+    { id: 'ling-xuan', type: 'person', name: '凌璇', weight: 0.9, psyche: { wants: ['保住家业'] } },
+    { id: 'zhang-lan', type: 'person', name: '张兰', weight: 0.3,
+      agenda: [{ goal: '换个差事', pressure: 0.5 }] },
+    { id: 'silou', type: 'institution', name: '司楼' },
+  ];
+  const picked = pickOffstagePersons(entities, {
+    presentIds: new Set(['凌玥']), playerName: '伍卿',
+    ledger: { characters: { 凌玥: { mood: '疲惫' } } },
+  });
+  eq(picked.map((c) => c.name), ['谢沐', '凌璇', '张兰'], '按份量+关系+私心排序，且不在场');
+  ok(!picked.some((c) => c.name === '凌玥'), '在场者不再被推演');
+  ok(!picked.some((c) => c.name === '伍卿'), '玩家不被推演');
+  eq(picked.length, 3, '非人物不混入候选');
+
+  const prompt = worldTickUserPrompt({
+    turnNo: 9, offstage: [], recentSummary: '', place: '茶楼', when: '次日 · 清晨',
+  });
+  ok(prompt.includes('【本场时间】次日 · 清晨'), '世界呼吸拿到这一场的时间');
 }
 
 console.log(`\n${'═'.repeat(50)}`);
