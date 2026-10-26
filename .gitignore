@@ -43,3 +43,5 @@ _work/real-10turn-report.json
 # 个人工具目录与临时探针输出（不入库）
 /.soloent/
 /_work/tmp-*.json
+
+/_work/tmp-realrun-*.jsonl

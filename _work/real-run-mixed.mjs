@@ -3,7 +3,8 @@
  * _work/real-run-mixed.mjs — 真实模型「混入低张力行动」验证跑（P7）
  *
  *   node _work/real-run-mixed.mjs [--turns 8] [--world nvzun-jianpolan]
- *                                 [--anchor prologue] [--base http://127.0.0.1:3210]
+ *                                 [--anchor prologue] [--profile time]
+ *                                 [--base http://127.0.0.1:3210]
  *
  * 走真实产品路径：新建会话 → 开局 → 逐轮玩家行动（刻意混入低张力/等待/回避/
  * 次日再来）。用于验证三件事是否真的发生：
@@ -31,7 +32,7 @@ const TURNS = Number(opt('turns', 8));
 
 // 行动采样：至少 1/3 是低张力/等待/回避/时间推进；同时保留少量目标推进，
 // 避免把「日常」跑成没有主线的散步。
-const ACTIONS = [
+const ACTIONS_DEFAULT = [
   '先不急着走，跟着她的话应下来，看看她到底想要什么。',
   '留在原地不动，等雨小一点再说。',
   '先把玉佩收好，回去睡一觉，明天再来这条街打听。',
@@ -41,6 +42,19 @@ const ACTIONS = [
   '该谈正事了，去司楼找伍卿把话说清楚，但不带威胁。',
   '这一趟先到此为止，回去把今天听到的理一理。',
 ];
+
+// 时间推进探针：每一拍都给出了「这一拍可以到此为止」的出口，用来验证
+// 旁白尾注的「可以直接把时间推到次日/更晚」是否真的被用上。
+const ACTIONS_TIME = [
+  '把钱袋揣好，牵着牛掉头回村，天黑前不再进城。',
+  '到家给黎婆熬药，收拾完就睡下；明天天亮再说。',
+  '第二天中午才出门，慢悠悠走到茶楼坐下。',
+  '在茶楼坐一整个下午，什么也不打听，只听。',
+  '傍晚回家，把今天听到的理一理，早早歇下。',
+];
+
+const PROFILE = opt('profile', 'default');
+const ACTIONS = PROFILE === 'time' ? ACTIONS_TIME : ACTIONS_DEFAULT;
 
 async function api(method, p, body) {
   const res = await fetch(`${BASE}${p}`, {
