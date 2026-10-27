@@ -279,6 +279,16 @@ try {
   eq(narrationMeta?.tools, 1, 'meta 记录一次工具调用');
   ok(narrationMeta?.sealed === true, 'meta 记录已定稿');
 
+  // P2：装配清单与场记单档位必须随回合落库——只在装配出口存在的话，
+  // 事后无法从 turns 回答「这一拍到底给了模型什么」。
+  const asm = narrators[0]?.meta?.assembly || {};
+  ok(Array.isArray(asm.messages) && asm.messages.length > 0, 'meta 落库逐条渲染归属（messages）');
+  ok(asm.messages.every((m) => typeof m.owner === 'string' && typeof m.tokens === 'number'),
+    'messages 每条都带 owner 与 tokens');
+  ok(asm.messages.some((m) => m.owner === 'scene_sheet'), 'messages 里有一条归属场记单');
+  ok(asm.scene_sheet && typeof asm.scene_sheet === 'object', 'meta 落库场记单档位（scene_sheet）');
+  ok(typeof asm.scene_sheet.cast_mode === 'string', 'scene_sheet 记录在场渲染档位');
+
   console.log('\n=== 回退：上游拒绝 tools ===');
   rejectTools = true;
   const session2 = await req('POST', '/api/sessions', {

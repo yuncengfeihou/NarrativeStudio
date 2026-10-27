@@ -1535,6 +1535,14 @@ export function getVoices(sessionId, { branchId = null, who = null, limit = 40, 
   return getDb().prepare(sql).all(...params);
 }
 
+/** 台词样本总数（`getVoices` 带 limit，面板需要知道列表之外还有多少）。 */
+export function countVoices(sessionId, { branchId = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM voices WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
 export function setVoicePinned(sessionId, id, pinned) {
   getDb().prepare(`UPDATE voices SET pinned=? WHERE session_id=? AND id=?`).run(pinned ? 1 : 0, sessionId, id);
 }
@@ -1583,14 +1591,77 @@ export function addPatch(sessionId, p) {
   return Number(info.lastInsertRowid);
 }
 
-export function listPatches(sessionId, { branchId = null, status = null, limit = 50 } = {}) {
+/**
+ * 列出提案，新的在前。
+ *
+ * `kind` 用于「窗口式取数」：`uncertain` 这类只留痕、无消费方的提案
+ * 会以每拍 3–5 条的速率把窗口挤满（实测 65 拍后 open 窗口 24 条里 17 条是它），
+ * 让真正的消费者（场记单的幕外流言）只能看到最旧的一小撮。调用方要么给 kind，
+ * 要么自己接受「翻到哪条算哪条」。
+ */
+export function listPatches(sessionId, { branchId = null, status = null, kind = null, limit = 50 } = {}) {
   let sql = `SELECT * FROM patches WHERE session_id=?`;
   const params = [sessionId];
   if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
   if (status) { sql += ` AND status=?`; params.push(status); }
+  if (kind) { sql += ` AND kind=?`; params.push(kind); }
   sql += ` ORDER BY id DESC LIMIT ?`;
   params.push(limit);
   return getDb().prepare(sql).all(...params).map((r) => ({ ...r, payload: JSON.parse(r.payload_json || '{}') }));
+}
+
+/** 计数（面板要知道「显示 100 条」之外还有多少，不要静默截断）。 */
+export function countPatches(sessionId, { branchId = null, status = null, kind = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM patches WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  if (kind) { sql += ` AND kind=?`; params.push(kind); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
+/**
+ * 按 kind 分组计数。
+ *
+ * 面板要按类分堆显示（矛盾 / 知识越界 / 待确认 …）：混在一起时数量最大的那一类
+ * （实测 `uncertain` 在 65 拍后占 open 提案的九成）会把真正需要人工处置的少数几条
+ * 挤出可视范围。分组计数让面板能说「这一类共 N 条，显示最近 M 条」。
+ */
+export function patchKindCounts(sessionId, { branchId = null, status = null } = {}) {
+  let sql = `SELECT kind, COUNT(*) AS c FROM patches WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  sql += ` GROUP BY kind`;
+  const out = {};
+  for (const row of getDb().prepare(sql).all(...params)) out[row.kind] = Number(row.c) || 0;
+  return out;
+}
+
+/**
+ * 把某一类提案里「超出保留条数的最旧 open 条目」置为 dismissed。
+ *
+ * 用在 `uncertain`（史官每拍的「正文没明说」清单）：它每拍产出 2–5 条、
+ * 实测 65 拍积到 209 条 open，且几乎全都不重复（去重率 0.5%）——
+ * 也就是说它不是「同一件事反复报」，而是**一条逐拍增长的未知项流水**。
+ * 没有上限时它会一直长下去（1000 拍 ≈ 3200 行），面板里也永远翻不到底。
+ *
+ * 这里只改 `status`，不删行（审计链保留），保留最近 `keep` 条 open。
+ * 返回被置为 dismissed 的条数。
+ */
+export function retirePatchesBeyond(sessionId, { branchId = null, kind, status = 'open', keep = 120 } = {}) {
+  const n = Math.max(0, Math.trunc(Number(keep) || 0));
+  let where = `session_id=? AND kind=? AND status=?`;
+  const params = [sessionId, kind, status];
+  if (branchId) { where += ` AND branch_id=?`; params.push(branchId); }
+  const info = getDb().prepare(`
+    UPDATE patches SET status='dismissed'
+     WHERE ${where}
+       AND id NOT IN (
+         SELECT id FROM patches WHERE ${where} ORDER BY id DESC LIMIT ?
+       )
+  `).run(...params, ...params, n);
+  return Number(info.changes) || 0;
 }
 
 export function setPatchStatus(sessionId, id, status) {

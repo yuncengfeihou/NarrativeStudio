@@ -255,9 +255,21 @@ console.log('\n=== 记忆六表 ===');
 
   const v = await req('GET', `/api/sessions/${SESSION_ID}/voices`);
   ok(v.status === 200, '原声表可读');
+  ok(Number.isFinite(v.data.total), '原声返回总数（列表外还有多少）不静默截断');
+  const vLim = await req('GET', `/api/sessions/${SESSION_ID}/voices?limit=1`);
+  ok(vLim.data.voices.length <= 1, '原声 limit 生效');
+  ok(vLim.data.total >= vLim.data.voices.length, '原声 total 不受 limit 影响');
 
   const p = await req('GET', `/api/sessions/${SESSION_ID}/patches`);
   ok(p.status === 200, '提案审计表可读');
+  ok(Array.isArray(p.data.patches), '返回提案列表');
+  ok(Number.isFinite(p.data.total), '返回总数（面板不必从截断后的列表推断）');
+  ok(p.data.counts && typeof p.data.counts === 'object', '返回按 kind 的分组计数');
+  ok(Number.isFinite(p.data.open_total), '返回未处置总数（列表外的也要算）');
+  const pKind = await req('GET', `/api/sessions/${SESSION_ID}/patches?kind=offstage_event&limit=5`);
+  ok(pKind.status === 200, '按 kind + limit 取数');
+  ok(pKind.data.patches.every((x) => x.kind === 'offstage_event'), 'kind 过滤生效');
+  ok(pKind.data.patches.length <= 5, 'limit 生效');
 
   const br = await req('GET', `/api/sessions/${SESSION_ID}/branches`);
   ok(br.data.current === 'main', '分支列表');

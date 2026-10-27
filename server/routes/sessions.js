@@ -18,6 +18,7 @@ import {
   addAssertion, addNote, deleteNote, deleteSession, deleteVoice, getAssertions,
   getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
   getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
+  countPatches, patchKindCounts, countVoices,
   retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
   updateTurnContent,
 } from '../memory/store.js';
@@ -553,7 +554,11 @@ sessionsRouter.get('/sessions/:id/world-state', (req, res) => {
 sessionsRouter.get('/sessions/:id/voices', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  res.json({ voices: getVoices(session.id, { branchId: session.branch_id || 'main', limit: 100 }) });
+  const branchId = session.branch_id || 'main';
+  // limit 可调（默认 100、上限 500），并回 total：面板要能说「共 N 条，显示最近 M 条」，
+  // 而不是在 234 条样本上显示 100 却看不出被截断。
+  const limit = Math.max(1, Math.min(500, intOr(req.query.limit, 100)));
+  res.json({ voices: getVoices(session.id, { branchId, limit }), total: countVoices(session.id, { branchId }) });
 });
 
 sessionsRouter.post('/sessions/:id/voices/:voiceId/pin', (req, res) => {
@@ -573,12 +578,20 @@ sessionsRouter.delete('/sessions/:id/voices/:voiceId', (req, res) => {
 sessionsRouter.get('/sessions/:id/patches', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const branchId = session.branch_id || 'main';
+  const status = req.query.status ? String(req.query.status) : null;
+  const kind = req.query.kind ? String(req.query.kind) : null;
+  const limit = Math.max(1, Math.min(500, intOr(req.query.limit, 100)));
+  // total / counts 让面板能说「这一类共 N 条，显示最近 M 条」，
+  // 而不是把 209 条待确认和 3 条矛盾混在一起静默截断到 100。
+  // open_total / open_counts 是「还没处置的」计数：总览卡的待处理数必须用它，
+  // 从前端拿到的这一页列表本地过滤会漏（实测报 22、实际 133）。
   res.json({
-    patches: listPatches(session.id, {
-      branchId: session.branch_id || 'main',
-      status: req.query.status ? String(req.query.status) : null,
-      limit: 100,
-    }),
+    patches: listPatches(session.id, { branchId, status, kind, limit }),
+    total: countPatches(session.id, { branchId, status, kind }),
+    counts: patchKindCounts(session.id, { branchId, status }),
+    open_total: countPatches(session.id, { branchId, status: 'open', kind }),
+    open_counts: patchKindCounts(session.id, { branchId, status: 'open' }),
   });
 });
 

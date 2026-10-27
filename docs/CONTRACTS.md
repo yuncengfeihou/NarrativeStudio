@@ -509,7 +509,10 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 - 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
   最近原文提到但不在场的角色只进辞书邻域/关系提示，不占完整人物卡位。
 - 玩家角色永远在场（即使不在人物表里，也会造一个最小条目）。
-- `turns.meta.assembly` 持久化本轮装配清单（层预算、在场、辞书候选/实渲染与原因、摘要/检索、降级标记）。
+- `turns.meta.assembly` 持久化本轮装配清单（层预算、在场、辞书候选/实渲染与原因、摘要/检索、降级标记），
+  并包含 `messages`（逐条 `{index, role, owner, tokens}` 渲染归属）与 `scene_sheet`（在场渲染档位）。
+  两者都是「新增内容落进了哪一层」的事后证据：只在装配出口存在、不落库时，事后无法回答
+  「这一拍到底给了模型什么」（长跑实测 65 拍全部缺 `scene_sheet`）。
 
 ## Agent 接口
 
@@ -573,6 +576,13 @@ runLibrarian({ session, question, signal })               // -> {found, answer, 
 // 工具：search_events / search_assertions / get_character_state / get_threads / get_scene /
 //       get_relations(who) / search_claims(subject,predicate)
 runWorldTick({ session, world, turnNo, signal, guard })   // -> {events, usage, stale?}
+// 候选 = pickOffstagePersons(entities, {presentIds, playerName, ledger, limit, recentCounts})。
+// recentCounts 来自最近 6 次推演已点名的 who → 每人被点过几次（runWorldTick 内部读 patches）。
+// 排序 = score − 0.12×次数（软轮转）：分数排序是静态的，不轮转时 8 次推演只会用到 7/55 人、
+// 同一批人的同一件旧事被反复渲染；但硬轮转（用过的排到队尾）会在第二次推演就把主角级人物
+// 整批挤出候选，世界呼吸不是发牌。软轮转的语义是「用多了才让位」。
+// 不做去重不删人：次数全相等时回到纯分数序，谁都不会被饿死。
+// 候选 ≤ limit 时不重排（小卡不该被打乱权重顺序）。
 
 // 成长曲线（server/world/fates.js，纯函数，不调模型）
 evaluateFates(card, { turnNo, ledger, assertions, relations, charStates })
@@ -790,10 +800,19 @@ PUT    /api/sessions/:id/state            body:{state, turn_no?}
 GET    /api/sessions/:id/scenes
 GET    /api/sessions/:id/threads
 GET    /api/sessions/:id/world-state      ?at_turn= -> 本局世界线增量
-GET    /api/sessions/:id/voices
+GET    /api/sessions/:id/voices           ?limit= -> { voices, total }
+// limit 默认 100（夹在 1..500）；total 是全量行数，不受 limit 影响。
+// 面板的「台词样本 N」必须用 total：用列表长度会在 234 条样本上显示 100 而看不出被截断。
 POST   /api/sessions/:id/voices/:id/pin   body:{pinned}
 DELETE /api/sessions/:id/voices/:id
-GET    /api/sessions/:id/patches          ?status=
+GET    /api/sessions/:id/patches          ?status=&kind=&limit=
+// -> { patches, total, counts, open_total, open_counts }
+// patches 按 id DESC；limit 默认 100（夹在 1..500）。
+// total = 同一过滤条件下的总数；counts = 按 kind 分组计数（不受 limit 影响）。
+// open_total / open_counts 是 status='open' 的同一组数：总览卡的「待处理」必须用它，
+// 从这一页列表本地过滤会漏（实测报 22，实际 133）。
+// 它们存在的理由：`uncertain` 每拍 3–5 条，混在一起时列表被它占满，
+// 面板无法区分「没有矛盾」和「矛盾被截断在 100 条之外」。
 POST   /api/sessions/:id/patches/:id/resolve  body:{status:'applied'|'dismissed'}
 GET    /api/sessions/:id/notes
 POST   /api/sessions/:id/notes            body:{content, kind}

@@ -731,14 +731,17 @@ export async function assembleContext({
 
   /* ---- 世界呼吸：把「幕外流言」送进场记单 ---- */
   // 世界呼吸在切场时推演「这段时间世界上发生了什么」；设计意图一直是让这些事件
-  // 作为压力与流言进入下一场的场记单，但此前只写库、没有消费者。这里只取最近一次
-  // 封场及之后、rumor/public 且仍 open 的事件：hidden 永不外泄；每轮最多 2 条、
-  // 按人去过重，渲染进既有「压力」段（不新增段/层，也不动 system 缓存前缀）。
+  // 作为压力与流言进入下一场的场记单。这里只取最近一次封场及之后、rumor/public
+  // 且仍 open 的事件：hidden 永不外泄；每轮最多 2 条、按人去过重，渲染进既有
+  // 「压力」段（不新增段/层，也不动 system 缓存前缀）。
+  //
+  // 取数必须按 kind 过滤：`patches` 里每拍还会写 3–5 条 `uncertain`（人工复核队列），
+  // 混在一起的 24 条窗口会被它挤满（长跑实测 17/24），流言只剩最旧的一小撮，
+  // 于是同一件旧事被反复渲染。过滤放在 SQL 里，窗口才真的属于流言。
   const rumors = [];
   {
     const seen = new Set();
-    for (const p of listPatches(sessionId, { branchId, status: 'open', limit: 24 })) {
-      if (p.kind !== 'offstage_event') continue;
+    for (const p of listPatches(sessionId, { branchId, status: 'open', kind: 'offstage_event', limit: 24 })) {
       const pl = p.payload || {};
       if (pl.visibility !== 'rumor' && pl.visibility !== 'public') continue;
       if ((Number(p.turn_no) || 0) < lastClosedTo) continue;

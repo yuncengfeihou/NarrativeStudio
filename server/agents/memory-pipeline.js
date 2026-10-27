@@ -17,7 +17,7 @@ import { buildAliasIndex, normalizeCard, PERSON_TYPE, resolveEntity } from '../w
 import { pathsFor } from '../world/state-paths.js';
 import {
   addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getRelations, getScenes,
-  getState, getThreads, getTurnsForBranch, invalidateAssertion, latestScene,
+  getState, getThreads, getTurnsForBranch, invalidateAssertion, latestScene, listPatches,
   searchAssertions, searchTurns, setCharState, upsertThread,
 } from '../memory/store.js';
 import {
@@ -528,13 +528,26 @@ export async function runLibrarian({ session, question, signal }) {
  * 这里按「权重 + 与在场者的关系 + 私心压力」排序，让不在场的主角级人物
  * 也有机会产生流言，从而获得入场通道。
  *
+ * `recentCounts` 是「最近几次推演里各被点名过几次」，用于**软轮转**：
+ * 排序分 = 原分数 − 0.12 × 次数，次数多的人往后排一点。
+ * 分数排序本身是静态的（同一份账本永远选出同一批 top N），长跑实测 29 次推演
+ * 只用到 6/45 个人，同一批人的同一件旧事被反复渲染。
+ *
+ * 为什么不删除、也不硬轮转：删了会让重要人物在幕外彻底停摆；「用过就排到队尾」
+ * 的两段式实测会在第二次推演就把主角级人物整批挤出候选（世界呼吸不是发牌），
+ * 而且一次推演覆盖 3–4 人、6 次窗口足以让全池都「出现过」，两段式随后整体失效。
+ * 软轮转的语义是「用多了才让位」——权重 1.0 的人连用 3 次才会被权重 0.7 的新人顶掉。
+ *
  * @param {Array} entities 卡实体（模板快照）
  * @param {object} opts
  * @param {Set} opts.presentIds 账本里的在场者（id 或名字）
  * @param {string} opts.playerName 玩家名字（不得被推演）
+ * @param {Set<string>|Map<string, number>} opts.recentCounts 最近各被点名过几次
  * @returns {Array} 人物实体（最多 6 个，不修改输入）
  */
-export function pickOffstagePersons(entities, { presentIds = new Set(), playerName = '', ledger = {}, limit = 6 } = {}) {
+export function pickOffstagePersons(entities, {
+  presentIds = new Set(), playerName = '', ledger = {}, limit = 6, recentCounts = new Map(),
+} = {}) {
   const present = new Set(presentIds || []);
   for (const key of Object.keys(ledger.characters || {})) present.add(key);
   const persons = (entities || [])
@@ -552,13 +565,64 @@ export function pickOffstagePersons(entities, { presentIds = new Set(), playerNa
     return weight + Math.min(pressure, 1) * 0.5 + Math.min(related, 2) * 0.35;
   };
 
+  // Set 视为「各被点名 1 次」，Map 直接用次数。
+  const countOf = recentCounts instanceof Map
+    ? (name) => Number(recentCounts.get(name)) || 0
+    : (() => {
+      const set = recentCounts instanceof Set ? recentCounts : new Set(recentCounts || []);
+      return (name) => (set.has(name) ? 1 : 0);
+    })();
+
+  // 轮转是**软**的：按「分数 − 惩罚 × 已推演次数」排序，不是「用过的排到队尾」。
+  // 硬轮转的实测后果：t4 就把凌玥/黎婆/姬淮澄整批挤出候选，
+  // 主角级人物在幕外彻底消失——世界呼吸不是发牌，重要人物不能因为「上轮出现过」就停摆。
+  // 软轮转的语义是「用多了才让位」：权重 1.0 的人要连用 3 次才会被权重 0.7 的新人顶掉。
+  const ROTATION_PENALTY = 0.12;
   return persons
-    .map((c) => ({ c, s: score(c) }))
+    .map((c) => ({ c, s: score(c) - ROTATION_PENALTY * countOf(c.name) }))
     .sort((a, b) => b.s - a.s
       || (Number(b.c.weight) || 0) - (Number(a.c.weight) || 0)
       || String(a.c.name).localeCompare(String(b.c.name)))
     .slice(0, Math.max(1, limit))
     .map((x) => x.c);
+}
+
+/**
+ * 最近几次世界呼吸里，每个人各被点名过几次。
+ *
+ * 取最近 `WORLD_TICK_ROTATION` **次**推演（按 `turn_no` 去重，不是按事件条数——
+ * 一次推演会写 1–4 条事件），统计这些事件的 `who` 里出现过的名字，返回次数的 Map，
+ * 交给 `pickOffstagePersons` 做轮转。
+ *
+ * 为什么需要次数而不是「出现过没有」：一次推演覆盖 3–4 个人，6 次窗口足以让
+ * 候选池里的所有人都至少出现过一次；此时「出现过就排到队尾」的两段式会整体失效。
+ *
+ * 为什么需要它：分数排序（权重 + 关系 + 压力）在同一份账本上是**静态**的——
+ * 长跑 29 次推演里 top6 一直是同样 6 个人，剩下 39 个人一次都没被推演过，
+ * 于是「幕外流言」段反复渲染同一批人的同一件旧事。
+ */
+function recentTickCounts(sessionId, branchId, window = 6) {
+  const counts = new Map();
+  try {
+    const ticks = new Set();
+    for (const p of listPatches(sessionId, { branchId, kind: 'offstage_event', limit: 200 })) {
+      const turnNo = Number(p.turn_no) || 0;
+      if (!ticks.has(turnNo)) {
+        if (ticks.size >= Math.max(1, window)) continue;
+        ticks.add(turnNo);
+      }
+      const who = p.payload?.who;
+      const list = Array.isArray(who) ? who : who ? [who] : [];
+      for (const name of list) {
+        const key = String(name || '').trim();
+        if (key) counts.set(key, (counts.get(key) || 0) + 1);
+      }
+    }
+  } catch (err) {
+    // 轮转是可选优化：取不到历史时退回原排序，不阻断世界呼吸。
+    console.warn(`[world-tick] 读取轮转窗口失败：${err?.message || err}`);
+  }
+  return counts;
 }
 
 /**
@@ -572,7 +636,10 @@ export async function runWorldTick({ session, world, turnNo, signal, guard }) {
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const presentIds = new Set(Object.keys(ledger.characters || {}));
   const playerName = card.player?.name || '';
-  const offstage = pickOffstagePersons(card.entities, { presentIds, playerName, ledger });
+  // 最近几次推演点名过的人往后排：分数排序是静态的，不轮转就会每次选同一批人，
+  // 同一件旧事被反复渲染（长跑实测 8 次推演只用到 7/55 人）。
+  const recentCounts = recentTickCounts(sessionId, branchId);
+  const offstage = pickOffstagePersons(card.entities, { presentIds, playerName, ledger, recentCounts });
   if (!offstage.length) return { events: [] };
 
   const last = latestScene(sessionId, branchId);

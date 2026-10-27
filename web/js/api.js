@@ -401,9 +401,14 @@ export const api = {
   deleteVoice(id, voiceId, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/voices/${voiceId}`, { method: 'DELETE', signal });
   },
+  /** params: { status?, kind?, limit? }；响应同时给 total / counts（按 kind 分组）。 */
   getPatches(id, params = {}, signal) {
-    const qs = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
-    return request(`/api/sessions/${encodeURIComponent(id)}/patches${qs}`, { signal });
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.kind) qs.set('kind', params.kind);
+    if (params.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return request(`/api/sessions/${encodeURIComponent(id)}/patches${q ? `?${q}` : ''}`, { signal });
   },
   resolvePatch(id, patchId, status, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/patches/${patchId}/resolve`,

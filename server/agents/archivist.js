@@ -17,7 +17,7 @@ import {
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
-  getWorldState, invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
+  getWorldState, invalidateAssertion, retirePatchesBeyond, setCharState, setState, upsertRelation, upsertThread,
 } from '../memory/store.js';
 import {
   LIFE_STATES, PREDICATES, STATE_FIELDS, VISIBILITIES, archivistSystemPrompt, archivistUserPrompt,
@@ -902,11 +902,21 @@ export function applyArchivistUpdate({
   applied.ledger = true;
 
   /* ---- 未确定项：交给人，不当事实 ---- */
+  // `uncertain` 是逐拍增长的未知项流水（实测每拍 2–5 条、65 拍 209 条、去重率 0.5%），
+  // 只增不减会一直长下去。保留最近 120 条 open，更旧的置 dismissed——不删行，审计链保留。
   for (const u of update.uncertain || []) {
     addPatch(sessionId, {
       branch_id: branchId, agent: 'archivist', kind: 'uncertain', turn_no: turnNo, status: 'open',
       payload: { text: u }, severity: 'minor',
     });
+  }
+  if (update.uncertain?.length) {
+    try {
+      retirePatchesBeyond(sessionId, { branchId, kind: 'uncertain', keep: 120 });
+    } catch (err) {
+      // 收敛失败不影响本拍写入：下一次写 uncertain 时会再收敛。
+      console.warn(`[archivist] uncertain 收敛失败：${err?.message || err}`);
+    }
   }
 
   /* ---- 目标声明：越界提案留痕（不静默丢，也不阻断同批合法写入） ---- */

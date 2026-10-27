@@ -528,6 +528,10 @@ function buildAssemblyMeta(context, narrator) {
     cache: meta.cache || null,
     hard_cap: meta.hard_cap || null,
     coverage: meta.coverage || null,
+    // 渲染归属审计与场记单降级档位：两者都是「新增内容落进了哪一层」的验收证据，
+    // 只在装配出口存在、不落库的话，事后无法回答「这一拍到底给了模型什么」。
+    messages: meta.messages || [],
+    scene_sheet: meta.scene_sheet || null,
     model: narrator?.model || null,
     effort: narratorAgent.effort,
     temperature: narratorAgent.temperature,

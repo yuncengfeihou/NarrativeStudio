@@ -18,8 +18,46 @@ const PATCH_KIND_LABEL = {
   alias: '别名冲突', stale_thread: '线索陈旧', state_jump: '状态跳变',
   offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '事实记录',
   world_change: '世界变化', rejected_delta: '数值被拒',
+  // 下面四类没进标签表会以裸标识符露在分组摘要里（`skipped_targets 10`），
+  // 面板面向作者，代码标识符不该出现在界面上。
+  skipped_targets: '越界写入', life_state_inferred: '生死补齐',
+  archivist_parse_failed: '记忆整理失败', stale: '过期作废',
 };
 const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', info: '提示' };
+
+/**
+ * 提案的「一句话说明」。
+ *
+ * 各类提案把话放在不同字段（断言/矛盾是 claim，待确认是 text，世界变化是
+ * path/op/value 三元组），缺一档就会把整条 JSON 原样显示给作者。
+ * 世界变化最多，且 payload 全是机器字段，退回 JSON 等于面板里一大片花括号。
+ */
+function patchClaim(p) {
+  const pl = p.payload || {};
+  if (pl.claim) return pl.claim;
+  if (pl.what) return pl.what;
+  if (pl.text) return pl.text;
+  if (pl.detail) return pl.detail;
+  // 断言的三元组（subject/predicate/object）：中文里「谁 谓词 什么」直接连起来就是人话。
+  if (pl.subject && pl.predicate) {
+    const obj = Array.isArray(pl.object) ? pl.object.join('、') : (pl.object ?? '');
+    const tail = obj && obj !== true ? ` ${obj}` : '';
+    return `${pl.subject} ${pl.predicate}${tail}`;
+  }
+  if (pl.op === 'introduce') {
+    // introduce 没有 path（是「凭空多出一个实体」），只有 kind + name/value.name。
+    const kind = { person: '角色', place: '地点' }[pl.kind || pl.entity_kind] || pl.kind || '实体';
+    const name = pl.name || pl.value?.name || pl.entity_id || '';
+    return `新增${kind}「${name}」`;
+  }
+  if (pl.path) {
+    const op = { add: '新增', set: '改写', remove: '移除', delta: '增减' }[pl.op] || pl.op || '写入';
+    const val = pl.value !== undefined && pl.value !== null ? String(pl.value) : '';
+    return `${op} ${pl.path}${val ? ` = ${val}` : ''}`;
+  }
+  // 实在没有可读字段时给一段短的结构化描述，不要把 JSON 直接铺在界面上。
+  return Object.keys(pl).slice(0, 3).map((k) => `${k}: ${truncate(JSON.stringify(pl[k]), 40)}`).join('，');
+}
 
 export async function openMemoryPanel(sessionId, opts = {}) {
   let data = null;
@@ -29,6 +67,10 @@ export async function openMemoryPanel(sessionId, opts = {}) {
   let threads = [];
   let voices = [];
   let patches = [];
+  let patchCounts = {};
+  let patchTotal = 0;
+  let patchOpenTotal = 0;
+  let voiceTotal = 0;
   let branches = [];
   let worldChanges = [];
   let worldVersion = null;
@@ -48,8 +90,8 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       { label: '有效事实记录', value: fmtNumber(assertions.length), hint: '带有效期；冲突时旧的作废，不删除' },
       { label: '世界变化', value: fmtNumber(worldChanges.length), hint: '本局世界线相对初始卡片的增量，不写回模板' },
       { label: '未回收线索', value: fmtNumber(threads.filter((t) => t.status === 'open').length), hint: '埋了没收的，和已经收掉的' },
-      { label: '台词样本', value: fmtNumber(voices.length), hint: '从正文里摘的台词，用来锚定声音' },
-      { label: '待处理', value: fmtNumber(patches.filter((p) => p.status !== 'applied' && p.status !== 'dismissed').length), hint: '一致性检查与幕后推演的提案' },
+      { label: '台词样本', value: fmtNumber(voiceTotal), hint: '从正文里摘的台词，用来锚定声音' },
+      { label: '待处理', value: fmtNumber(patchOpenTotal), hint: '一致性检查与幕后推演的提案' },
     ];
     for (const c of cards) {
       overview.appendChild(el('div', { class: 'mem-card' },
@@ -219,13 +261,28 @@ export async function openMemoryPanel(sessionId, opts = {}) {
     body.appendChild(el('p.muted', {}, 'Agent 只提案，代码才落库。这里能看到谁提的、证据是什么。'));
     const patchList = el('div.mem-patches');
     if (!patches.length) patchList.appendChild(el('p.muted', {}, '暂无提案。'));
-    for (const p of patches.slice(0, 40)) {
+    // 按类分堆：待确认（uncertain）每拍产出 3–5 条，混在一起会把真正需要处置的少数几条挤出可视范围。
+    // 这里显示每一类的总数，并说明列表里只展示最近多少条——不静默截断。
+    const shown = patches.slice(0, 40);
+    const counts = patchCounts || {};
+    const shownKinds = {};
+    for (const p of shown) shownKinds[p.kind] = (shownKinds[p.kind] || 0) + 1;
+    const kindSummary = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${PATCH_KIND_LABEL[k] || k} ${shownKinds[k] ? `${shownKinds[k]}/${n}` : `${n}`}`)
+      .join(' · ');
+    if (kindSummary) {
+      patchList.appendChild(el('p.muted', {},
+        `${kindSummary}（斜线后为该类总数；共 ${patchTotal} 条，列表只显示最近 ${shown.length} 条，未逐条列出不代表没有问题）`));
+    }
+    for (const p of shown) {
       const pending = p.status !== 'applied' && p.status !== 'dismissed';
       patchList.appendChild(el('div', { class: 'mem-patch' + (pending ? ' is-pending' : '') },
         el('span.mem-patch-kind', {}, PATCH_KIND_LABEL[p.kind] || p.kind),
         el('span.mem-patch-sev', {}, SEVERITY_LABEL[p.severity] || p.severity),
         el('span.mem-patch-agent', {}, p.agent),
-        el('span.mem-patch-claim', {}, truncate(p.payload?.claim || p.payload?.what || JSON.stringify(p.payload), 140)),
+        // 各类提案把话放在不同字段，统一走 patchClaim 归一，不要把 JSON 铺在界面上。
+        el('span.mem-patch-claim', {}, truncate(patchClaim(p), 140)),
         p.evidence ? el('span.mem-patch-ev', {}, truncate(p.evidence, 120)) : null,
         el('span.mem-patch-status', {}, p.status),
         pending ? el('div.mem-patch-actions', {},
@@ -314,7 +371,17 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       scenes = sc.scenes || [];
       threads = th.threads || [];
       voices = v.voices || [];
+      voiceTotal = Number(v.total) || voices.length;
       patches = p.patches || [];
+      patchCounts = p.counts || {};
+      patchTotal = Number(p.total) || patches.length;
+      // 总览卡的「待处理」必须用后端 open 计数：列表只取最近 100 条，
+      // 用 patches 本地过滤会把它报成「22」，实际 133（长跑实测）。
+      // 只有后端字段缺失（旧响应）时才退回本地过滤，不要用 `|| 0` 判真——
+      // 真正 0 条 open 与「字段没给」是两件事。
+      patchOpenTotal = Number.isFinite(Number(p.open_total))
+        ? Number(p.open_total)
+        : patches.filter((x) => x.status !== 'applied' && x.status !== 'dismissed').length;
       branches = br.branches || [];
       worldChanges = ws.changes || [];
       worldVersion = ws.world_version ?? null;

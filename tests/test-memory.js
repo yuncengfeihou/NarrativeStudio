@@ -658,6 +658,48 @@ console.log('\n=== 提案审计表 ===');
   eq(store.listPatches(sid, { status: 'open' }).length, 0, '按状态过滤');
 }
 
+console.log('\n=== 提案窗口：按 kind 取数 + 计数不静默截断 ===');
+{
+  const sid = `s-patchwin-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  // 复现长跑的形状：uncertain 每拍 3 条，offstage_event 每拍 1 条，共 10 拍。
+  for (let t = 1; t <= 10; t++) {
+    for (let k = 0; k < 3; k++) {
+      store.addPatch(sid, {
+        branchId: 'main', agent: 'archivist', kind: 'uncertain', turn_no: t, status: 'open',
+        payload: { text: `第 ${t} 拍未知项 ${k}` }, severity: 'minor',
+      });
+    }
+    store.addPatch(sid, {
+      branchId: 'main', agent: 'world-tick', kind: 'offstage_event', turn_no: t, status: 'open',
+      payload: { who: `人物${t}`, what: `第 ${t} 拍幕外`, visibility: 'rumor' }, severity: 'minor',
+    });
+  }
+  // 混 kind 的 24 条窗口里以 uncertain 为主（复现「流言被挤到最旧的一小撮」）
+  const mixed = store.listPatches(sid, { status: 'open', limit: 24 });
+  eq(mixed.filter((x) => x.kind === 'offstage_event').length, 6,
+    '混 kind 的 24 条窗口只有 6 条是流言（其余 18 条被 uncertain 占掉）');
+  // 按 kind 过滤后，窗口真的属于流言，而且拿到的是最新的
+  const rumors = store.listPatches(sid, { status: 'open', kind: 'offstage_event', limit: 24 });
+  eq(rumors.length, 10, 'kind 过滤后拿到全部 10 条流言');
+  eq(rumors[0].turn_no, 10, '窗口里最新的一条在前');
+  eq(store.countPatches(sid, { kind: 'offstage_event' }), 10, '计数按 kind');
+  eq(store.countPatches(sid, { status: 'open' }), 40, '计数不静默截断');
+  const counts = store.patchKindCounts(sid, { status: 'open' });
+  eq(counts.uncertain, 30, '分组计数：uncertain');
+  eq(counts.offstage_event, 10, '分组计数：offstage_event');
+  eq(store.countVoices(sid), 0, '原声计数（空表为 0）');
+
+  // 收敛：只保留最近 N 条 open，更旧的置 dismissed（不删行，审计链保留）
+  const retired = store.retirePatchesBeyond(sid, { kind: 'uncertain', keep: 5 });
+  eq(retired, 25, '把超出的 25 条置为 dismissed');
+  eq(store.countPatches(sid, { kind: 'uncertain', status: 'open' }), 5, '只留最近 5 条 open');
+  eq(store.countPatches(sid, { kind: 'uncertain' }), 30, '行没有被删掉（审计链保留）');
+  const keptTurns = store.listPatches(sid, { kind: 'uncertain', status: 'open', limit: 10 }).map((x) => x.turn_no);
+  ok(keptTurns.every((t) => t >= 9), '留下的是最近几拍的');
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 世界状态：变更校验 ===');
 {
@@ -1391,6 +1433,41 @@ console.log('\n=== 世界呼吸：不在场候选按「份量/关系/私心」�
     turnNo: 9, offstage: [], recentSummary: '', place: '茶楼', when: '次日 · 清晨',
   });
   ok(prompt.includes('【本场时间】次日 · 清晨'), '世界呼吸拿到这一场的时间');
+}
+
+console.log('\n=== 世界呼吸：候选轮转（静态排序会让同一批人被反复推演） ===');
+{
+  // 8 个人、权重递减：不轮转时永远只选前 4 个（长跑实测 29 次推演只用到 6/45 人）。
+  // 分数 = 权重 + 压力 0.5×0.5 = 权重 + 0.25。
+  const entities = Array.from({ length: 8 }, (_, i) => ({
+    id: `p${i}`, type: 'person', name: `人${i}`, weight: 1 - i * 0.1,
+    agenda: [{ goal: '有事', pressure: 0.5 }],
+  }));
+  const pick = (recentCounts) => pickOffstagePersons(entities, {
+    presentIds: new Set(), playerName: '玩家', ledger: {}, limit: 4, recentCounts,
+  }).map((c) => c.name);
+
+  eq(pick(new Map()), ['人0', '人1', '人2', '人3'], '不轮转：永远是最高的 4 个（复现问题）');
+
+  // 轮转是**软**的：分数 − 0.12 × 已用次数，不是「用过的排到队尾」。
+  // 用一次（-0.12 ≈ 一个以上权重档）会让 0.7 的 人3 被 0.6 的 人4 顶掉，
+  // 但**权重最高的人仍在前列**——重要人物不会因为「上轮出现过」就整个停摆。
+  const onceTop = new Map([['人0', 1], ['人1', 1], ['人2', 1], ['人3', 1]]);
+  eq(pick(onceTop), ['人0', '人1', '人2', '人4'], '用过一次：只让出一个末位，不是整批换人');
+  eq(pick(onceTop)[0], '人0', '权重最高的人用过一次仍排第一（不会因为出现过就消失）');
+
+  // 用得多才让位：top4 各用 5 次（-0.6）之后新人成片顶上来，
+  // 但权重最高的 人0 仍保住一个名额（1.25-0.6=0.65，与 人6 同分，靠权重序胜出）。
+  eq(pick(new Map([['人0', 5], ['人1', 5], ['人2', 5], ['人3', 5]])),
+    ['人4', '人5', '人0', '人6'], '用多了才让位，但最高权重仍保一个名额');
+
+  // 不会饿死：次数全部相等时回到纯分数序
+  eq(pick(new Map(entities.map((c) => [c.name, 3]))), ['人0', '人1', '人2', '人3'],
+    '次数全相等时回落分数序，不会没人可推');
+
+  // 兼容 Set 入参（只关心「出现过没有」的调用方，按各 1 次处理）
+  eq(pick(new Set(['人0', '人1', '人2', '人3'])), ['人0', '人1', '人2', '人4'],
+    'Set 入参按各 1 次处理，语义与计数 1 相同');
 }
 
 console.log('\n=== 切场只认实质变化：同场景措辞不封场 ===');
