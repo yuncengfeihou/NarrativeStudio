@@ -26,7 +26,7 @@ const effective = await import('../server/world/effective.js');
 const playerView = await import('../server/memory/player-view.js');
 const recall = await import('../server/memory/recall-history.js');
 const { pickOffstagePersons, detectSceneChange, isSubstantivePlaceShift } = await import('../server/agents/memory-pipeline.js');
-const { worldTickUserPrompt } = await import('../server/prompts/archivist.js');
+const { worldTickUserPrompt, archivistSystemPrompt } = await import('../server/prompts/archivist.js');
 
 let pass = 0;
 let fail = 0;
@@ -719,6 +719,88 @@ console.log('\n=== 世界状态：落库与投影 ===');
   );
   eq(effCodex.entities.find((e) => e.id === 'ling-fu').status, '全府戒严', '事实运行态进入投影');
   eq(effCodex.entities.find((e) => e.id === 'ling-fu').summary, '主宅', '定义不被运行态覆盖');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 数值账本：模型只报变化量，加减与余额由代码算 ===');
+{
+  const paths = await import('../server/world/state-paths.js');
+  ok(paths.NUMBER_PATH_SET.has('money'), 'money 是数值路径');
+  ok(![...paths.NUMBER_PATH_SET].some((p) => paths.LIST_PATH_SET.has(p)), '数值路径与列表路径不相交');
+  ok(paths.isNumberPath('player', 'money') === true, 'player.money 是数值路径');
+  ok(paths.isNumberPath('person', 'money') === false, '人物没有 money 路径');
+
+  const sid = `num-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const card = schema.normalizeCard({ title: 't', player: { name: '伍卿', money: 100 } });
+  const project = (turn) => effective.buildEffectiveWorld(
+    card, store.getWorldState(sid, { branchId: 'main', atTurn: turn }),
+  );
+
+  eq(project(0).player.money, 100, '卡里的初始银钱进投影');
+
+  // 模型只声明「花了 60」，不写余额。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex: [], playerName: '伍卿',
+    update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: -60 }] },
+  });
+  eq(project(1).player.money, 40, 'delta 由代码做加减（100 - 60 = 40）');
+
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 2, aliasIndex: [], playerName: '伍卿',
+    update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: 5.5 }] },
+  });
+  eq(project(2).player.money, 45.5, '再次 delta 累加到同一余额');
+
+  // 余额不会被扣成负数：整条拒绝，并留可查的拒绝记录（不静默 clamp 成 0）。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 3, aliasIndex: [], playerName: '伍卿',
+    update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: -100 }] },
+  });
+  const eff3 = project(3);
+  eq(eff3.player.money, 45.5, '超支的 delta 不把余额写成负数');
+  ok((eff3.rejected_deltas || []).some((r) => r.reason === 'negative' && r.path === 'money'),
+    '被拒的数值增量留下 rejected_deltas 证据');
+  ok(!String(eff3.rejected_deltas?.[0]?.reason || '').includes('__'), '拒绝记录用可序列化的键名，不进提示词');
+
+  // 数值路径的判定只看白名单，不看模型吐出的字面量：给 status 塞数字不能把它变成数字。
+  const dirty = arch.sanitizeChange(
+    { kind: 'person', id: 'a-jiu', path: 'status', op: 'delta', value: 5 },
+    { aliasIndex: [], playerName: '伍卿' },
+  );
+  eq(dirty, null, '非数值路径上的 delta 被拒（不像素级信任模型的字面量类型）');
+
+  const badMoney = arch.sanitizeChange(
+    { kind: 'player', id: 'player', path: 'money', op: 'delta', value: '很多' },
+    { aliasIndex: [], playerName: '伍卿' },
+  );
+  eq(badMoney, null, 'money 的 delta 值不是数字就整条拒绝');
+
+  // 空值不能当 0：Number('') === 0，会把「没写金额」误记成「余额归零」。
+  eq(arch.sanitizeChange(
+    { kind: 'player', id: 'player', path: 'money', op: 'set', value: '' },
+    { aliasIndex: [], playerName: '伍卿' },
+  ), null, 'money 的空值不当成 0');
+  eq(arch.sanitizeChange(
+    { kind: 'player', id: 'player', path: 'money', op: 'delta', value: null },
+    { aliasIndex: [], playerName: '伍卿' },
+  ), null, 'money 的 null 不当成 0');
+
+  // 分支复制：数值增量按 valid_to 裁剪，与其它 world_state 同一条规则。
+  store.addWorldState(sid, {
+    branch_id: 'main', entity_kind: 'player', entity_id: 'player',
+    path: 'money', op: 'delta', value: -1, turn: 9,
+  });
+  ok(store.getWorldState(sid, { branchId: 'main', atTurn: 9 }).some((d) => d.path === 'money'),
+    '数值增量同样进 world_state（因此天然被分支复制覆盖）');
+
+  // 金额不能再走断言：断言没有数量概念、「拥有」又可并存，同一个钱包会留下互相矛盾的余额，
+  // 而且每拍都渲染进「已成立的事实」——真跑里就出现过场记单写「银钱 0」、事实段写「七十五块钱」。
+  const prompt = archivistSystemPrompt();
+  ok(prompt.includes('金额不写成断言'), '史官提示词明确禁止把金额写成断言');
+  ok(prompt.includes('op": "delta"') && prompt.includes('path": "money"'),
+    '史官提示词给出 money + delta 的示例（模型只报变化量）');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

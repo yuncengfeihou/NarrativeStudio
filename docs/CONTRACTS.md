@@ -108,7 +108,7 @@ NarrativeStudio/
   // v5 图谱字段（可选）；没有时由 server/world/graph.js 从 relations/links/parent_id 推导
   edges: [{ from, to, kind, directed, weight, visibility, note }],
   claims: [{ subject, predicate, object:{kind,id,text}, cardinality:'one|many', visibility, validity }],
-  player: { mode: 'original|canon', canon_character, name, …, knowledge },
+  player: { mode: 'original|canon', canon_character, name, …, money, knowledge },
   author_notes: [{ text, scope: 'always|scene|session' }],
 }
 ```
@@ -184,10 +184,20 @@ patches(session_id, branch_id, agent, kind, payload_json, evidence, status, seve
 **写入 `assertions` / `voices` / `patches` 必须显式给 `branch_id`**（缺省抛错，不再静默兜底 `main`）。
 
 **world_state 是运行期世界变化的唯一写入口**：`entity_kind` 为实体类型（`person` / `place` / `institution` / `item` / `faction` / `concept` / `custom`）或 `player | world`，
-`op` 为 `set | add | remove | introduce`，路径白名单在 `server/world/state-paths.js`。
+`op` 为 `set | add | remove | introduce | delta`，路径白名单在 `server/world/state-paths.js`。
 身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas, fates)` 把
 模板、增量与已解锁的成长阶段投影成当轮有效的世界（优先级：`world_state` > `fates` > 卡初始值）；
 上下文引擎只读投影结果，永远不把运行期状态写回 `card_json`。
+
+**数值路径与 `delta`**（`NUMBER_PATH_SET` / `isNumberPath(kind, path)`）：只有白名单里的数值路径
+（当前仅 `player.money`）允许 `op='delta'`——模型只声明「这一拍变了多少」，加减由代码做，
+模型不再自己算余额。路径是不是数值**由白名单决定，不由模型吐出的字面量类型决定**；`NUMBER_PATH_SET`
+与 `LIST_PATH_SET` 不相交。非数字值、空串、`null` 一律整条拒绝（`Number('') === 0` 会把
+「没写金额」误记成「余额归零」）。`delta` 的结果为负时**不 clamp 成 0**，整条拒绝并记进
+`EffectiveWorld.rejected_deltas`（`{path, op, delta_id, turn, value, prev, next, reason}`，
+reason ∈ `not_a_number | negative`）；该字段只供装配/编排层读，**不进提示词、不占预算**，
+由 `orchestrator` 在本轮写完后重新投影采样，落成 `patches(kind='rejected_delta', status='failed')`。
+玩家银钱经 `renderSceneSheet({playerNow})` 的「主角此刻｜银钱 N」每拍可见。
 
 **实体定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有事实实体运行期不可写
 （`FACT_CANON_PATHS`）；运行期只写 `status / condition / access / open_to / owner_id / location_id /

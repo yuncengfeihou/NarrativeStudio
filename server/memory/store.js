@@ -316,7 +316,7 @@ export function getDb() {
       entity_kind TEXT NOT NULL,            -- person | place | ... | player | world
       entity_id TEXT NOT NULL,
       path TEXT NOT NULL DEFAULT '',
-      op TEXT NOT NULL DEFAULT 'set',       -- set | add | remove | introduce
+      op TEXT NOT NULL DEFAULT 'set',       -- set | add | remove | introduce | delta
       value_json TEXT NOT NULL DEFAULT 'null',
       valid_from INTEGER NOT NULL DEFAULT 0,
       valid_to INTEGER,
@@ -901,7 +901,10 @@ export function getThreads(sessionId, { branchId = null, status = null, limit = 
 
 /**
  * 追加一条世界状态增量。set 会关闭同一 (entity, path) 的旧值；
- * add / remove / introduce 保留历史，由投影器按顺序应用。
+ * add / remove / introduce / delta 保留历史，由投影器按顺序应用。
+ *
+ * delta 为什么**不**关闭旧值：它是增量而不是新状态。历史必须能逐条回放成
+ * 「每次都加了什么」，关闭旧值会让重放只剩最后一条、无法审计「钱是怎么变少的」。
  */
 export function addWorldState(sessionId, delta) {
   const d = getDb();
@@ -909,7 +912,7 @@ export function addWorldState(sessionId, delta) {
   const kind = String(delta.entity_kind || '').trim();
   const entityId = String(delta.entity_id || '').trim();
   const path = String(delta.path || '').trim();
-  const op = ['set', 'add', 'remove', 'introduce'].includes(delta.op) ? delta.op : 'set';
+  const op = ['set', 'add', 'remove', 'introduce', 'delta'].includes(delta.op) ? delta.op : 'set';
   if (!kind || !entityId) return null;
   if (op !== 'introduce' && !path) return null;
   const turn = Number(delta.turn ?? delta.valid_from ?? 0) || 0;

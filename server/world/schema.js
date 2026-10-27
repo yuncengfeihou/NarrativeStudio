@@ -574,6 +574,9 @@ function normalizePlayer(raw, entities) {
     mood: str(p.mood),
     location: str(p.location),
     goal: str(p.goal),
+    // 银钱：唯一的数值字段（state-paths.js NUMBER_PATH_SET）。缺省 0 而不是空串，
+    // 否则「第一次 delta」会从 undefined 开始算，模型和代码对不上同一个起点。
+    money: num(p.money, 0),
     knowledge: {
       knows: asStringArray(knowledge.knows),
       does_not_know: asStringArray(knowledge.does_not_know),

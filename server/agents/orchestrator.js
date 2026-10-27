@@ -17,12 +17,13 @@ import { config } from '../config.js';
 import { estimateTokens } from '../tokens.js';
 import { isPerson, normalizeCard } from '../world/schema.js';
 import { buildEffectiveWorld } from '../world/effective.js';
+import { isNumberPath } from '../world/state-paths.js';
 import { resolveAgent } from '../model-registry.js';
 import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId, runEffectOnce } from '../memory/branch-guard.js';
 import { buildPlayerView } from '../memory/player-view.js';
 import { recallHistory } from '../memory/recall-history.js';
 import {
-  accumulateUsage, addTurn, copyBranchState, createBranch, createSession,
+  accumulateUsage, addPatch, addTurn, copyBranchState, createBranch, createSession,
   getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession,
   getState, getThreads, getTurnsForBranch, getWorld, getWorldState, listBranches, saveWorld,
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
@@ -331,6 +332,29 @@ async function runTurnInner({
       : archRun.result;
     memoryStats = arch;
     if (!archRun.skipped) trackUsage('archivist', arch.usage);
+
+    // 数值增量被拒（值不是数字 / 加减后余额为负）：不 clamp、不静默吞，落成 patch 供排查。
+    // 必须在本轮 delta 写完之后重新投影一次——装配时那份 card 是 turnNo-1 的，
+    // 拿它看不到本轮刚写进去的 delta。只有本轮真写过数值路径才需要投影。
+    if (!archRun.skipped) {
+      const turnDeltas = getWorldState(sessionId, { branchId, atTurn: turnNo })
+        .filter((d) => Number(d.turn ?? d.valid_from) === turnNo);
+      if (turnDeltas.some((d) => isNumberPath(d.entity_kind, d.path))) {
+        const projected = buildEffectiveWorld(
+          normalizeCard(session.card_snapshot || world?.card || {}),
+          getWorldState(sessionId, { branchId, atTurn: turnNo }),
+        );
+        for (const r of projected.rejected_deltas || []) {
+          if (Number(r.turn) !== turnNo) continue;
+          addPatch(sessionId, {
+            branch_id: branchId, agent: 'archivist', kind: 'rejected_delta', turn_no: turnNo,
+            status: 'failed', severity: 'warn', payload: r,
+            evidence: `${r.path || ''} ${r.op || ''} ${r.value ?? ''}`.trim(),
+          });
+        }
+      }
+    }
+
     emit({ type: 'memory', stats: summarizeMemory(sessionId, arch, context, branchId) });
     const st = getState(sessionId, { branchId, atTurn: turnNo });
     // state 是完整账本（导出/排查用）；状态条只认 player_view，前端不得从 state 自取展示字段。

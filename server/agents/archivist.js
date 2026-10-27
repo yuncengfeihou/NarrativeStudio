@@ -13,7 +13,7 @@ import {
   ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
-  ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, pathsFor,
+  ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, isNumberPath, pathsFor,
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
@@ -198,7 +198,7 @@ function sanitizeIntroduce(kind, fields, name) {
 export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
   const o = obj(raw);
   const op = str(o.op) || (o.fields ? 'introduce' : 'set');
-  if (!['set', 'add', 'remove', 'introduce'].includes(op)) return null;
+  if (!['set', 'add', 'remove', 'introduce', 'delta'].includes(op)) return null;
   let kind = str(o.kind);
   if (!ENTITY_KINDS.includes(kind)) return null;
 
@@ -246,6 +246,20 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
   const isList = LIST_PATH_SET.has(path);
   if ((op === 'add' || op === 'remove') && !isList) return null;
   if (op === 'set' && isList) return null;
+
+  // 数值路径：值必须是数字，路径本身也不能是列表。delta 只对数值路径合法——
+  // 「模型写一个数字」不能把任意字符串路径变成数值路径（路径的性质由白名单决定）。
+  // 注意 Number('') 与 Number(null) 都是 0：空值必须判非法，否则「没写金额」会被当成「余额归零」。
+  const isNumber = isNumberPath(kind, path);
+  if (op === 'delta' && !isNumber) return null;
+  if (isNumber) {
+    if (op !== 'set' && op !== 'delta') return null;
+    const n = typeof o.value === 'number'
+      ? o.value
+      : (typeof o.value === 'string' && o.value.trim() !== '' ? Number(o.value) : NaN);
+    if (!Number.isFinite(n)) return null;
+    return { kind, entity_id: entityId, path, op, value: Math.round(n * 100) / 100 };
+  }
 
   let value = o.value;
   if (kind !== PERSON_TYPE && path === 'reveal') {

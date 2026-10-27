@@ -29851,6 +29851,7 @@
    "mood": "",
    "location": "",
    "goal": "",
+   "money": 75,
    "knowledge": {
     "knows": [],
     "does_not_know": [

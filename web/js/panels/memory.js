@@ -17,7 +17,7 @@ const PATCH_KIND_LABEL = {
   contradiction: '矛盾', knowledge_breach: '知识越界', timeline: '时间线',
   alias: '别名冲突', stale_thread: '线索陈旧', state_jump: '状态跳变',
   offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '事实记录',
-  world_change: '世界变化',
+  world_change: '世界变化', rejected_delta: '数值被拒',
 };
 const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', info: '提示' };
 

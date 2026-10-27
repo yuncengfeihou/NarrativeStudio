@@ -8,7 +8,7 @@
  * 纯函数：不碰存储、不调 LLM。
  */
 
-import { pathsFor, LIST_PATH_SET as LIST_PATHS } from './state-paths.js';
+import { pathsFor, isNumberPath as isNumberPathOf, LIST_PATH_SET as LIST_PATHS } from './state-paths.js';
 import { isPerson, PERSON_TYPE } from './schema.js';
 import { applyFates } from './fates.js';
 
@@ -166,9 +166,54 @@ function removeList(obj, path, value) {
   setAt(obj, path, asArray(getAt(obj, path)).filter((x) => String(x) !== v));
 }
 
+/** 数值路径的判定只看白名单，不看模型吐出的字面量类型。 */
+const isNumberPath = (kind, path) => isNumberPathOf(kind, path);
+const numericOf = (v) => {
+  if (typeof v === 'number') return Number.isFinite(v) ? v : null;
+  if (typeof v === 'string' && v.trim() !== '') {
+    const n = Number(v);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+};
+/** 百分位取整：0.1+0.2 这类浮点毛刺不能写进「钱」。 */
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * 写一条数值增量。
+ *
+ * delta 做加减；结果为负**不 clamp 成 0**，而是整条拒绝并记进 `__rejected`——
+ * 静默 clamp 会让「钱变少了但没人知道为什么」，与静默失忆同罪。
+ * `__rejected` 由装配层读走写成 patch，不进提示词、不占预算。
+ */
+function writeNumber(world, target, path, op, value, src = {}) {
+  const n = numericOf(value);
+  const tag = { path, op, delta_id: src.id ?? null, turn: Number(src.valid_from) || 0 };
+  if (n == null) {
+    pushRejected(world, { ...tag, value, reason: 'not_a_number' });
+    return;
+  }
+  if (op === 'set') {
+    setAt(target, path, round2(n));
+    return;
+  }
+  const prev = numericOf(getAt(target, path)) ?? 0;
+  const next = round2(prev + n);
+  if (next < 0) {
+    pushRejected(world, { ...tag, value: n, prev, next, reason: 'negative' });
+    return;
+  }
+  setAt(target, path, next);
+}
+
+function pushRejected(world, item) {
+  if (!Array.isArray(world.rejected_deltas)) world.rejected_deltas = [];
+  world.rejected_deltas.push(item);
+}
+
 /**
  * 把一条增量应用到实体上。
- * set 写标量；add/remove 写列表；introduce 创建会话内的新实体。
+ * set 写标量；add/remove 写列表；introduce 创建会话内的新实体；delta 只作用于数值路径。
  * entity_kind 是 v5 的实体类型值（person / place / …），不再有 cast/codex 两套。
  * player / world 不是卡里的实体：前者投影到 world.player，后者投影到 world.runtime。
  */
@@ -186,6 +231,7 @@ function applyDelta(world, delta) {
     if (!isObj(target) || !allowed.has(path)) return;
     if (op === 'add') addList(target, path, value);
     else if (op === 'remove') removeList(target, path, value);
+    else if (isNumberPath(kind, path)) writeNumber(world, target, path, op, value, delta);
     else if (path.includes('.')) setAt(target, path, value);
     else target[path] = String(value ?? '');
     return;
@@ -228,6 +274,7 @@ function applyDelta(world, delta) {
   if (!allowed.has(path)) return;
   if (op === 'add') addList(entity, path, value);
   else if (op === 'remove') removeList(entity, path, value);
+  else if (isNumberPath(kind, path)) writeNumber(world, entity, path, op, value);
   else if (path.includes('.')) setAt(entity, path, value);
   else entity[path] = String(value ?? '');
 }

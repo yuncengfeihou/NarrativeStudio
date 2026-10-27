@@ -58,6 +58,7 @@ schema：
     {"kind": "person", "id": "凌玥", "path": "knowledge.knows", "op": "add", "value": "七年前是她母亲把伍卿丢在街上"},
     {"kind": "person", "id": "凌玥", "path": "status", "op": "set", "value": "左肩中箭，强撑着"},
     {"kind": "item", "id": "玉佩", "path": "reveal", "op": "set", "value": "public"},
+    {"kind": "player", "id": "player", "path": "money", "op": "delta", "value": -60},
     {"kind": "place", "id": "听雨楼", "op": "introduce", "fields": {"type": "place", "name": "听雨楼", "summary": "城南的暗线据点"}},
     {"kind": "person", "id": "a-jiu", "op": "introduce", "fields": {"name": "阿九", "role": "听雨楼的跑堂"}}
   ],
@@ -78,6 +79,8 @@ schema：
 - predicate 只能从这个表里选：${PREDICATES.join(' / ')}
 - 「位于 / 是 / 曾经是」是单值：同一时刻只能有一个对象；其余谓词可以并存，
   不要因为对象不同就当成矛盾（知道 A 与知道 B 可以同时成立）。
+- **金额不写成断言**：断言没有数量概念，「拥有」又是可以并存的谓词，同一个钱包会
+  留下好几个互相矛盾的余额，每拍都渲染进「已成立的事实」。银钱只走 changes 的 money。
 - visibility：
   - public  —— 在场的人都知道
   - engine  —— 只有演绎引擎知道（用于保持自洽，不得由角色说出）
@@ -108,9 +111,14 @@ schema：
     新条目用 introduce 一次写清。
   - player: situation / capability / inner_voice / wants / afraid；
     status / condition / mood / location / goal / life_state；
-    knowledge.knows / knowledge.does_not_know
+    knowledge.knows / knowledge.does_not_know；
+    money（银钱，唯一的数值字段）
   - world: status（城邦/阵营/天下的整体局势，例如「全城戒严」）
 - op：set 写标量；add / remove 写列表；introduce 让剧情里第一次出现的实体进入当前世界线。
+- **money 只写「这一拍变了多少」，不要写你算完的余额**：付出去写负数、收进来写正数，
+  op 用 delta（例：{"kind":"player","id":"player","path":"money","op":"delta","value":-60}）。
+  加减由代码做，你只声明变化量；算错了会变成账本里的假数。
+  只有确知「他现在一共只有多少」时才用 op set 写绝对值。
 - 角色在正文里学到/误解/遗忘一件事，必须写 knowledge.*；不要只写进 assertions 就完事。
 - **死亡 / 重伤 / 离场**：先用 life_state 标 dead / injured / gone，再用 person.status 写细节
   （怎么死的、尸体在哪里、谁看见了）；只写自由文本 code 判定不了，死人在后续回合仍会开口。

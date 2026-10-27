@@ -597,9 +597,21 @@ export default {
         inp.addEventListener('input', () => { p[key] = inp.value; });
         card.appendChild(editorRow(label, inp));
       }
+      // 银钱是唯一的数值字段：开局给个起点，之后由史官报「变化量」、代码加减，
+      // 作者不需要在卡里写死任何后续余额。
+      const moneyInp = el('input', {
+        type: 'number', step: '0.1', placeholder: '0',
+        style: 'flex:1;min-width:0;font-size:var(--fs-caption);color:var(--ink-2);padding:2px 0;',
+      });
+      moneyInp.value = Number(p.money ?? 0) || 0;
+      moneyInp.addEventListener('input', () => {
+        const n = Number(moneyInp.value);
+        p.money = Number.isFinite(n) && n >= 0 ? n : 0;
+      });
+      card.appendChild(editorRow('银钱', moneyInp));
       wrap.appendChild(card);
       wrap.appendChild(el('div.group-note', { style: 'padding-top:10px;' },
-        '主角速写会每轮进入上下文（约 0.6K tok）。'));
+        '主角速写会每轮进入上下文（约 0.6K tok）；银钱由代码累加，模型只报「这一拍变了多少」。'));
       return wrap;
     }
 

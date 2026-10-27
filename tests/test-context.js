@@ -461,6 +461,35 @@ console.log('\n=== 场记单内容 ===');
   ok(!sheet.includes('玉佩'), 'reveal=secret 的条目不被链接带出时不出现在单子里');
 }
 
+console.log('\n=== 银钱：数值路径每拍可见，且不与列表路径冲突 ===');
+{
+  const numCard = schema.normalizeCard({
+    title: 'n',
+    player: { name: '伍卿', money: 88.4 },
+    entities: [{ id: 'ling-yue', type: 'person', name: '凌玥' }],
+  });
+  const person = numCard.entities.find((e) => e.type === 'person');
+  const sheet = sceneSheet.renderSceneSheet({
+    ledger: { time: '初冬 · 午后', place: '柴房', present: [person.name] },
+    present: [person],
+    playerNow: { money: numCard.player.money },
+  });
+  ok(sheet.text.includes('银钱 88.4'), '银钱随场记单进提示词（模型不必自己记账）');
+
+  const noMoney = sceneSheet.renderSceneSheet({
+    ledger: { time: 't', place: 'p' },
+    present: [person],
+    playerNow: { goal: '活下去' },
+  });
+  ok(!noMoney.text.includes('银钱'), '没有数值就不渲染这一格（不写 0 占位）');
+
+  // 数值路径必须是标量路径：同一路径不能既在 LIST_PATH_SET 又在 NUMBER_PATH_SET。
+  const paths = await import('../server/world/state-paths.js');
+  for (const p of paths.NUMBER_PATH_SET) {
+    ok(!paths.LIST_PATH_SET.has(p), `数值路径 ${p} 不是列表路径`);
+  }
+}
+
 console.log('\n=== 预算从模型窗口推导（不再写死层配额） ===');
 {
   const plan = currentPlan();

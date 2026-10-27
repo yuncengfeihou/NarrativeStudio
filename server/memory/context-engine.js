@@ -802,6 +802,9 @@ export async function assembleContext({
       condition: card.player?.condition, mood: card.player?.mood,
       location: card.player?.location, goal: card.player?.goal,
       status: card.player?.status, situation: card.player?.situation,
+      // 银钱是唯一的数值路径（state-paths.js NUMBER_PATH_SET），每拍必须可见：
+      // 否则模型只能靠「拥有」断言各自记一个余额，6 次面额拆解 6 次算不平。
+      money: card.player?.money,
     },
     directive: directive || str(session.settings?.scene_directive),
     absentees,

@@ -487,6 +487,9 @@ export function renderSceneSheet({
     if (p.mood) playerBits.push(`情绪 ${str(p.mood)}`);
     if (p.location) playerBits.push(`所在 ${str(p.location)}`);
     if (p.goal) playerBits.push(`当下想要 ${str(p.goal)}`);
+    // 银钱是唯一的数值路径：由代码累加，模型每拍都能看见「现在一共有多少」，
+    // 而不是每条断言各记一个互相矛盾的余额。
+    if (typeof p.money === 'number') playerBits.push(`银钱 ${p.money}`);
   }
   const playerLine = playerBits.length ? `主角此刻：${playerBits.join('｜')}` : '';
 
