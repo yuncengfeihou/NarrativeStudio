@@ -209,7 +209,8 @@ try {
     "select value, count(*) c from character_states where session_id = :sid and field = 'life_state' group by value"
   ).all({ sid: sessionId });
   const lifeMap = Object.fromEntries(lifeStates.map((r) => [r.value, r.c]));
-  const deathTurns = narr.filter((t) => /死|断气|咽气|身亡|离世|尸体|尸首/.test(String(t.content || '')));
+  // 单字「死」排除非死亡固定搭配（死死抠着／拽得死紧），口径与 longrun-report.mjs 同一份。
+  const deathTurns = narr.filter((t) => /(?:死(?!死|紧|盯|守|撑|抠|攥|抓|拽|磕|心|气|板|结)|断气|咽气|身亡|离世|尸体|尸首|丧命|毙命)/.test(String(t.content || '')));
   const deadWrites = (lifeMap.dead || 0) + (lifeMap.gone || 0);
   console.log(`生命体征     life_state ${lifeStates.length ? JSON.stringify(lifeMap) : '(无)'}｜正文含死亡表述 ${deathTurns.length} 轮｜dead/gone 写入 ${deadWrites} 行`);
   // 场外流言是否真的被后文接住：offstage_event 的 who 之后是否在旁白正文里再出现。

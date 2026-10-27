@@ -45,3 +45,4 @@ _work/real-10turn-report.json
 /_work/tmp-*.json
 
 /_work/tmp-realrun-*.jsonl
+/_work/tmp-longrun-*.jsonl
