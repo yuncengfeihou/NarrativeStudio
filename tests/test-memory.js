@@ -28,6 +28,7 @@ const recall = await import('../server/memory/recall-history.js');
 const { pickOffstagePersons, detectSceneChange, isSubstantivePlaceShift } = await import('../server/agents/memory-pipeline.js');
 const pipe = await import('../server/agents/memory-pipeline.js');
 const { worldTickUserPrompt, archivistSystemPrompt } = await import('../server/prompts/archivist.js');
+const config = (await import('../server/config.js')).config;
 
 let pass = 0;
 let fail = 0;
@@ -476,6 +477,73 @@ console.log('\n=== 史官：确定性落库 ===');
   });
   const st11 = store.getState(sid, { branchId: 'main', atTurn: 11 });
   eq(st11.state.place_id, 'ling-fu', '复合地名按实体链接解析 place_id');
+
+  /* ---- place_id 重算：最长命中 + 唯一性，不做名字特判 ---- */
+  // 别名索引与场景里一致：别墅有「二楼」这个别名，「老旅馆二楼房间」不能被它抢走。
+  const villaIdx = [
+    { alias: '别墅', kind: 'codex', id: 'bie-shu', name: '别墅', type: 'place' },
+    { alias: '二楼', kind: 'codex', id: 'bie-shu', name: '别墅', type: 'place' },
+    { alias: '凌玥的别墅', kind: 'codex', id: 'bie-shu', name: '别墅', type: 'place' },
+    { alias: '老旅馆', kind: 'codex', id: 'lao-lv-guan', name: '老旅馆', type: 'place' },
+  ];
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 12, aliasIndex: villaIdx,
+    update: { scene_change: { changed: true, place: '老旅馆二楼房间' } },
+  });
+  eq(store.getState(sid, { branchId: 'main', atTurn: 12 }).state.place_id, 'lao-lv-guan',
+    '最长命中：老旅馆二楼房间 → 老旅馆，不被别名「二楼」抢走');
+
+  // 反向包含：地点文本比条目名短，要能命中全名；但必须唯一。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 13,
+    aliasIndex: [{ alias: '镇东回春堂', kind: 'codex', id: 'hui-chun-tang', name: '镇东回春堂', type: 'place' }],
+    update: { scene_change: { changed: true, place: '回春堂' } },
+  });
+  eq(store.getState(sid, { branchId: 'main', atTurn: 13 }).state.place_id, 'hui-chun-tang',
+    '反向包含唯一时解析成功：回春堂 → 镇东回春堂');
+
+  // 反向歧义（「东别墅」「西别墅」都同样长短地包住「别墅」）→ 判失败写空，不猜。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 14,
+    aliasIndex: [
+      { alias: '东别墅', kind: 'codex', id: 'a', name: '东别墅', type: 'place' },
+      { alias: '西别墅', kind: 'codex', id: 'b', name: '西别墅', type: 'place' },
+    ],
+    update: { scene_change: { changed: true, place: '别墅' } },
+  });
+  eq(store.getState(sid, { branchId: 'main', atTurn: 14 }).state.place_id, '',
+    '反向包含歧义 → 写空而不是猜一个实体');
+
+  // 但「别墅」自身就是一个条目时不算歧义：最短命中的那个才是本意，长名条目只是它的变体。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 141,
+    aliasIndex: [
+      { alias: '别墅', kind: 'codex', id: 'villa', name: '别墅', type: 'place' },
+      { alias: '凌玥的别墅', kind: 'codex', id: 'villa', name: '别墅', type: 'place' },
+    ],
+    update: { scene_change: { changed: true, place: '别墅' } },
+  });
+  eq(store.getState(sid, { branchId: 'main', atTurn: 141 }).state.place_id, 'villa',
+    '最短命中的唯一实体优先（长名只是同一条目的别名）');
+
+  // 运行期 introduce 的地点也要能被解析（卡快照里没有它的别名索引）。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 15, aliasIndex: [],
+    update: {
+      scene_change: { changed: true, place: '官道' },
+      changes: [{ kind: 'place', id: 'guan-dao', op: 'introduce', value: { name: '官道' } }],
+    },
+  });
+  const st15 = store.getState(sid, { branchId: 'main', atTurn: 15 });
+  eq(st15.state.place_id, 'guan-dao', '本分支 introduce 的地点也能解析成 place_id');
+
+  // 解析不到就写空，不把自由文本留成 place_id；且空不会把上一拍的 place_id 抹成脏值。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 16, aliasIndex: villaIdx,
+    update: { scene_change: { changed: true, place: '黑色商务车内／村路' } },
+  });
+  eq(store.getState(sid, { branchId: 'main', atTurn: 16 }).state.place_id, '',
+    '解析不到的地点写空（不保留自由文本当 id）');
 
   const patches = store.listPatches(sid, { limit: 50 });
   ok(patches.some((p) => p.kind === 'assertion' && p.status === 'applied'), '断言提案有审计');
@@ -1340,18 +1408,74 @@ console.log('\n=== 切场只认实质变化：同场景措辞不封场 ===');
     when_label: '初冬 · 午后', place: '黑色商务车',
   });
 
+  // 下面三条都在「本场已满最小场长」之后（否则切场会被最小场长拦掉，
+  // 测不到「只认实质变化」这条规则本身）。prev.turn_from=1，所以 turnNo>=4 起闸门失效。
   // 史官报了 changed，但账本里地点只是「车 → 车内」——不封场。
-  store.setState(sid, 2, { time: '初冬 · 午后', place: '黑色商务车内' }, 'main');
-  eq(detectSceneChange(session, { scene_change: { changed: true } }, 2), false,
+  store.setState(sid, 4, { time: '初冬 · 午后', place: '黑色商务车内' }, 'main');
+  eq(detectSceneChange(session, { scene_change: { changed: true } }, 4), false,
     '同场景措辞变化 + 史官 changed:true 也不封场');
 
   // 真的换了地方才封场。
-  store.setState(sid, 3, { time: '初冬 · 午后', place: '茶楼' }, 'main');
-  eq(detectSceneChange(session, { scene_change: { changed: true } }, 3), true, '实质换地点封场');
+  store.setState(sid, 5, { time: '初冬 · 午后', place: '茶楼' }, 'main');
+  eq(detectSceneChange(session, { scene_change: { changed: true } }, 5), true, '实质换地点封场');
 
-  // 时间跳到另一段也封场（跨日）。
-  store.setState(sid, 4, { time: '第二天 · 清晨', place: '茶楼' }, 'main');
-  eq(detectSceneChange(session, { scene_change: { changed: true } }, 4), true, '时间跳到次日封场');
+  // 时间跳到另一段也封场（跨日）。这里换回同一地点，排除地点变量的干扰。
+  store.setState(sid, 6, { time: '第二天 · 清晨', place: '茶楼' }, 'main');
+  eq(detectSceneChange(session, { scene_change: { changed: true } }, 6), true, '时间跳到次日封场');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 最小场长：场次太短会让「本场逐字原文」为空 ===');
+{
+  const sid = `scene-min-${Date.now()}`;
+  store.createSession({ id: sid, title: 'scene-min' });
+  store.createBranch(sid, { branchId: 'main' });
+  const session = { id: sid, branch_id: 'main' };
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 1,
+    when_label: '初冬 · 午后', place: '茶楼',
+  });
+  // 第 2、3 拍：地点已经变了，但本场还没满 MIN_SCENE_TURNS=3 拍 → 不切。
+  store.setState(sid, 2, { time: '初冬 · 午后', place: '柴房' }, 'main');
+  eq(detectSceneChange(session, { scene_change: {} }, 2), false, '本场第 2 拍：不因换地点切场');
+  store.setState(sid, 3, { time: '初冬 · 午后', place: '柴房' }, 'main');
+  eq(detectSceneChange(session, { scene_change: {} }, 3), false, '本场第 3 拍：仍不切');
+  // 第 4 拍满了下限 → 换地点照常切。
+  store.setState(sid, 4, { time: '初冬 · 夜', place: '官道' }, 'main');
+  eq(detectSceneChange(session, { scene_change: {} }, 4), true, '满下限后地点/时间变化照常切场');
+
+  // 下限必须在**每一场**都生效，不能只在第一场后面生效。
+  // 判据取 turnNo - prev.turn_to（本场已写下的拍数），不是 turnNo - prev.turn_from：
+  // prev.turn_from 是上一场的起点，上一场越长这个差越大，闸门就越早失效——
+  // 一场 6 拍之后的下一场，第 2 拍就会被放行（实测 65 拍里 29 场全是 1–2 拍）。
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S002', level: 1, turn_from: 2, turn_to: 6,
+    when_label: '初冬 · 夜', place: '官道',
+  });
+  store.setState(sid, 7, { time: '初冬 · 夜', place: '废品站' }, 'main');
+  eq(detectSceneChange(session, { scene_change: {} }, 7), false,
+    '长场之后的下一场：本场第 1 拍不因换地点切场');
+  store.setState(sid, 8, { time: '初冬 · 夜', place: '废品站' }, 'main');
+  eq(detectSceneChange(session, { scene_change: {} }, 8), false,
+    '长场之后的下一场：本场第 2 拍仍不切');
+  store.setState(sid, 9, { time: '初冬 · 夜', place: '废品站' }, 'main');
+  eq(detectSceneChange(session, { scene_change: {} }, 9), true,
+    '长场之后的下一场：满下限后照常切场');
+
+  // 硬触发不受下限约束：SCENE_EVERY 到点必须封场，否则长局会「一场都不关」，
+  // 且 minSceneTurns > sceneEvery 时会死锁。
+  const sid2 = `scene-hard-${Date.now()}`;
+  store.createSession({ id: sid2, title: 'scene-hard' });
+  store.createBranch(sid2, { branchId: 'main' });
+  const every = config.context.sceneEvery;
+  store.addScene(sid2, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 1,
+    when_label: '初冬 · 午后', place: '茶楼',
+  });
+  // 地点和时间都不变，只有轮数走到上限。
+  store.setState(sid2, every, { time: '初冬 · 午后', place: '茶楼' }, 'main');
+  eq(detectSceneChange({ id: sid2, branch_id: 'main' }, { scene_change: {} }, every), true,
+    `轮数强制封场不受最小场长影响（SCENE_EVERY=${every}）`);
 }
 
 console.log(`\n${'═'.repeat(50)}`);

@@ -19,6 +19,7 @@ const turns = Number(process.argv[2]) || 500;
 const store = await import('../server/memory/store.js');
 const engine = await import('../server/memory/context-engine.js');
 const { currentPlan } = await import('../server/memory/context-plan.js');
+const { config } = await import('../server/config.js');
 const { normalizeCard } = await import('../server/world/schema.js');
 const fs = await import('node:fs');
 
@@ -36,18 +37,24 @@ const S = { ...session, branch_id: 'main', anchor_id: 'prologue' };
 // 塞入假回合，让「最近原文」层有真实数据（只追加，模拟长会话）
 const NARRATIVE = ('雨顺着他的围巾往下淌，冰凉。他忽然发现，自己竟然没有立刻甩开那只手'
   + '——不是不想，是这具身体好像认得她。凌玥的手很凉，握得很轻，像怕捏碎什么。').repeat(3);
-const SCENE_EVERY = 6; // 与 config.context.sceneEvery 的默认节奏一致
+// 场次长度按**配置允许的最坏情况**取：地点/时间每拍都变时，能切到多短就多短。
+// 取 SCENE_EVERY 是旧口径，它只是上限——长跑实测 65 拍切了 29 场（2.24 拍/场），
+// 模拟按 12 拍一场会把场次索引层低估 5 倍，「1000 轮体积有上界」就成了自证。
+// MIN_SCENE_TURNS=0 时没有下限，最坏是 1 拍一场。
+const SCENE_LEN = Math.max(1, Math.min(
+  config.context.minSceneTurns || 1, config.context.sceneEvery || 1,
+));
 for (let i = 1; i <= turns; i++) {
   store.addTurn('scale-session', { turn_no: i, kind: 'player', content: '我低着头没说话。', branch_id: 'main' });
   store.addTurn('scale-session', { turn_no: i, kind: 'narrator', content: NARRATIVE, branch_id: 'main' });
   // 模拟回合末的封场：原文窗口只保留当前场次（上一场结束 + 1 起）。
-  if (i % SCENE_EVERY === 0) {
-    const n = i / SCENE_EVERY;
+  if (i % SCENE_LEN === 0) {
+    const n = i / SCENE_LEN;
     store.addScene('scale-session', {
       branch_id: 'main',
       scene_id: `S${String(n).padStart(3, '0')}`,
       level: 1,
-      turn_from: i - SCENE_EVERY + 1,
+      turn_from: i - SCENE_LEN + 1,
       turn_to: i,
       place: `地点${i}`,
       question: `第 ${n} 场真正在问的问题？`,

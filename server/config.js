@@ -61,6 +61,13 @@ export const config = {
     // 强制切场：>0 时按固定轮数封场。0 = 只按「地点变化」切场，会导致
     // 角色在一个地点待 100 轮就一场都不关，「最近一场」永远未归档。
     sceneEvery: int(env.SCENE_EVERY, 12),
+    // 最小场长：场次至少写满这么多拍，才允许因「地点/时间变了」切场。
+    // 长跑实测 65 拍切了 29 场（2.24 拍/场），每场第一拍的
+    // meta.coverage.recent_from 必为 null——那一拍上下文里没有任何逐字原文，
+    // 模型是凭场次索引在续写。SCENE_EVERY 只管上限（12 拍必封），
+    // 缺的是下限。默认 3：65 拍 → 18 场，recent_from=null 从 44.6% 降到 27.7%。
+    // 只约束软触发；轮数/ token 的强制封场不受影响（否则会与 SCENE_EVERY 死锁）。
+    minSceneTurns: int(env.MIN_SCENE_TURNS, 3),
     sceneMaxTokens: int(env.SCENE_MAX_TOKENS, 20000), // 单场原文超过这个就强制封场
   },
 

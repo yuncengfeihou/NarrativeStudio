@@ -10,14 +10,14 @@
  */
 import { chat } from '../llm.js';
 import {
-  ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
+  ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
   ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, isNumberPath, pathsFor,
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
-  invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
+  getWorldState, invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
 } from '../memory/store.js';
 import {
   LIFE_STATES, PREDICATES, STATE_FIELDS, VISIBILITIES, archivistSystemPrompt, archivistUserPrompt,
@@ -615,6 +615,78 @@ export async function runArchivist({
 }
 
 /**
+ * 把地点名映射到实体 id；映射不到就是空——空只表示「这个地点没有对应条目」，
+ * 不会把错实体带进上下文（`context-engine` 的地点加分是按 place_id 匹配的）。
+ *
+ * 两段式，两段都只做确定性匹配 + 唯一性判定，不做任何名字特判：
+ *   ① 正向：地点文本 ⊇ 某 label，取**最长**命中；
+ *   ② 反向：某 label ⊇ 地点文本，取**最短**命中，且必须唯一——
+ *      「回春堂」要靠这一档命中「镇东回春堂」，但「别墅」会同时命中
+ *      别墅/凌玥的别墅/西式别墅，歧义直接判失败，不猜。
+ * @returns {string|null} 空串 = 解析失败（写空）；null = 无地点信息（保持旧值）
+ */
+function resolvePlaceId(place, explicitId, placeEntities) {
+  const norm = (v) => str(v).replace(/[\s·・,，。、；;：:（）()【】\[\]—\-–~～→>]/g, '');
+  const labelsOf = (e) => [e.name, ...(e.aliases || [])].map(norm).filter((l) => l.length >= 2);
+
+  if (place) {
+    const raw = norm(place);
+    if (!raw) return '';
+    let best = '';
+    let bestLen = 0;
+    for (const e of placeEntities) {
+      for (const l of labelsOf(e)) {
+        if (raw.includes(l) && l.length > bestLen) { best = e.id; bestLen = l.length; }
+      }
+    }
+    if (best) return best;
+    const cands = [];
+    for (const e of placeEntities) {
+      for (const l of labelsOf(e)) if (l.includes(raw)) cands.push({ id: e.id, len: l.length });
+    }
+    if (!cands.length) return '';
+    const shortest = Math.min(...cands.map((c) => c.len));
+    const uniq = new Set(cands.filter((c) => c.len === shortest).map((c) => c.id));
+    return uniq.size === 1 ? cands.find((c) => c.len === shortest).id : '';
+  }
+  if (explicitId) {
+    const hit = placeEntities.find((e) => e.id === explicitId || norm(e.name) === norm(explicitId));
+    return hit ? hit.id : null;
+  }
+  return null;
+}
+
+/**
+ * 收集本拍可见的 place 实体：卡快照（经别名索引）+ 本分支已 introduce 的地点。
+ * 后者不能省——运行期新登场的地点（官道/柴房/回春堂）不在卡里，只从卡建索引
+ * 会让它们的 place_id 永远是自由文本。
+ */
+function collectPlaceEntities(aliasIndex, sessionId, branchId, turnNo) {
+  const byId = new Map();
+  for (const e of aliasIndex || []) {
+    if (e.type !== 'place') continue;
+    const cur = byId.get(e.id) || { id: e.id, name: e.name, aliases: [] };
+    if (e.alias && e.alias !== e.name) cur.aliases.push(e.alias);
+    byId.set(e.id, cur);
+  }
+  let introduced = [];
+  try {
+    introduced = getWorldState(sessionId, { branchId, atTurn: turnNo });
+  } catch { introduced = []; }
+  for (const d of introduced) {
+    if (d.entity_kind !== 'place' || d.op !== 'introduce' || !isPlainObject(d.value)) continue;
+    const id = str(d.entity_id);
+    if (!id || byId.has(id)) continue;
+    byId.set(id, {
+      id,
+      name: str(d.value.name) || id,
+      aliases: Array.isArray(d.value.aliases) ? d.value.aliases.map(str).filter(Boolean) : [],
+    });
+  }
+  return [...byId.values()];
+}
+
+/**
  * 确定性应用史官提案。所有写入都在这里发生，全部可回放、可审计。
  */
 export function applyArchivistUpdate({
@@ -802,27 +874,18 @@ export function applyArchivistUpdate({
     applied.changes++;
     if (declaredSet && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
   }
-
   /* ---- 账本合并 ---- */
   const old = getState(sessionId, { branchId, atTurn: turnNo });
   const delta = ledgerDelta;
   const scene = update.scene_change || {};
 
-  // 地点名能对上卡里的 place 事实实体时，自动补 place_id；这让「当前地点」加分与
-  // 地点条目进场不再依赖模型是否手写了 id。
-  let placeId = scene.place_id || '';
-  if (!placeId && scene.place) {
-    const resolved = resolveEntity(scene.place, aliasIndex);
-    if (resolved.type === 'place') {
-      placeId = resolved.id;
-    } else {
-      // 「凌府门口 → 凌府天井」这类复合地名：用实体链接取最长的 place 命中。
-      const hit = linkEntities(scene.place, aliasIndex).fact
-        .map((id) => aliasIndex.find((e) => e.type === 'place' && e.id === id))
-        .find(Boolean);
-      if (hit) placeId = hit.id;
-    }
-  }
+  // place_id 只做一件事：把地点名映射到「卡里或本分支已 introduce」的 place 实体。
+  // 原实现有两个洞：①解析失败时会退回 linkEntities 的**第一个**命中（不是最长），
+  // 于是「老旅馆二楼房间」被别墅的别名「二楼」抢走（长跑 t59/t60 的错指）；
+  // ②别名索引只从卡快照建，运行期 introduce 的官道/柴房/回春堂永远解析不到，
+  // place_id 只能退化成自由文本，「当前地点 +20 分」失效。
+  const placeEntities = collectPlaceEntities(aliasIndex, sessionId, branchId, turnNo);
+  const placeId = resolvePlaceId(scene.place, scene.place_id, placeEntities);
 
   const mergedDelta = {
     ...delta,

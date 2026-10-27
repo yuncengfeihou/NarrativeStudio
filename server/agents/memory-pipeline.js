@@ -246,11 +246,23 @@ export function detectSceneChange(session, _update, turnNo) {
   const prev = latestScene(sessionId, branchId);
   if (!prev) return true;
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
-  if (isSubstantivePlaceShift(prev.place, ledger.place)) return true;
+
+  // 最小场长：场次第一拍的「本场逐字原文」必然为空（coverage.recent_from === null），
+  // 模型那一拍看不到上一拍正文，只能靠场次索引续写。长跑实测 65 拍切 29 场
+  // （2.24 拍/场），44.6% 的拍落在这种状态里，所以缺的是**下限**不是上限
+  // （SCENE_EVERY=12 一次都没触发过）。这里只给「地点/时间」两个软触发加闸；
+  // 轮数 / token 的强制封场必须照旧生效，否则 minTurns > sceneEvery 会死锁。
+  // 本场已写下的拍数 = turnNo - prev.turn_to（prev 是上一场**已封**的场）。
+  // 不能用 prev.turn_from：那是上一场的起点，上一场越长这个差越大，
+  // 闸门会在第二场之后彻底失效——「下限」只在短场后面生效，等于没做。
+  const minTurns = config.context.minSceneTurns;
+  const tooShort = minTurns > 0 && turnNo - prev.turn_to < minTurns;
+
+  if (!tooShort && isSubstantivePlaceShift(prev.place, ledger.place)) return true;
   const prevWhen = str(prev.when_label);
   const nextWhen = str(ledger.time);
   // 时间标签变了就是跨了一段（史官只该在真正跳跃时写 when；同刻续写由提示词约束）。
-  if (prevWhen && nextWhen && prevWhen !== nextWhen) return true;
+  if (!tooShort && prevWhen && nextWhen && prevWhen !== nextWhen) return true;
 
   // 强制封场：按轮数
   const every = config.context.sceneEvery;
