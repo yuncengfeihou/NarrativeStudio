@@ -1493,7 +1493,7 @@ export function getCharStates(sessionId, { branchId = null, who = null, atTurn =
   if (who) { sql += ` AND who=?`; params.push(who); }
   if (atTurn != null) sql += ` AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)`;
   if (atTurn != null) params.push(atTurn, atTurn);
-  sql += ` ORDER BY who ASC, field ASC, valid_from DESC`;
+  sql += ` ORDER BY who ASC, field ASC, valid_from DESC, id DESC`;
   return getDb().prepare(sql).all(...params);
 }
 

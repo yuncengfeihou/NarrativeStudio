@@ -559,6 +559,14 @@ canonizeSession({ sessionId, title?, anchorLabel?, openingSeed?, id? })
 
 // 场记 / 校勘 / 检索 / 世界呼吸（server/agents/memory-pipeline.js）
 closeScene({ session, world, turnNo, reason, guard })    // 切场归档；stale 返回 null
+// -> {scene_id, turn_from, turn_to, importance, when_label, place, place_id, cast,
+//     question, outcome, key_detail, causal, threads, hooks, life_changes, usage}
+// life_changes: [{who, life_state}]，由提示词的受控字段上报，closeScene 内部转交
+// applyLifeChanges() 落库；它只在「史官没写成 dead/gone」时补写，并留
+// patches(kind='life_state_inferred') 审计。理由：lint-state 只认 life_state 这个受控值，
+// 而「手垂在床沿，指节不再蜷着」不含任何关键词，关键词兜底永远打不中。
+applyLifeChanges({ sessionId, branchId, turnNo, world, outcome, lifeChanges, sceneId })
+// -> [{who, life_state, from}]  纯写入辅助，供 closeScene 与测试复用
 detectSceneChange(session, update, turnNo)                // 地点/时间/在场者变了就切
 runContinuity({ session, world, turnNo, signal, guard })  // -> {issues, healthy, applied, stale?}
 runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}

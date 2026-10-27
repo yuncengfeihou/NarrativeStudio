@@ -26,6 +26,7 @@ const effective = await import('../server/world/effective.js');
 const playerView = await import('../server/memory/player-view.js');
 const recall = await import('../server/memory/recall-history.js');
 const { pickOffstagePersons, detectSceneChange, isSubstantivePlaceShift } = await import('../server/agents/memory-pipeline.js');
+const pipe = await import('../server/agents/memory-pipeline.js');
 const { worldTickUserPrompt, archivistSystemPrompt } = await import('../server/prompts/archivist.js');
 
 let pass = 0;
@@ -896,7 +897,61 @@ console.log('\n=== 分支：关系/线索按分叉点重放 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
-console.log('\n=== 定稿：世界线 → 新世界卡 ===');
+console.log('\n=== 生死交叉校正：场记读整场原文，补史官漏掉的那一拍 ===');
+{
+  const sid = `life-${Date.now()}`;
+  store.createSession({ id: sid, title: 'life' });
+  store.createBranch(sid, { branchId: 'main' });
+  const card = schema.normalizeCard({
+    title: 'life',
+    player: { name: '伍卿' },
+    entities: [
+      { id: 'li-po', type: 'person', name: '黎婆', aliases: ['奶奶'] },
+      { id: 'jun-yi', type: 'person', name: '军医' },
+    ],
+  });
+  store.setState(sid, 1, {
+    time: '黎明前', place: '竹屋', present: ['wu-qing', 'li-po'],
+    characters: { 黎婆: { condition: '掌心朝上，指节不再蜷着' }, 伍卿: {} }, turn_no: 1,
+  }, 'main');
+
+  // 史官只写了「不明说的状态」，没写 life_state —— 就是长跑里 t37 的原样。
+  store.setCharState(sid, { branchId: 'main', who: '黎婆', field: 'life_state', value: 'injured', turn: 1 });
+
+  const applied = pipe.applyLifeChanges({
+    sessionId: sid, branchId: 'main', turnNo: 1,
+    world: { card },
+    outcome: '奶奶于黎明前离世',
+    lifeChanges: [{ who: '黎婆', life_state: 'dead' }],
+    sceneId: 'S001',
+  });
+  eq(applied.length, 1, '场记报的生死变化被接受');
+  eq(applied[0].from, 'injured', '记下被覆盖的前值');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['黎婆'].life_state, 'dead',
+    'closeScene 后 life_state 被交叉校正为 dead');
+  ok(store.listPatches(sid, { branchId: 'main', limit: 50 })
+    .some((p) => p.kind === 'life_state_inferred' && p.payload?.who === '黎婆'),
+  '交叉校正留了可追溯的审计记录');
+
+  // 投影侧：effective world 里也必须是 dead，否则 lint-state 看不到。
+  const eff = effective.buildEffectiveWorld(card, store.getWorldState(sid, { branchId: 'main', atTurn: 1 }));
+  eq(eff.entities.find((e) => e.id === 'li-po').life_state, 'dead', '投影后 life_state 生效');
+
+  // 幂等：史官已经写成 dead 的，不重复写、不覆盖成 injured。
+  const again = pipe.applyLifeChanges({
+    sessionId: sid, branchId: 'main', turnNo: 2, world: { card },
+    lifeChanges: [{ who: '黎婆', life_state: 'injured' }],
+  });
+  eq(again.length, 0, '已经是 dead 的不再被改回 injured');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['黎婆'].life_state, 'dead', 'dead 是终态');
+
+  // 不越界：不是本场 cast 的人，由 closeScene 的白名单过滤（这里直接验证 applyLifeChanges 的
+  // 契约——它只信任调用方过滤后的名单，所以给空数组即无写入）。
+  eq(pipe.applyLifeChanges({
+    sessionId: sid, branchId: 'main', turnNo: 3, world: { card }, lifeChanges: [],
+  }).length, 0, '没有生死变化就不写库');
+}
+
 {
   const baseCard = schema.normalizeCard({
     title: '定稿测试',

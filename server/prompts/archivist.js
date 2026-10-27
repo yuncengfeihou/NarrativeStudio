@@ -197,7 +197,8 @@ export function sceneKeeperSystemPrompt() {
   "threads": ["本场埋下或推进的线索标题"],
   "key_detail": "一个值得被长久记住的具体细节（数字、原话、物件、身体变化），没有就空字符串",
   "causal": "这一场为什么会接在上一场后面（上一场留下的什么导致了这一场），不超过 40 字",
-  "hooks": ["本场结束时仍然悬着的具体钩子"]
+  "hooks": ["本场结束时仍然悬着的具体钩子"],
+  "life_changes": [{"who": "黎婆", "life_state": "dead"}]
 }
 
 # 硬性要求
@@ -208,7 +209,9 @@ export function sceneKeeperSystemPrompt() {
    优先记数字、专有名词、身体变化、一句原话。这一条是几十轮后唯一能唤回细节的东西。
 5. causal 不是 outcome 的复述，而是**因果连接**：上一场的什么决定了这一场的起点。
    没有连接就写空字符串。
-6. hooks 写「还悬着什么」，不写「发生了什么」。每条不超过 25 字。`;
+6. hooks 写「还悬着什么」，不写「发生了什么」。每条不超过 25 字。
+7. life_changes 只记本场里**状态发生变化**的人：life_state ∈ alive / injured / dead / gone，
+   who 必须是【在场】名单里的人。没变就留空数组。`;
 }
 
 export function sceneKeeperUserPrompt({

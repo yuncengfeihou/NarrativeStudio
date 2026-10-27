@@ -22,7 +22,7 @@ import {
 } from '../memory/store.js';
 import {
   continuitySystemPrompt, continuityUserPrompt, librarianSystemPrompt, librarianUserPrompt,
-  sceneKeeperSystemPrompt, sceneKeeperUserPrompt, worldTickSystemPrompt, worldTickUserPrompt,
+  LIFE_STATES, sceneKeeperSystemPrompt, sceneKeeperUserPrompt, worldTickSystemPrompt, worldTickUserPrompt,
 } from '../prompts/archivist.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
@@ -64,6 +64,48 @@ function branchCtx(session) {
  * - 关闭后不可变（同一 scene_id 只会在追加轮次时扩展 turn_to）；
  * - 字段要够具体：「八万」而不是「一大笔钱」。
  */
+/**
+ * 把场记报上来的生死/离场变化落库。
+ *
+ * 为什么需要第二个人写 `life_state`：正文里「手垂在床沿，指节不再蜷着」这种写法
+ * 不含任何关键词（`DEAD_MARKERS` 打不中），而 `lint-state` 只认 `life_state` 这个受控值。
+ * 史官只看当拍、容易漏；场记读整场原文，是同一事实的第二次独立见证。
+ *
+ * 边界：只补「史官还没写成 dead/gone」的；值必须在 `LIFE_STATES` 内且只认本场 cast
+ * （在调用方过滤）；落库仍走 store 具名函数，并留 `life_state_inferred` 审计。
+ *
+ * @returns {Array} 实际写入的条目（供测试与 SSE 统计）
+ */
+export function applyLifeChanges({
+  sessionId, branchId, turnNo, world = null, outcome = '', lifeChanges = [], sceneId = '',
+}) {
+  if (!lifeChanges?.length) return [];
+  const aliasIndex = buildAliasIndex(world?.card || {});
+  const stateMap = getCharStateMap(sessionId, { branchId });
+  const applied = [];
+  for (const c of lifeChanges) {
+    const prevLife = stateMap[c.who]?.life_state;
+    if (prevLife === 'dead' || prevLife === 'gone') continue;
+    const resolved = resolveEntity(c.who, aliasIndex);
+    setCharState(sessionId, {
+      branchId, who: c.who, field: 'life_state', value: c.life_state, turn: turnNo,
+    });
+    addWorldState(sessionId, {
+      branch_id: branchId, entity_kind: 'person', entity_id: resolved.id || c.who,
+      path: 'life_state', op: 'set', value: c.life_state, turn: turnNo,
+      source: 'scene-keeper', evidence: outcome,
+    });
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'scene-keeper', kind: 'life_state_inferred', turn_no: turnNo,
+      status: 'applied', severity: 'info',
+      payload: { scene_id: sceneId, who: c.who, life_state: c.life_state, from: prevLife || null },
+      evidence: outcome,
+    });
+    applied.push({ who: c.who, life_state: c.life_state, from: prevLife || null });
+  }
+  return applied;
+}
+
 export async function closeScene({ session, world, turnNo, reason = '', guard }) {
   const { sessionId, branchId, forkTurn } = branchCtx(session);
   const prev = latestScene(sessionId, branchId);
@@ -76,9 +118,11 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
   const ledger = getState(sessionId, { branchId, atTurn: turnNo })?.state || {};
   const sceneNo = (prev ? Number(String(prev.scene_id).replace(/\D/g, '')) || 0 : 0) + 1;
   const sceneId = `S${String(sceneNo).padStart(3, '0')}`;
+  // 本场在场名单：既要给提示词，也是 life_changes 的白名单（越界丢弃）。
+  const castNames = Object.keys(ledger.characters || {});
 
   let record = {
-    question: '', outcome: '', threads: [], key_detail: '', causal: '', hooks: [],
+    question: '', outcome: '', threads: [], key_detail: '', causal: '', hooks: [], life_changes: [],
   };
   let usage = null;
   try {
@@ -91,7 +135,7 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
           content: sceneKeeperUserPrompt({
             sceneId, turnFrom: from, turnTo: turnNo,
             when: ledger.time, place: ledger.place,
-            cast: Object.keys(ledger.characters || {}),
+            cast: castNames,
             previous: prev ? { scene_id: prev.scene_id, outcome: prev.outcome, hooks: prev.hooks } : null,
             turns: rows.map((r) => ({ turn_no: r.turn_no, kind: r.kind, content: r.content })),
           }),
@@ -111,6 +155,13 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
       key_detail: str(parsed.key_detail).slice(0, 120),
       causal: str(parsed.causal).slice(0, 120),
       hooks: arr(parsed.hooks).map(str).filter(Boolean).slice(0, 6),
+      // 生死/离场是代码必须能判定的字段（lint-state 只认 life_state）。场记是唯一读完整
+      // 本场原文的 Agent，outcome 里早就写着「于黎明前离世」——只是过去没有结构化出口。
+      life_changes: arr(parsed.life_changes)
+        .map((x) => ({ who: str(obj(x).who), life_state: str(obj(x).life_state) }))
+        .filter((x) => x.who && LIFE_STATES.includes(x.life_state))
+        .filter((x) => castNames.includes(x.who))
+        .slice(0, 8),
     };
   } catch (err) {
     console.warn(`[scene-keeper] LLM 失败，降级为纯结构记录：${err?.message || err}`);
@@ -144,6 +195,13 @@ export async function closeScene({ session, world, turnNo, reason = '', guard })
     state: ledger,
   };
   addScene(sessionId, sceneRow);
+
+  // 生死交叉校正：史官每一拍只看见当拍正文，容易漏掉「就在这一拍死」的那一下；
+  // 场记读的是**整场原文**，它的 life_changes 是对同一个事实的第二次独立见证。
+  applyLifeChanges({
+    sessionId, branchId, turnNo, world, outcome: record.outcome,
+    lifeChanges: record.life_changes, sceneId,
+  });
 
   addPatch(sessionId, {
     branch_id: branchId, agent: 'scene-keeper', kind: 'scene', turn_no: turnNo, status: 'applied',
