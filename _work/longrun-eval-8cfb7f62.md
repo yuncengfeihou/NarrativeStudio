@@ -5,7 +5,9 @@
 > 世界卡：`nvzun-jianpolan`（310 entities / 55 persons）｜锚点 `prologue`｜模型 `step-5-preview`（全部 Agent）
 > 规模：45 轮玩家行动 + 开场 = 46 拍｜正文 66054 字｜墙钟 **3.58h**（DB 首末回合时间戳 12894s；驱动自报 12819s=3.56h；计划 4.5h 内）
 > 机械判定：`node _work/longrun-report.mjs <sid>` → **FAIL（PASS 11 / WARN 3 / FAIL 1）**
-> 本文件是**唯一最终报告**；过程发现按 O1–O47 编号，明细留在 [`_work/longrun-interim-findings.md`](longrun-interim-findings.md)。
+> 本文件是**第一轮长跑的最终报告**（2026-10-27，D1–D8 时代的现场记录，数字冻结不改）。
+> 它报告的是**当时**的缺陷与幅度；之后 D9–D30 的机制结论与修复记录在 `_work/longrun-scale-discussion.md`（D 编号唯一真源），两者冲突时以那份为准。
+> 过程发现按 O1–O47 编号，明细留在 `_work/longrun-interim-findings.md`（历史归档，全部已收敛成 D 项）。
 >
 > ⚠️ **2026-10-27 续跑说明**：本报告主体是**第一次 45 拍**的数字。之后同一会话又续跑了 20 拍（t47–t66），
 > 现库内共 **66 回合 / 65 拍 / 29 场**。续跑**没有推翻任何一条结论**，但改了三处**幅度**、纠了一处**结论**，
@@ -493,7 +495,7 @@ node _work/longrun-drive.mjs <session-id>
 # 出数字
 node _work/longrun-report.mjs <session-id>            # 人读
 node _work/longrun-report.mjs <session-id> --json     # 机器读
-node _work/longrun-audit.mjs <session-id>             # 叙事点名率等 audit 段
+
 node _work/longrun-sample.mjs <session-id> --turns 1,5,45 --out a.txt   # 导正文
 ```
 

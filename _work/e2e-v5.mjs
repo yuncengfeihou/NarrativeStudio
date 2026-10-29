@@ -236,7 +236,10 @@ function assertContext(d, label) {
   if (meta.soft_max) check(`${label}: 总预算 ≤ 软目标`, num(budget.total) <= meta.soft_max, `total=${budget.total} soft=${meta.soft_max}`);
   if (meta.hard_max) check(`${label}: 总预算 ≤ 硬上限`, num(budget.total) <= meta.hard_max, `total=${budget.total} hard=${meta.hard_max}`);
   if (cov.recent_from) {
-    check(`${label}: 场次与原文无洞（scene_to+1 === recent_from）`, num(cov.scene_to) + 1 === num(cov.recent_from), JSON.stringify(cov));
+    // D1 之后：重叠合法、洞非法。窗口起点不能晚于场次边界，且重叠拍数要与记账对得上。
+    check(`${label}: 场次与原文无洞（recent_from + overlap_turns === scene_to+1）`,
+      num(cov.recent_from) <= num(cov.scene_to) + 1
+      && num(cov.recent_from) + num(cov.overlap_turns) === num(cov.scene_to) + 1, JSON.stringify(cov));
   }
   if (frozen.systemTokens === null) frozen.systemTokens = num(budget.system);
   check(`${label}: system 层 token 跨轮恒定`, num(budget.system) === frozen.systemTokens, `now=${budget.system} first=${frozen.systemTokens}`);

@@ -78,11 +78,16 @@ for (const n of samples) {
   const b = ctx.budget;
   results.push({ n, ...b, recall: ctx.meta.recall, index: ctx.meta.system_blocks?.index, coverage: ctx.meta.coverage });
   const c = ctx.meta.coverage || {};
-  const seam = c.recent_from == null || c.recent_from === c.scene_to + 1 ? '✓' : '✗';
+  // 接缝判据（D1）：重叠合法、洞非法。`recent_from + overlap_turns` 必须等于 `scene_to + 1`。
+  const seam = c.recent_from == null
+    ? '✓'
+    : (c.recent_from <= c.scene_to + 1
+      && c.recent_from + (c.overlap_turns || 0) === c.scene_to + 1 ? '✓' : '✗');
   console.log(
     `  ${String(n).padStart(4)}  ${String(b.system).padStart(6)}  ${String(b.archive).padStart(8)}`
     + `  ${String(b.recent).padStart(6)}  ${String(b.scene).padStart(6)}  ${String(b.current).padStart(5)}`
-    + `  ${String(b.total).padStart(6)}   ${c.scene_to ?? 0}→${c.recent_from ?? '-'} ${seam}`,
+    + `  ${String(b.total).padStart(6)}   ${c.scene_to ?? 0}→${c.recent_from ?? '-'} ${seam}`
+    + `  重叠 ${c.overlap_turns ?? 0}/${c.overlap_limit ?? '-'}`,
   );
   if (seam === '✗') process.exitCode = 1;
 }

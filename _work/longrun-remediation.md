@@ -3,6 +3,9 @@
 > 对象：`_work/longrun-eval-8cfb7f62.md` §10 列出的 P0–P3 缺口
 > 数据基线：会话 `8cfb7f62-9c16-43de-a451-ca7ccb98de96`（66 回合 / 65 拍 / 29 场，phase2 已续跑）
 > 本文只给**方案与改动面**，不含实施 diff。所有判据都能用 §附录 的 SQL 复现。
+>
+> **状态（2026-10-29）：本文列出的方案已全部落地**（对应 D10–D13、D24、D25 等），
+> 落地后的实际口径与验证结果在 `_work/longrun-scale-discussion.md`；本文保留的是「为什么这样解」的论证。
 
 ---
 
@@ -419,7 +422,7 @@ MVU 的 `delta` 是**自定义 op**（不是 RFC 6902 标准，报告 §6.2 已�
 **PR-3（场次，收益最大但要观察）**
 `place_id` 两段式重算 + 引入实体并入 alias 池 → `detectSceneChange` 加 `MIN_SCENE_TURNS` → 测试。
 **不要动 `:195` 时间触发**（实测与 minTurns 叠加一场都不多省）。
-验收：`node _work/longrun-scenesim.mjs <sid>` 的 `minTurns=3` 一行为 18 场 / 27.7%；
+验收：`node _work/longrun-report.mjs <sid>` 第 1 段的场次表（场数 / 场长 / `recent_from=null` 比例）达到 18 场 / 27.7% 那一档；
 新跑 20 拍时 `recent_from != null` 比例 > 60%；`scenes` 行数 ≥ `ceil(拍数/12)`（防「一场都不关」回归）。
 
 P2 那批（`meta` 白名单、面板分页、`uncertain` 处置、报告阈值）单独一个「杂项」PR，别和上面三个混。
@@ -449,7 +452,7 @@ SELECT scene_id, turn_from, turn_to, turn_to-turn_from+1 len FROM scenes WHERE s
 SELECT turn_no, json_extract(state_json,'$.place'), json_extract(state_json,'$.place_id'),
        json_extract(state_json,'$.time') FROM states WHERE session_id=S ORDER BY turn_no;
 -- 场次推演（含「重放边界 vs 真实 scenes」对齐校验）：
---   node _work/longrun-scenesim.mjs 8cfb7f62
+--   场次表在 node _work/longrun-report.mjs 8cfb7f62 第 1 段
 
 -- 4) patches 分布（P2 / offstage_event 有消费方）
 SELECT kind, status, COUNT(*) c FROM patches WHERE session_id=S GROUP BY kind, status ORDER BY c DESC;

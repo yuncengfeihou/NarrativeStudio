@@ -13,7 +13,7 @@
  *   3) 世界呼吸的幕外流言进入场记单压力段（context.scene_sheet 的「幕外：」行）。
  *
  * 只走 HTTP/SSE，不直接读写记忆表；原始记录落到 _work/tmp-realrun-<session>.jsonl。
- * 跑完用 node _work/longrun-audit.mjs <session_id> 对比验收口径。
+ * 跑完用 node _work/longrun-report.mjs <session_id> 对比验收口径。
  */
 import fs from 'node:fs';
 import path from 'node:path';
@@ -193,4 +193,4 @@ log(`走向形态    ${records.flatMap((r) => r.branches).map((b) => b.tone).joi
 log(`幕外流言    ${allRumors.length} 行${allRumors.length ? `：${[...new Set(allRumors)].slice(0, 6).join(' ｜ ')}` : ''}`);
 log(`错误        ${records.flatMap((r) => r.errors).length ? records.flatMap((r) => r.errors).join(' / ') : '无'}`);
 log(`原始记录    ${outFile}`);
-log(`\n下一步：node _work/longrun-audit.mjs ${sessionId}`);
+log(`\n下一步：node _work/longrun-report.mjs ${sessionId}`);

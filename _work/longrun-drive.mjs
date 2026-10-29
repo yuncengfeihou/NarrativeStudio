@@ -34,6 +34,17 @@ const ONLY = opt('only', ''); // 只跑某几拍（调试用，如 "12,13"）
 // 不写进实验：实验长度由 PLAN 决定，改成靠 --limit 会把「45 拍」变成不可复现的口头约定。
 const LIMIT = Number(opt('limit', '0')) || 0;
 const TAG = opt('tag', '长跑评测'); // 会话标题前缀，验证跑用 `契约验证`
+// 会话级设置透传（A/B 实验用）。默认不传 = 线上默认行为。
+// 实验臂必须靠它区分，否则两局跑的是同一份代码路径，比较不出任何东西。
+//   node _work/longrun-drive.mjs --settings '{"branch_sheet_trim":"core_only"}'
+const SETTINGS = (() => {
+  const raw = opt('settings', '');
+  if (!raw) return null;
+  try { return JSON.parse(raw); } catch (err) {
+    console.error(`--settings 不是合法 JSON: ${err.message}`);
+    process.exit(2);
+  }
+})();
 
 /* ══════════════════════════════════════════════════════════════════════════
  * 行动剧本。45 拍。
@@ -293,9 +304,10 @@ function findOrphans({ narr, player }) {
   return out.sort((a, b) => a.turn_no - b.turn_no);
 }
 
+// 库路径必须跟随 DB_PATH：A/B 双局长跑各用一个库，写死 data/roleplay.db 会删错库。
 const REPAIR_SNIPPET = `
 import { DatabaseSync } from 'node:sqlite';
-const db = new DatabaseSync('data/roleplay.db');
+const db = new DatabaseSync(process.env.DB_PATH || 'data/roleplay.db');
 const [sessionId, ...nos] = process.argv.slice(2);
 for (const no of nos.map(Number)) {
   const r = db.prepare("DELETE FROM turns WHERE session_id=? AND turn_no=? AND kind='player'").run(sessionId, no);
@@ -332,9 +344,11 @@ if (!sessionId) {
     world_id: WORLD,
     title: `${TAG} ${stamp}｜${WORLD}`,
     anchor_id: ANCHOR || undefined,
+    settings: SETTINGS || undefined,
   });
   sessionId = created.id;
-  log(`新会话 ${sessionId}｜world=${WORLD}｜anchor=${ANCHOR}`);
+  log(`新会话 ${sessionId}｜world=${WORLD}｜anchor=${ANCHOR}`
+    + (SETTINGS ? `｜settings=${JSON.stringify(SETTINGS)}` : ''));
 } else {
   log(`续跑会话 ${sessionId}`);
 }
