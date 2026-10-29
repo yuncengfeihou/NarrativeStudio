@@ -934,6 +934,8 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 "`terminated` / `fetch failed`" 这类 Node fetch 错误原先不在 `withRetry` 的白名单里
 （真 code 藏在 `err.cause`），一次都不重试；现在 `llm.js` 用 `failureOf(err)` 遍历 `cause`
 （最多 4 层）归一成 `retryable:true` 的 `LlmError`，两层才都能接上。
+端到端验证见 `_work/segmented-e2e.mjs` 的「D33：上游抖动 → 自动整拍重发」段（假上游连断两次，
+断言重发后行动只落库一次、残稿不混进正文、`meta.narration.transient_retries === 2`）。
 
 ### SSE 事件协议
 

@@ -43,6 +43,8 @@ let rejectTools = false;
 let reasoningOnly = false;
 // 断连（复现 `terminated`）：发一个 chunk 后直接销毁 socket。
 let dropConnection = false;
+// D33：只断 N 次，之后正常产出。用来验证「抖一下就整拍重发、内容不丢」。
+let dropTimesLeft = 0;
 
 function sendJson(res, body) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -107,6 +109,15 @@ const fakeUpstream = http.createServer(async (req, res) => {
     res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
     res.write(`data: ${JSON.stringify(completion({ delta: { content: '半句' } }))}\n\n`);
     // 不写 [DONE]、不 end：直接断。上游「terminated」就是这种形状。
+    res.socket?.destroy();
+    return;
+  }
+
+  // D33：连续抖动 N 次后放行，用来验证整拍重发能救回来（不是整拍报废）。
+  if (dropTimesLeft > 0) {
+    dropTimesLeft -= 1;
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    res.write(`data: ${JSON.stringify(completion({ delta: { content: '抖一下' } }))}\n\n`);
     res.socket?.destroy();
     return;
   }
@@ -390,6 +401,31 @@ try {
   const detail6 = await req('GET', `/api/sessions/${sid4}`);
   eq((detail6.json?.turns || []).filter((t) => t.kind === 'player').map((t) => t.turn_no), [1],
     '重发用的是第 1 拍（断连没留空洞）');
+
+  /* ══════════════════════════════════════════════════════════════════ */
+  /* D33：抖动两次 → 自动整拍重发，用户不用重打那句话                     */
+  /* ══════════════════════════════════════════════════════════════════ */
+  console.log('\n=== D33：上游抖动 → 自动整拍重发（用户无感，行动不丢） ===');
+  dropTimesLeft = 2;
+  const session5 = await req('POST', '/api/sessions', { world_id: worldId });
+  const sid5 = session5.json?.id;
+  const flakyRes = await req('POST', `/api/sessions/${sid5}/turn`, { playerText: '我数了数口袋里的钱。' });
+  const flakyEvents = parseSse(flakyRes.text);
+  const retryEvts = flakyEvents.filter((e) => e.type === 'narration_retry');
+  eq(retryEvts.map((e) => e.attempt), [1, 2], '每次抖动都发 narration_retry（attempt 依次递增）');
+  eq(retryEvts[0]?.max, 3, 'max 与 NARRATION_RETRY_MAX 一致');
+  ok(!flakyEvents.some((e) => e.type === 'error'), '抖动两次没有把这一拍判失败');
+  ok(flakyEvents.some((e) => e.type === 'done'), '第三次尝试成功后正常 done');
+  eq(dropTimesLeft, 0, '假上游确实断过两次');
+
+  const detail7 = await req('GET', `/api/sessions/${sid5}`);
+  const turns7 = detail7.json?.turns || [];
+  eq(turns7.filter((t) => t.kind === 'player').map((t) => t.turn_no), [1],
+    '玩家行动只落库一次（重发不会重复记录同一句话）');
+  const narr7 = turns7.filter((t) => t.kind === 'narrator');
+  eq(narr7.length, 1, '正文只落一条');
+  eq(narr7[0]?.meta?.assembly?.narration?.transient_retries, 2, 'meta 记下重试了 2 次（可审计）');
+  ok(!String(narr7[0]?.content || '').includes('抖一下'), '残稿没有混进正文（重置后重新写）');
 } finally {
   child.kill();
   await new Promise((r) => fakeUpstream.close(r));
