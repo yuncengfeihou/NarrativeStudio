@@ -1,7 +1,7 @@
-# 长轮次记忆：讨论清单（D1–D31 已落地；D26 方案 A 已做完同剧本双局长跑，维持会话级开关）
+# 长轮次记忆：讨论清单（D1–D32 已落地；D26 方案 A 已做完同剧本双局长跑，维持会话级开关；D32 修了 gone 的回程通道）
 
 > 用途：把「几十轮就有这么多问题、几百轮怎么办」这个讨论拆成可逐条拍板的决策项。
-> **状态（2026-10-29）**：**D1–D31 已全部落地**。D1–D8 经 50 轮真实会话验证；
+> **状态（2026-10-29）**：**D1–D32 已全部落地**。D1–D8 经 50 轮真实会话验证；
 > D9–D15 是那 50 轮与第二轮验证长跑现场发现的缺陷（D10/D11/D12/D15 是真实 bug，
 > 不是设计取舍），已按推荐方案全部实现并测通。**D19–D22 都是报告判据自身的缺陷**
 > （D19 分类名错、D20 层级错、D21 对象错、D22 曾被怀疑缺信号）——它们不改变运行时行为，
@@ -1029,7 +1029,7 @@ importance 分级（major:normal:minor = 1:1:1）
 
 ---
 
-## 4. 建议的顺序（D1–D31 已全部落地并已跑完验证）
+## 4. 建议的顺序（D1–D32 已全部落地并已跑完验证）
 
 ```
 第 0 步（已做完）：
@@ -1094,7 +1094,7 @@ D3 那种「改取数逻辑」才需要数据支撑。
 
 ## 5. 拍板结果
 
-**D1–D31 全部已定并已落地，没有待拍板项**（D5 遗留的 seeds 槽位于 m10518 拍板为「不改上限 8、只改可见性」并已落地；D26 方案 A 已做完同剧本双局长跑、维持会话级开关；D1–D8 经 50 轮真实会话验证；D9–D13 于 m03366 按推荐方案落地；D14/D15/D17 在验证长跑现场发现并当拍落地；D16 是 D1 修法自带的回归，逐拍读 coverage 时发现；D19 是**报告自己的断点分类口径错了**，用三局前后对照验出来的；D20 是同一形状的第二次发作——时间推进按场次级采样，量不到场内推进）。
+**D1–D32 全部已定并已落地，没有待拍板项**（D5 遗留的 seeds 槽位于 m10518 拍板为「不改上限 8、只改可见性」并已落地；D26 方案 A 已做完同剧本双局长跑、维持会话级开关；D1–D8 经 50 轮真实会话验证；D9–D13 于 m03366 按推荐方案落地；D14/D15/D17 在验证长跑现场发现并当拍落地；D16 是 D1 修法自带的回归，逐拍读 coverage 时发现；D19 是**报告自己的断点分类口径错了**，用三局前后对照验出来的；D20 是同一形状的第二次发作——时间推进按场次级采样，量不到场内推进）。
 
 | 决策 | 结论 | 出处 |
 |---|---|---|
@@ -1130,8 +1130,9 @@ D3 那种「改取数逻辑」才需要数据支撑。
 | D29 校勘 `set_state` 死路 | **已落地**：提示词写明 `人物::字段`（两个半角冒号）与各 action 的 target 形态；`merge_alias` 从枚举删除（代码无分支）；落空原因分三类留痕（形态错 / 不是人物 / 字段越界 / 无此通道）；报告新增 `continuity_fix_target_form` 判 WARN | 双局长跑 17 条 fix 里 7 条 `set_state` + 1 条 `merge_alias` 全部落空却记 `open`，而执行率 5/9 看起来健康——**它把 4 条死通道平均掉了** |
 | D30 报告 drift 基线错位 | **已落地**：`classifyBreak()` 新增第 ⓿ 类 `gap`——`drift.prev_count` 与报告基线的 `assembly.messages.length` 不等即「少一拍」，`EXPLAINED_KINDS` 加入 `gap`；报告新增 `real_break_gap`/`gap_turns` 与明细行 | 双局 B/A 的 `cache_prefix_reuse` 都判 FAIL，理由是「同消息改写 1 轮」；查下去是**孤儿回合让 drift 基线跨了一拍**（drift 用 orchestrator 内存基线、报告用 DB 装配清单），修口径后四局「真改写」全为 0 |
 | D31 三处死通道 | **孤儿回合与空正文整拍回滚**（`addTurnPair` 事务；正文没产出就一行不写） + 校勘三类落空记 `failed` 终态并带 `reason`；`open` 只留「等人裁决」 | m11285 |
+| D32 `life_state` 两套存储 | **已落地**：`changes` 里的 `life_state` 同时补写 `character_states`（按 `aliasIndex` 反查人物名、同拍 `states` 写过就跳过）；报告判据改读两表并集并单列「两套存储分裂」 | 第三次长跑凌玥经 `changes` 被标 `gone`，而回程通道读 `character_states`、永远看不见它：她 27 拍正文里 **19 拍不在 present**，玩家 t24/32/40/45 四次点名一次都没唤回，报告 `VERDICT` 却是 FAIL 0 —— **判据读错表＝给缺陷发合格证** |
 
-**三十一条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
+**三十二条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
 
 > **D5 遗留已拍板（2026-10-29，m10518）**：「不改上限 8，只改可见性」——种子在场记单行尾标
 > ［预置］、`lintCard` 以 `seeds_eat_runtime_room`（minor）提醒占额度，详见 §3 D5 末尾。
@@ -3470,6 +3471,82 @@ A 局从 `22/7/3` → `23/7/2`。**四个会话的「真改写」现在全是 0*
 共同形状是：**为安全而设的拒绝 → 状态永久卡在错值上 → 没有恢复通道 → 报告也看不见**。
 识别方法：**凡是写 `status='open'` 的地方都要问「谁会来把它关掉」**，答不出来的就是死通道。
 
+### D32【已落地】`life_state` 有两套存储，`gone` 的回程通道读错了那一张：凌玥被「离场」19 拍，玩家四次点名都没唤回
+
+**发现方式**：第三次长跑（`27980417`，45 拍）报告给出 `VERDICT: WARN (PASS 28 / WARN 4 / FAIL 0)`，
+但 `meta.assembly.state_fixes` 里 `remove_gone_from_present` 出现了 11 次（t19/24/25/26/32/33/35/38/39/40/45），
+几乎全是凌玥。于是逐拍交叉了「正文提到她的拍」与「present 名单里有她的拍」。
+
+#### 现象（逐拍可复算）
+
+| 角色 | 正文出现拍数 | 其中不在 present | 例 |
+|---|---|---|---|
+| 凌玥 | 27 | **19** | t9/10/13/14/17/18/20/21/22/24/29/32/33/34/37/39/40/41/45 |
+| 陆可 | 12 | 7 | — |
+| 黎婆 | 39 | 7 | — |
+| 张兰 | 10 | 2 | t39 |
+
+玩家在 t24/32/40/45 四次主动点名要见凌玥，`reviveNamedGone()` 四次全部没有动作。
+
+#### 根因：同一个事实有两条写入入口，只有一条写进记忆表
+
+史官有两种写法报人物状态：
+
+| 入口 | 代码位置 | 写入 `character_states` | 写入 `world_state` |
+|---|---|---|---|
+| `update.states` 数组 | `server/agents/archivist.js:852` `setCharState(...)` | ✅ | ✅（`:855 addWorldState`） |
+| `update.changes` 数组 | `server/agents/archivist.js:957` 循环 | **❌ 从不写** | ✅ |
+
+消费侧正好各读一边，于是彻底分裂：
+
+- `reviveNamedGone()`（`server/agents/memory-pipeline.js:79`）读 `getCharStateMap()` = 表 `character_states`，
+  判据 `if (life !== 'gone') continue` —— **经 `changes` 写出的 gone 在它眼里根本不存在**。
+- `lint-state.js:69` 读 `str(c.life_state) || str(charState.life_state)`，而 `c` 是**投影后**的卡实体
+  （来自 `world_state`）—— 命中 gone，于是把人剔出 present。
+
+实测本局：`world_state` t18 有 `凌玥 life_state=set "gone"`（source=archivist、evidence 空、payload 来自 `changes`），
+而 `character_states` 里凌玥的 `life_state` **只有 t1=alive**，从无 gone。
+t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
+本局唯一一次成功 revive 是 t40 陆可 —— 那条走的是 `states` 路径，本来就进了 `character_states`。
+
+#### 为什么报告没抓到（这是本条的第二个教训）
+
+`_work/longrun-report.mjs` 的 `life_state_consistency` 判据原本只查 `character_states`（`:1465`）。
+**判据读错了表，就等于给缺陷发合格证**：凌玥这条 19 拍的事实，在「记忆一致性」里一个字都看不到，
+整局报告反而是 `FAIL 0`。这与 D30（判 FAIL 的其实是报告自己的口径 bug）互为镜像——
+一个是给合格发缺陷通知，一个是给缺陷发合格证。
+
+#### 落地
+
+1. `server/agents/archivist.js:974`：`changes` 循环里，当 `kind === PERSON_TYPE && path === 'life_state' && op === 'set'` 时
+   额外调一次 `setCharState()`，把同一条事实补进 `character_states`。不改任何判定口径——
+   `world_state` 仍是投影的唯一写入口，`character_states` 只是它的记忆表镜像。
+   按 `aliasIndex` 反查人物名（`character_states` 的键是 name，不是 slug 化的 id），
+   并用 `seen` 集合跳过「同一拍 `states` 已经写过这条」的情况（`setCharState` 每次都封上一条的 `valid_to`，
+   同拍写两次会留下零长度行）。
+2. `_work/longrun-report.mjs`：`lifeRows` 改成 `character_states` 与 `world_state` 的**并集**，
+   新增 `lifeOnlyWorldState`（只在 `world_state` 里的 gone/dead 行 = 两套存储分裂的直接证据），
+   判据 detail 里单列「两套存储分裂 N 行」并在 FAIL 时注明「这是修复前的存量数据」。
+3. `tests/test-memory.js` 新增 `=== D32：life_state 的两条写入入口必须落到同一张表 ===`（7 条断言）：
+   slug id 经 `changes` 写 life_state 后 `character_states` 里按人物名查得到；`reviveNamedGone()` 因此能唤回；
+   `states` 路径照旧；**`condition`/`mood` 等非 life_state 的 changes 不会被顺手写进记忆表**（不制造第二份真相）。
+4. `docs/CONTRACTS.md` 补 `applyArchivistUpdate` 的这条不变式。
+
+#### 可复现判据
+
+- 修复前：`select count(*) from world_state where path='life_state' and op='set' and value_json='"gone"'`
+  与 `select count(*) from character_states where field='life_state' and value='gone'` 不相等。
+- 修复后：任何经 `changes` 写入的 life_state，两张表同拍同值。
+- 报告：`life_state_consistency` 详情里「两套存储分裂」一项，新跑的局必须为 0。
+
+#### 教训
+
+**同一个事实有两个写入入口时，只要有一个入口不写记忆表，回程/第二见证这些「读记忆表」的通道就会静默失效。**
+这类缺陷的伪装性极强：投影（`world_state`）是对的、正文是对的、lint 也在正常工作，
+**唯一坏掉的是一条没人监控的旁路**。识别方法：任何 `getCharStateMap()` / `listPatches()` 的读者，
+都要问「它的写者是不是覆盖了所有入口」。
+
+
 ## 6. 变更记录
 
 | 日期 | 变更 |
@@ -3516,3 +3593,4 @@ A 局从 `22/7/3` → `23/7/2`。**四个会话的「真改写」现在全是 0*
 | 2026-10-29 | **D29（双局长跑收尾发现）：校勘的 `set_state` 通道 7 次提案 0 次执行**。两局 17 条 fix 里 7 条 `set_state` 全部 `unmatched`、1 条 `merge_alias` 落空（**代码里本来就没有这个分支**），而 patch 状态都记 `open`（看起来像「等人裁决」），报告只报「fix 提案 9 条执行 5 条」这种健康数字。根因：`continuitySystemPrompt` 的 schema 只写 `"target": "断言 id / 状态键 / 线索标题"`，**没规定分隔符**，而 `continuityUserPrompt` 的【人物状态】段渲染成 `谁：k=v`，于是模型自己发明了 `大黑牛.condition`（点号）、`凌玥`（裸人名，字段塞进 value）、`伍卿 —拥有→ 金钱`（把断言三元组填进 target）。落地：提示词新增 `# target 写法` 段（`set_state` 必须 `人物名::字段名`，两个半角冒号，字段只取 condition/mood/location/goal/life_state）+ 从 action 枚举删掉 `merge_alias`（合并别名要人确认，不补自动通道）；`memory-pipeline.js` 落空时 `merge_alias` 记 `reason='not_implemented'` 与「形态填错」区分；报告新增 `continuity_fix_target_form`（WARN，把 `set_state` 拆成「执行/形态没写对/被设计拒写」三类）；`test-memory.js` 补 7 条断言含一条「提示词全文不含 merge_alias」。教训：**「提案了但没执行」有两种相反含义——「模型说错了」和「这条通道不存在」，它们在同一张表里长得一模一样**，不区分就等于给死通道发「正在等人裁决」的合格证。 |
 | 2026-10-29 | **D30（本轮收尾自查）：报告判 FAIL 的「同消息改写」是报告自己的口径 bug**。孤儿回合让 drift 的基线跨了一拍（drift 用 orchestrator 的内存基线、报告用 DB 里的装配清单），11 条对位 14 条 → 掉进兜底类 `rewrite`。`classifyBreak()` 加第 ⓿ 类 `gap` 并纳入 `EXPLAINED_KINDS`，报告新增 `real_break_gap`/`gap_turns`。修口径后 B 局 `cache_prefix_reuse` FAIL→PASS（VERDICT 24/7/1）、A 局 23/7/2，**四局「真改写」全为 0**。 |
 | 2026-10-29 | D31 | 三处「错了也不会说」的通道改行为：孤儿回合与空正文整拍回滚、校勘死提案判 failed | 新增 e2e 22 条 + test-memory 20 条；全量绿 |
+| 2026-10-29 | D32 | `changes` 里的 `life_state` 补写 `character_states`；报告判据改读两表并集 | test-memory 新增 7 条（443 passed）；全量 6 套件绿；真库回放第三次长跑，`life_state_consistency` 从误判 PASS 变为如实 FAIL 并注明是修复前存量 |

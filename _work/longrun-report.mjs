@@ -1462,11 +1462,38 @@ try {
   // 实测本局：黎婆 t5 写 gone 但 valid_to=12，t12 起回写 alive，t13/16/17/18 都在场；
   // 旧判据把 t13 之后的每一次出场都算成「死人上场」，于是整条判据永久 FAIL。
   // 正确口径：只看**当时仍然有效**的 dead/gone（valid_to 为 NULL 或 > 当拍）。
-  const lifeRows = all(
+  // D32：`life_state` 有两条写入入口——`states` 数组（写 character_states）与
+  // `changes` 数组（只写 world_state）。判据只读 character_states 时，经 changes 写出的
+  // gone 在报告里**根本不存在**：实测凌玥 t18 就是这样被标 gone 的，这一整条判据一条都没抓到，
+  // 而 lint-state 读的是投影（world_state），据此把她剔出 present 整整 19 拍。
+  // 所以取两边的并集；`only_in:'world_state'` 的行本身就是「两套存储分裂」的证据。
+  const lifeRowsCs = all(
     'select who, value, valid_from, valid_to from character_states where session_id = :sid' +
       " and field = 'life_state' and value in ('dead','gone') order by valid_from",
     { sid: sessionId }
   ) || [];
+  const lifeRowsWs = all(
+    `select entity_id as who, value_json as value, valid_from, valid_to from world_state
+      where session_id = :sid and path = 'life_state' and op = 'set'
+        and value_json in ('"dead"', '"gone"') order by valid_from`,
+    { sid: sessionId }
+  ) || [];
+  const lifeKey = (r) => `${r.who}::${r.value}::${Number(r.valid_from)}`;
+  const lifeSeenCs = new Set(lifeRowsCs.map(lifeKey));
+  const lifeRows = [
+    ...lifeRowsCs,
+    ...lifeRowsWs
+      .map((r) => ({
+        who: r.who,
+        value: String(r.value ?? '').replace(/^"|"$/g, ''),
+        valid_from: r.valid_from,
+        valid_to: r.valid_to,
+      }))
+      .filter((r) => !lifeSeenCs.has(lifeKey(r))),
+  ];
+  const lifeOnlyWorldState = lifeRowsWs
+    .map((r) => ({ who: r.who, value: String(r.value ?? '').replace(/^"|"$/g, ''), valid_from: r.valid_from }))
+    .filter((r) => !lifeSeenCs.has(lifeKey(r)));
   const presentByTurn = new Map();
   for (const r of asmRows) {
     const p = r.meta?.assembly?.present;
@@ -2930,6 +2957,14 @@ try {
   let lifeDetail =
     `dead/gone 写入 ${deadWrites} 行｜正文死亡用语 ${deathTurns.length} 轮（仅叙述用语，不作判据）` +
     `｜离场后仍被提名 ${lifeLeaks.length} 例`;
+  // D32：两套存储分裂的直接证据。只在 world_state 里出现的 gone/dead 一定来自 changes 路径，
+  // 修复前回程通道（读 character_states）对它完全失效。非 0 说明这局跑在 D32 之前。
+  if (lifeOnlyWorldState.length > 0) {
+    lifeStatus = 'WARN';
+    lifeDetail += `｜两套存储分裂 ${lifeOnlyWorldState.length} 行（只写进 world_state、没进 character_states` +
+      ` → 回程通道看不见：${lifeOnlyWorldState.map((x) => `${x.who}@t${Number(x.valid_from)}`).join(' ')}` +
+      '）；D32 起 changes 的 life_state 会同时写两张表，非 0 说明这局跑在修复前';
+  }
   if (lifeFatal.length > 0) {
     lifeStatus = 'FAIL';
     lifeDetail += `｜离场后仍在场：${lifeFatal.map((x) => `${x.who}(${x.value}@t${x.from}${x.valid_to == null ? '' : `-t${x.valid_to}`}→t${x.in_present.join(',')})`).join(' · ')}（§13.22）`;
@@ -2940,7 +2975,11 @@ try {
     lifeDetail += `｜离场后仍在镜头里：${lifeReviveMissing.map((x) =>
       `${x.who}(${x.value}@t${x.from})→玩家点名 t${x.named_by_player.join(',')}、正文 t${x.turns.join(',')}，但 present 一直没有她`
     ).join(' · ')}` +
-      '｜机制没跟上正文：gone 被当成永别，没有回程通道（D10）';
+      '｜机制没跟上正文：gone 被当成永别，没有回程通道（D10）' +
+      (lifeOnlyWorldState.length > 0
+        ? `｜根因见 D32：${lifeOnlyWorldState.length} 行 gone/dead 只写进 world_state，`
+          + '回程通道（读 character_states）对它们完全失效；这条 FAIL 是修复前的存量数据'
+        : '');
   } else if (lifeLeaks.length > 0) {
     lifeStatus = 'WARN';
     lifeDetail += `｜${lifeLeaks.map((x) => {

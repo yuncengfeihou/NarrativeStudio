@@ -1214,6 +1214,64 @@ console.log('\n=== 世界状态：落库与投影 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D32：life_state 的两条写入入口必须落到同一张表 ===');
+{
+  // 史官有两种写法写人物状态：`states` 数组（走 setCharState）和 `changes` 数组
+  // （走 world_state）。只有前者会写 `character_states`，而 gone 的回程通道
+  // （reviveNamedGone）与场记的第二见证（applyLifeChanges）读的正是那张表。
+  // 结果：经 changes 写出的 gone 在回程通道里**根本看不见**，`lint-state` 却按
+  // 投影里的 life_state 把人剔出在场 —— 实测凌玥 t18 被 changes 标 gone 之后
+  // 19 拍正文都在演她，回程一次也没触发。这里断言两条路写出同一张表。
+  const sid = `s-d32-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const card = schema.normalizeCard({
+    title: 't',
+    entities: [
+      { id: 'ling-yue', name: '凌玥', type: 'person', aliases: ['凌总'] },
+      { id: '凌玥', name: '凌玥二', type: 'person' },
+    ],
+  });
+  const idx = schema.buildAliasIndex(card);
+
+  // ① changes 路径，实体 id 是 slug 化的 ling-yue → 必须按 id 反查成人物名
+  const r1 = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 2, aliasIndex: idx, playerName: '伍卿',
+    update: { changes: [{ kind: 'person', id: 'ling-yue', path: 'life_state', op: 'set', value: 'gone' }] },
+  });
+  eq(r1.changes, 1, 'changes 里的 life_state 落库');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥']?.life_state, 'gone',
+    'changes 写的 gone 同时进 character_states（id 用别名索引反查成人物名）');
+  ok(!store.getCharStateMap(sid, { branchId: 'main' })['ling-yue'],
+    '不会按 id 另起一条人物（两张表的键都是人物名）');
+
+  // ② 回程通道因此看得见它 —— 这正是 D32 要修的那件事
+  const revived = pipe.reviveNamedGone({
+    sessionId: sid, branchId: 'main', turnNo: 3, card, playerText: '我去找凌总问清楚。',
+  });
+  eq(revived, [{ who: '凌玥', from: 'gone', to: 'alive' }],
+    '经 changes 写的 gone 也能被玩家点名唤回（修复前这条永远返回空数组）');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥']?.life_state, 'alive', '回程写回 alive');
+
+  // ③ states 路径不受影响（它本来就走这张表）
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 4, aliasIndex: idx, playerName: '伍卿',
+    update: { states: [{ who: '凌玥', field: 'life_state', value: 'dead' }] },
+  });
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥']?.life_state, 'dead',
+    'states 路径照旧写 character_states');
+
+  // ④ 非 life_state 的 changes 不该被顺手写进人物状态表
+  const statesBefore = store.getCharStates(sid, { branchId: 'main' }).length;
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 5, aliasIndex: idx, playerName: '伍卿',
+    update: { changes: [{ kind: 'person', id: 'ling-yue', path: 'mood', op: 'set', value: '冷' }] },
+  });
+  eq(store.getCharStates(sid, { branchId: 'main' }).length, statesBefore,
+    '只有 life_state 补写 memory 表；condition/mood 等仍只走 world_state（不重复两份真相）');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 数值账本：模型只报变化量，加减与余额由代码算 ===');
 {
   const paths = await import('../server/world/state-paths.js');

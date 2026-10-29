@@ -965,6 +965,23 @@ export function applyArchivistUpdate({
       source: 'archivist',
       evidence: str(obj(raw).evidence).slice(0, 120),
     });
+    // D32：`life_state` 有两条写入入口（本循环的 changes 与上面的 states），但只有 states
+    // 会同时写 `character_states`。changes 只写 world_state，于是同一个「离场」在
+    // `character_states` 里查不到——而 `reviveNamedGone()` / `applyLifeChanges()` 读的正是
+    // 那张表，回程通道因此从未对 changes 写出的 gone 生效（实测凌玥 t18 经 changes 标 gone，
+    // 之后 19 拍正文都在演她，回程一次也没触发）。这里把同一条事实补进那张表，不改任何
+    // 判定口径：world_state 仍是投影唯一写入口，character_states 只是它的记忆表镜像。
+    if (c.kind === PERSON_TYPE && c.path === 'life_state' && c.op === 'set') {
+      // `character_states` 的主键是**人物名**（`sanitizeState` 走 canonicalize 得到 name），
+      // 不是实体 id。两者在卡里通常相同，但 slug 化过的 id 不同，必须按 id 反查名字。
+      const named = (aliasIndex || []).find((x) => x.id === c.entity_id);
+      const who = named?.name || c.entity_id;
+      // 同一拍 states 已经写过这条就不再重复写：`setCharState` 每次都会把上一条的
+      // valid_to 封到当拍，同拍写两次会留下零长度的一行。
+      if (!seen.has(`${who}::life_state`)) {
+        setCharState(sessionId, { branchId, who, field: 'life_state', value: c.value, turn: turnNo });
+      }
+    }
     addPatch(sessionId, {
       branch_id: branchId, agent: 'archivist', kind: 'world_change', turn_no: turnNo,
       status: 'applied', payload: c, evidence: str(obj(raw).evidence).slice(0, 120),

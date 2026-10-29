@@ -696,6 +696,12 @@ buildDeclaredTargets({ card, present, codex, ledgerCharacters, playerName }) -> 
 //   `entity_kind='world'` 的写入 **0 行**，而消费方一直在。新增任何投影目标时
 //   必须同步加进这里，并补一条「写入真的落库 + 投影后消费方读得到」的端到端断言。
 applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerName, narrative, declaredTargets })   // 纯函数，可单测
+// D32：`update.changes` 里的 `life_state`（kind=person、op=set）会**同时**写 `character_states`
+//   （`setCharState`，键是人物名，按 aliasIndex 反查）与 `world_state`。原因：这条路过去只写
+//   `world_state`，而 `reviveNamedGone()` / `applyLifeChanges()` 读的是 `character_states`——
+//   gone 的回程通道对 changes 写出的离场完全失效（实测凌玥 t18 被标 gone 后 19 拍仍在正文，
+//   玩家四次点名一次都没唤回）。同拍若 `update.states` 已写过同一条则跳过，避免同拍两行。
+//   其它字段（condition/mood/...）仍只走 world_state，不制造第二份真相。
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
 parseArchivistUpdateStrict(content) // -> {ok, error, update}；只有顶层 JSON 对象才算成功（供重试/留痕）
 sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
