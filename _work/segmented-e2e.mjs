@@ -38,6 +38,11 @@ function eq(a, b, label) {
 /* ══════════════════════════════════════════════════════════════════════ */
 
 let rejectTools = false;
+// D31：只回 reasoning、不回正文（复现「重试仍空」）。单发模式下两次都这样回，
+// 用来验证「整拍回滚、不留空行、不留孤儿 player 行」。
+let reasoningOnly = false;
+// 断连（复现 `terminated`）：发一个 chunk 后直接销毁 socket。
+let dropConnection = false;
 
 function sendJson(res, body) {
   res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -97,6 +102,22 @@ const fakeUpstream = http.createServer(async (req, res) => {
     (m) => m.role === 'assistant' && Array.isArray(m.tool_calls) && m.tool_calls.length,
   );
   const segmented = Array.isArray(body.tools) && body.tools.length > 0;
+
+  if (dropConnection) {
+    res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache' });
+    res.write(`data: ${JSON.stringify(completion({ delta: { content: '半句' } }))}\n\n`);
+    // 不写 [DONE]、不 end：直接断。上游「terminated」就是这种形状。
+    res.socket?.destroy();
+    return;
+  }
+
+  if (reasoningOnly) {
+    sendSse(res, [
+      completion({ delta: { reasoning_content: '我先想想这一拍该怎么接。' } }),
+      completion({ finish: 'stop', usage: { prompt_tokens: 50, completion_tokens: 2369, total_tokens: 2419 } }),
+    ]);
+    return;
+  }
 
   if (segmented && !hasToolExchange) {
     sendSse(res, [
@@ -311,6 +332,64 @@ try {
   eq(narr2.length, 1, '回退后也只写入一条 narrator');
   eq(narr2[0]?.meta?.assembly?.narration?.fallback, 'segmented', 'meta 记录回退原因');
   eq(narr2[0]?.meta?.assembly?.narration?.mode, 'single', '回退后模式记为 single');
+
+  /* ══════════════════════════════════════════════════════════════════ */
+  /* D31：没有正文的那一拍，一行都不许落库                                  */
+  /* ══════════════════════════════════════════════════════════════════ */
+  console.log('\n=== D31：正文为空 → 整拍回滚（不留空行、不留孤儿） ===');
+  reasoningOnly = true;   // 单发模式：首次空 → 关推理重试 → 仍空
+  const session3 = await req('POST', '/api/sessions', { world_id: worldId });
+  const sid3 = session3.json?.id;
+  const emptyRes = await req('POST', `/api/sessions/${sid3}/turn`, { playerText: '我说一句话。' });
+  const emptyEvents = parseSse(emptyRes.text);
+  const emptyErr = emptyEvents.find((e) => e.type === 'error');
+  ok(!!emptyErr, 'SSE 发出 error 事件（不是静默失败）');
+  ok(emptyErr?.empty_narration === true, 'error 事件标 empty_narration');
+  ok(emptyErr?.retryable === true, 'error 事件标 retryable（重发安全）');
+  ok(emptyErr?.not_persisted === true, 'error 事件标 not_persisted（服务器没写库）');
+  ok(!emptyEvents.some((e) => e.type === 'done'), '没有 done 事件（这一拍不算成功）');
+
+  const detail3 = await req('GET', `/api/sessions/${sid3}`);
+  const turns3 = detail3.json?.turns || [];
+  eq(turns3.filter((t) => t.kind === 'player').length, 0, '玩家行动没有落库（不再留下孤儿 player 行）');
+  eq(turns3.filter((t) => t.kind === 'narrator').length, 0, '空正文没有落库（不再有空 assistant 行）');
+  eq(detail3.json?.turn_count || 0, 0, '会话回合数没有前进');
+
+  reasoningOnly = false;
+  // 再发一次正常回合：证明回滚后会话仍可用，且回合号从 1 开始（没有空洞）。
+  const retryRes = await req('POST', `/api/sessions/${sid3}/turn`, { playerText: '我再说一句话。' });
+  const retryEvents = parseSse(retryRes.text);
+  ok(retryEvents.some((e) => e.type === 'done'), '回滚后重发成功');
+  const detail4 = await req('GET', `/api/sessions/${sid3}`);
+  const turns4 = detail4.json?.turns || [];
+  eq(turns4.filter((t) => t.kind === 'player').map((t) => t.turn_no), [1], '重发用的是第 1 拍（回滚没留空洞）');
+  eq(turns4.filter((t) => t.kind === 'narrator').length, 1, '重发后有一条 narrator');
+
+  /* ══════════════════════════════════════════════════════════════════ */
+  /* D31：上游断连 → 整拍回滚（原先是孤儿回合）                             */
+  /* ══════════════════════════════════════════════════════════════════ */
+  console.log('\n=== D31：上游断连 → 整拍回滚（原先会留孤儿回合） ===');
+  dropConnection = true;
+  const session4 = await req('POST', '/api/sessions', { world_id: worldId });
+  const sid4 = session4.json?.id;
+  const dropRes = await req('POST', `/api/sessions/${sid4}/turn`, { playerText: '推门出去。' });
+  const dropEvents = parseSse(dropRes.text);
+  const dropErr = dropEvents.find((e) => e.type === 'error');
+  ok(!!dropErr, '断连时发出 error 事件');
+  eq(dropErr?.aborted, undefined, '断连不算用户取消（aborted 不置位）');
+  ok(dropErr?.not_persisted === true, '断连时标 not_persisted（服务器没写库，可安全重发）');
+
+  const detail5 = await req('GET', `/api/sessions/${sid4}`);
+  const turns5 = detail5.json?.turns || [];
+  eq(turns5.length, 0, '断连后库里一行都没有（不再是孤儿 player 行）');
+  eq(detail5.json?.turn_count || 0, 0, '断连后回合数没有前进');
+
+  dropConnection = false;
+  const afterDrop = await req('POST', `/api/sessions/${sid4}/turn`, { playerText: '推门出去。' });
+  ok(parseSse(afterDrop.text).some((e) => e.type === 'done'), '断连整拍回滚后可以直接重发');
+  const detail6 = await req('GET', `/api/sessions/${sid4}`);
+  eq((detail6.json?.turns || []).filter((t) => t.kind === 'player').map((t) => t.turn_no), [1],
+    '重发用的是第 1 拍（断连没留空洞）');
 } finally {
   child.kill();
   await new Promise((r) => fakeUpstream.close(r));

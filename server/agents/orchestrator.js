@@ -24,7 +24,7 @@ import { buildPlayerView } from '../memory/player-view.js';
 import { recallHistory } from '../memory/recall-history.js';
 import { recallVisibleFrom } from '../memory/context-engine.js';
 import {
-  accumulateUsage, addPatch, addTurn, copyBranchState, createBranch, createSession,
+  accumulateUsage, addPatch, addTurnPair, copyBranchState, createBranch, createSession,
   getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession, latestScene,
   getState, getThreads, getTurnsForBranch, getWorld, getWorldState, listBranches, saveWorld,
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
@@ -111,18 +111,19 @@ async function runTurnInner({
   const turnNo = prevMax + 1;
   emit({ type: 'turn_start', turn_no: turnNo, is_opening: isOpening, branch: branchId });
 
-  // 1) 持久化玩家行动
-  if (!isOpening) {
-    addTurn(sessionId, {
-      turn_no: turnNo,
-      kind: 'player',
-      content: playerText || '',
-      images,
-      branch_choice: branchChoice,
-      branch_id: branchId,
-      meta: { source: branchChoice ? 'branch' : 'free' },
-    });
-  }
+  // 1) 玩家行动**暂不落库**，等正文真的产出了再和 narrator 行在同一个事务里写（见 §3）。
+  // 早写一步的后果实测过：上游 `terminated` / `fetch failed` 时留下一行没有正文的 player，
+  // 这一拍的玩家行动在账本上等于发生了一半——recent 层里多一条没有回应的 user 消息，
+  // 报告里表现为「孤儿回合」，只能靠人工 --repair 删行（D31）。
+  const playerTurn = isOpening ? null : {
+    turn_no: turnNo,
+    kind: 'player',
+    content: playerText || '',
+    images,
+    branch_choice: branchChoice,
+    branch_id: branchId,
+    meta: { source: branchChoice ? 'branch' : 'free' },
+  };
 
   // 2) 设定集检索预检（模型主动取证；不是关键词触发）。
   // auto = 只在大卡上开；会话 settings.codex_retrieval 可强制 on/off。
@@ -212,6 +213,12 @@ async function runTurnInner({
     emit({ type: 'error', message: `上下文装配失败: ${err.message}`, turn_no: turnNo });
     throw err;
   }
+  // 这一拍有可能在产出正文前失败（D31：失败就整拍回滚、一行都不落库）。
+  // 那时「上一拍」缓存必须退回去，否则下一拍会拿一个不存在的回合当基线：
+  // 缓存漂移探针的 `prev_count` 与装配清单对不上（D30 的 gap），记忆面板也会
+  // 显示这一拍其实没发生的装配。所以先拍快照，失败路径统一还原。
+  const prevAssemblyCache = lastAssembly.get(sessionId) || null;
+  const prevMessagesCache = lastMessages.get(sessionId) || null;
   lastAssembly.set(sessionId, { ...(context.meta || {}), budget: context.budget || null });
   // 上下文已经完成投影；下游 Agent 共享同一份 effective world，
   // 否则史官不认识剧情里新登场的人，走向也只看得见开局卡司。
@@ -270,11 +277,22 @@ async function runTurnInner({
       narrator = await runSingleNarrator();
     }
   } catch (err) {
+    // 整拍回滚：一行都没落库，所以「上一拍」缓存也要退回去（D31）。
+    lastAssembly.set(sessionId, prevAssemblyCache);
+    lastMessages.set(sessionId, prevMessagesCache);
     if (err?.name === 'AbortError' || signal?.aborted) {
       emit({ type: 'error', message: '已取消', turn_no: turnNo, aborted: true });
       throw err;
     }
-    emit({ type: 'error', message: `剧情演绎失败: ${err.message}`, turn_no: turnNo });
+    // 走到这里说明正文没产出 → 这一拍一行都没落库（D31：player 行延后到正文产出后同事务写）。
+    // 带上 not_persisted，前端才好把玩家那句话还回输入框，而不是让人重打一遍。
+    emit({
+      type: 'error',
+      message: `剧情演绎失败: ${err.message}`,
+      turn_no: turnNo,
+      not_persisted: true,
+      retryable: true,
+    });
     throw err;
   }
 
@@ -311,23 +329,49 @@ async function runTurnInner({
   const narrative = narrator.content || '';
   const narratorUsage = narrator.usage || null;
 
-  addTurn(sessionId, {
-    turn_no: turnNo,
-    kind: 'narrator',
-    content: narrative,
-    reasoning: narrator.reasoning || null,
-    token_count: estimateTokens(narrative),
-    usage: narratorUsage,
-    branch_id: branchId,
-    meta: {
-      model: narrator.model,
-      finish_reason: narrator.finishReason,
-      prompt_tokens: narratorUsage?.prompt_tokens,
-      completion_tokens: narratorUsage?.completion_tokens,
-      // 装配清单随回合持久化：刷新后仍能回答「这一轮为什么是这些内容」。
-      assembly: buildAssemblyMeta(context, narrator),
+  // 3) 正文与玩家行动**同一个事务**落库。空正文不写：那一拍的玩家行动在账本上不该发生，
+  // 写了空 narrator 行的后果是三重的——①字数统计被拉低 ②局部重复率分母虚高（指标虚好）
+  // ③一条空 assistant 消息进下一拍 recent 层；下游账本（world_state / character_states /
+  // assertions / relations / voices）全是 0 行，等于玩家白说了一句（D28 实测 A 局 t5/t10）。
+  // 已经是**重试过一次**仍为空：再重试没有证据表明会好转，直接把这一拍判失败，
+  // 让前端把玩家那句话留在输入框里重发——比静默吞掉一次行动好。
+  if (!String(narrative).trim()) {
+    // 整拍回滚（D31）：没落库，装配/消息缓存也不能前进到这一拍。
+    lastAssembly.set(sessionId, prevAssemblyCache);
+    lastMessages.set(sessionId, prevMessagesCache);
+    const detail = `上游连续两次只输出思考、没有正文（finish_reason=${narrator.finishReason || '?'}，`
+      + `completion_tokens=${narratorUsage?.completion_tokens ?? '?'}）`;
+    emit({
+      type: 'error',
+      message: `这一拍没有产出正文，已回滚：${detail}`,
+      turn_no: turnNo,
+      not_persisted: true,
+      empty_narration: true,
+      retryable: true,
+    });
+    throw new Error(`空正文：${detail}`);
+  }
+
+  addTurnPair(sessionId, [
+    playerTurn,
+    {
+      turn_no: turnNo,
+      kind: 'narrator',
+      content: narrative,
+      reasoning: narrator.reasoning || null,
+      token_count: estimateTokens(narrative),
+      usage: narratorUsage,
+      branch_id: branchId,
+      meta: {
+        model: narrator.model,
+        finish_reason: narrator.finishReason,
+        prompt_tokens: narratorUsage?.prompt_tokens,
+        completion_tokens: narratorUsage?.completion_tokens,
+        // 装配清单随回合持久化：刷新后仍能回答「这一轮为什么是这些内容」。
+        assembly: buildAssemblyMeta(context, narrator),
+      },
     },
-  });
+  ]);
   emit({
     type: 'narrative_done',
     turn_no: turnNo,

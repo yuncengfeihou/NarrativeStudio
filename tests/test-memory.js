@@ -212,6 +212,41 @@ console.log('\n=== 分支：回合可见性 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D31：一回合的两行要么都写、要么都不写 ===');
+{
+  const sid = `s-turnpair-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+
+  // 正常路径：两条都在同一个事务里落库。
+  store.addTurnPair(sid, [
+    { turn_no: 1, kind: 'player', content: '推门进去。', branch_id: 'main' },
+    { turn_no: 1, kind: 'narrator', content: '门后是空的。', branch_id: 'main' },
+  ]);
+  ok(store.getTurn(sid, 1, 'player')?.content === '推门进去。', '成对写入：player 行在');
+  ok(store.getTurn(sid, 1, 'narrator')?.content === '门后是空的。', '成对写入：narrator 行在');
+
+  // 失败路径：narrator 那行非法（缺 kind 会抛）→ 事务回滚，player 行也不能留在库里。
+  // 这就是 D31 要修的「孤儿回合」：过去 player 行在演绎之前就写死了，上游一断，
+  // 库里就留下一条没人回应的玩家行动，只能靠 --repair 删行收拾。
+  let threw = false;
+  try {
+    store.addTurnPair(sid, [
+      { turn_no: 2, kind: 'player', content: '再推一次。', branch_id: 'main' },
+      { turn_no: 2, kind: null, content: '不该写进去。', branch_id: 'main' },
+    ]);
+  } catch { threw = true; }
+  ok(threw, '第二行非法时 addTurnPair 抛错');
+  ok(!store.getTurn(sid, 2, 'player'), '事务回滚：player 行没有留下（不再有孤儿回合）');
+  ok(!store.getTurn(sid, 2, 'narrator'), '事务回滚：narrator 行也没有');
+
+  // 空数组是合法的 no-op（opening 那一拍没有 player 行）。
+  eq(store.addTurnPair(sid, []), [], '空列表不报错');
+  eq(store.addTurnPair(sid, [null, undefined]), [], '只有 null 时也不报错');
+  eq(store.getMaxTurnNo(sid), 1, '回滚后回合水位没有前进');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 历史检索：FTS5 + 分支可见性 ===');
 {
   const sid = `s-${Date.now()}`;
@@ -951,8 +986,12 @@ console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
   });
   eq(n3, 0, '非数字 target 不执行');
   const p = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
-  eq(p.status, 'open', '未执行的提案仍是 open（等人裁决）');
+  // D31：执行不了的提案是**终态**（failed），不是「等人裁决」（open）。
+  // 过去记 open 会让记忆面板显示「接受/忽略」两个按了没反应的按钮，
+  // 报告也只能数出「执行 0 条」，数不出「它已经废了」。
+  eq(p.status, 'failed', '未执行的提案记 failed 终态（不是 open，open 专指等人裁决）');
   eq(p.payload?.fix_result?.state, 'unmatched', '未执行的原因记进 payload（报告能看见为什么 0 执行）');
+  eq(p.payload?.fix_result?.retryable, false, '标记为不可重放：隔拍再执行会把状态改回过去');
 
   /* ---- D15：模型把断言 id 填进 set_state，不能当成状态改写 ---- */
   // 实测形状：{"action":"set_state","target":"#2036","value":"伍家竹院牛棚"}。
@@ -988,6 +1027,7 @@ console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
   eq(store.getCharStateMap(sid, { branchId: 'main' })['伍卿的积蓄'], undefined, 'character_states 里没有假人物');
   const p5 = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
   eq(p5.payload?.fix_result?.reason, 'not_a_person', '拒写原因留痕（报告能看见为什么没执行）');
+  eq(p5.status, 'failed', '「不是人物」是代码按设计拒写，重试也不会变，记终态');
 
   // 合法形态仍然工作：who::field
   // aliasIndex 必须是 buildAliasIndex() 产出的数组（`resolveEntity` 用 `.find`）；
@@ -1010,6 +1050,9 @@ console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
   eq(n7, 0, '点号形态 `人物.字段` 不执行（代码只认 `::`，这是提示词该说清的事）');
   const p7 = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
   eq(p7.payload?.fix_result?.state, 'unmatched', '落空原因留痕，不是静默挂 open');
+  eq(p7.payload?.fix_result?.reason, 'stale_value',
+    '点号形态的 set_state 记 stale_value：它的 value 是「校勘那一拍应有的值」，不能隔拍重放');
+  eq(p7.status, 'failed', '终态，不会在记忆面板里永远排队');
 
   // merge_alias 从来没有实现分支。提示词已把它从 action 枚举删掉；万一模型仍写出来，
   // 要能和「形态填错」区分开——否则又是一个「看起来在等人裁决」的死通道。
@@ -1023,6 +1066,7 @@ console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
   eq(n8, 0, 'merge_alias 不执行（没有这条自动通道）');
   const p8 = store.listPatches(sid, { kind: 'alias', limit: 5 })[0];
   eq(p8.payload?.fix_result?.reason, 'not_implemented', 'merge_alias 的落空原因是「没有实现」，不是「填错了」');
+  eq(p8.status, 'failed', 'merge_alias 落 failed 终态（不是 open——它不是「等人裁决」）');
 
   // 提示词必须写明 set_state 的 target 形态，且不能把 merge_alias 列成可用的 action——
   // 这两条是上面的代码约束在提示词侧的唯一证据，写漏一条就回到 D29。

@@ -176,7 +176,12 @@ async function runStream(path, body, handlers = {}) {
   const handle = (evt) => {
     if (!evt) return;
     if (evt.type === 'error') {
-      throw new Error(evt.message || '服务端返回错误事件');
+      // 把原始事件挂在错误上：`not_persisted` / `empty_narration` / `retryable` 这几个
+      // 字段决定调用方能不能把这一拍安全地重发（服务器没落库 vs 落了半拍）。
+      // 只留一句 message 的话，界面层只能一律当「失败」，无法区分。
+      const fail = new Error(evt.message || '服务端返回错误事件');
+      fail.evt = evt;
+      throw fail;
     }
     if (evt.type === 'done') final = evt;
     else if (final == null || final.type !== 'done') final = evt;

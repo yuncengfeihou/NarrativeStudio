@@ -427,9 +427,12 @@ export default {
       removeContinue();
 
       const host = scroll.querySelector('.play-body');
+      // 玩家气泡是**乐观渲染**：先上屏，等后端确认这一拍真的落库。失败要能整条撤掉，
+      // 否则屏幕上会留下一条「我说了但没人回」的行动，而数据库里并没有它。
+      let playerNode = null;
       if (!silent && (playerText || images.length || branchChoice)) {
         const shown = playerText || (branchChoice ? branchChoice.description || branchChoice.title : '');
-        appendPlayer(shown, images, branchChoice, host);
+        playerNode = appendPlayer(shown, images, branchChoice, host);
       }
       scrollToBottom(true);
 
@@ -454,10 +457,21 @@ export default {
         finalize();
       } catch (err) {
         pending.remove();
+        // finalize() 会把 live 置空，先判断这一拍到底有没有产出正文。
+        const produced = String(live?.text || '').trim().length > 0;
         finalize();
         if (err?.name === 'AbortError') {
+          // 取消：服务端可能在落库前 abort。玩家气泡保留（用户知道自己点了停止），
+          // 但正文没有产出时要把那句话还回输入框，不然它只存在于屏幕上。
+          if (!produced && playerText) restoreAction(playerText, playerNode);
           toast('已停止生成');
         } else {
+          const evt = err?.evt || {};
+          // 服务端明确说「这一拍没有落库」→ 撤掉乐观气泡、把行动放回输入框，让用户原样重发。
+          // 这类失败（空正文 / 上游连接断了）不是用户写错了，不该让他们重打一遍。
+          if (!produced && (evt.not_persisted || evt.empty_narration || evt.retryable)) {
+            restoreAction(playerText || (branchChoice ? branchChoice.description || branchChoice.title : ''), playerNode);
+          }
           toast(err.message || '生成失败', { type: 'error', duration: 3200 });
           showError(err.message || '生成出错');
         }
@@ -470,6 +484,18 @@ export default {
         updateSub();
         paintRing();
       }
+    }
+
+    /** 把一次没有落库的行动还给输入框：撤掉乐观气泡，文本回填（图片也回填）。 */
+    function restoreAction(text, playerNode) {
+      playerNode?.remove();
+      if (text && !input.value.trim()) {
+        input.value = text;
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+        input.focus();
+      }
+      paintSend();
     }
 
     function handleEvent(pending) {
@@ -652,9 +678,14 @@ export default {
             window.dispatchEvent(new CustomEvent('sessions:changed'));
             break;
           }
-          case 'error':
+          case 'error': {
             dropPostPending();
-            throw new Error(evt.message || '生成失败');
+            const fail = new Error(evt.message || '生成失败');
+            // 带上原始事件：空正文这类「服务器没有落库、可以原样重发」的失败，
+            // 前端要把玩家那句话放回输入框，不能只弹一个 toast 就把它吞掉。
+            fail.evt = evt;
+            throw fail;
+          }
           default:
             break;
         }

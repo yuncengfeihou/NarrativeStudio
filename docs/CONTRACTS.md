@@ -143,6 +143,12 @@ branches { session_id, branch_id, parent_branch, fork_turn, status, note }
 回合编号全局递增；`branch_id` 标记归属。分支可见 = **当前分支 + 祖先链**，每条祖先边只继承到
 子分支 `fork_turn` 为止；不能只看全局 `turn_no`（否则嵌套分叉会读到废弃兄弟分支的回合）。
 
+**一个回合的两行原子写入**（D31）：`addTurnPair(sessionId, [playerTurn, narratorTurn])` 在一个
+事务里写，要么都写、要么都不写。玩家行动过去在演绎之前单独 `addTurn`，上游 `terminated` /
+`fetch failed` 时库里就留下一条没有正文的 player 行（孤儿回合）——它进不了场次原文（场记只读
+narrator 行），却作为一条没有回应的 user 消息留在库里，只能靠 `_work/longrun-drive.mjs --repair`
+删行收拾。正文没产出的那一拍在账本上不该发生。`addTurn` 仍保留（测试与工具用），单行写入。
+
 **分支隔离**：`states / relations / threads / character_states / assertions / voices /
 scenes / world_state` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork：把分叉点仍有效的
 状态复制到新分支，新分支不会读到旧线在分叉点之后写下的任何内容。
@@ -744,8 +750,15 @@ applyContinuityFixes(sessionId, { branchId, turnNo, issues, threads, aliasIndex,
 //   一律拒写并留痕。aliasIndex 必须是 buildAliasIndex() 产出的数组（resolveEntity 用 .find）。
 // merge_alias 不是可用 action（D29）：没有实现分支，合并别名必须人确认。提示词里已从
 //   action 枚举删掉；模型仍可能写出来，那种情况记 reason='not_implemented'，与「形态填错」区分。
-// 未执行的提案写进 patch payload 的 fix_result:{action,target,state:'unmatched'[,reason]}，
-//   让「提案了但没执行」在报告里可见，而不是静默挂在 open。
+// 未执行的提案写进 patch payload 的 fix_result:{action,target,state:'unmatched',retryable:false[,reason]}，
+// 并记 patch.status='failed'（D31）——`open` 的唯一语义是「等人裁决」，记忆面板会给它
+//   接受/忽略两个按钮；而形态填错的 set_state、没实现的 merge_alias、非人物 subject 这三类，
+//   人点了接受也不会执行。它们过去全记 open，于是看起来像在排队等人，实际是死通道。
+//   reason 区分「模型的错」（stale_value = target 解析不出 `人物::字段`；bad_target_form =
+//   有 `::` 但人名/字段为空）与「代码按设计拒写」（not_a_person / unknown_field）——
+//   前者下一轮改提示词能修，后者修不了也不该修。set_state 的 value 是「校勘那一拍应有的值」，
+//   隔 N 拍再执行会把状态改回过去，比不执行更坏，所以 retryable:false、不做存量回填
+//   （只能等下一次校勘重新发现问题）。action:'none' 仍记 open——那才是真的等人裁决。
 // tests 必须覆盖它——抽成纯函数就是为了这个（抽之前 runContinuity 零测试，才让上面那条活了 40 拍）。
 runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}
 // 工具：search_events / search_assertions / get_character_state / get_threads / get_scene /
@@ -927,7 +940,16 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 {type:'continuity', report}              // 校勘
 {type:'branches', branches, scene_summary, stale?}
 {type:'done', turn_no, branch, narration_mode, usage, session_usage, memory}
-{type:'error', message, aborted?} / {type:'ping'}
+{type:'error', message, aborted?, not_persisted?, retryable?, empty_narration?}
+// not_persisted：这一拍**一行都没落库**（上游连接断了 / 正文为空），前端可以把玩家那句话
+//   原样放回输入框重发。D31 起一回合的 player + narrator 两行是原子写入（addTurnPair），
+//   正文没产出就整拍回滚——不再有「player 行在、narrator 缺」的孤儿回合。
+// empty_narration：content 为空且关推理重试一次仍为空。同样整拍回滚，不落库空串。
+//   空串落库的后果是三重的：字数统计被拉低、重复率分母虚高、一条空 assistant 消息
+//   进下一拍 recent 层；下游账本（world_state/状态/断言/关系/原声）全 0 行，
+//   等于玩家说了句话没人应答。
+// aborted：用户取消。三种都不会留下半拍。
+{type:'ping'}
 ```
 
 ---

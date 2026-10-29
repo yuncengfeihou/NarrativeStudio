@@ -683,6 +683,31 @@ export function addTurn(sessionId, turn) {
   return { id: Number(info.lastInsertRowid), token_count: tokenCount };
 }
 
+/**
+ * 一次写入同一回合的多行（player + narrator），要么都写、要么都不写。
+ *
+ * 为什么需要：玩家行动过去在演绎之前就单独落库，于是上游 `terminated` / `fetch failed`
+ * 时库里留下一条没有正文的 player 行——「孤儿回合」。它进不了场次原文（场记只读 narrator 行），
+ * 却会作为一条没有回应的 user 消息留在库里，只能靠 `_work/longrun-drive.mjs --repair`
+ * 删行收拾。一回合本来就是一个整体：正文没产出的那一拍在账本上不该发生。
+ *
+ * 这里只让**新**回合原子化，不改已有行（beta 不做迁移）。
+ */
+export function addTurnPair(sessionId, turns = []) {
+  const list = (turns || []).filter(Boolean);
+  if (!list.length) return [];
+  const d = getDb();
+  d.exec('BEGIN');
+  try {
+    const out = list.map((t) => addTurn(sessionId, t));
+    d.exec('COMMIT');
+    return out;
+  } catch (err) {
+    try { d.exec('ROLLBACK'); } catch { /* 事务已回滚 */ }
+    throw err;
+  }
+}
+
 function decorateTurn(row) {
   return {
     ...row,

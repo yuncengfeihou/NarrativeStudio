@@ -24,6 +24,20 @@ const PATCH_KIND_LABEL = {
   archivist_parse_failed: '记忆整理失败', stale: '过期作废',
 };
 const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', info: '提示' };
+// 提案落到 `failed` 终态后，界面要回答「为什么没执行」——否则作者只会看到一条
+// 点了没反应的记录。「形态没写对」和「这条通道没实现」是两件不同的事，
+// 后者不是模型的错，也不该期待重试。
+const FAIL_REASON_LABEL = {
+  stale_value: '这条修复要改的是当场应有的值，隔拍再执行会把状态改回过去，已作废',
+  not_implemented: '这类修复还没有实现，仅作记录',
+  not_a_person: '目标不是角色，无法改人物状态',
+  unknown_field: '字段不在受控表里，拒写',
+};
+
+/** 从提案的 payload.fix_result 里取「为什么没执行」的原因码。 */
+function patchFailReason(p) {
+  return p?.payload?.fix_result?.reason || null;
+}
 
 /**
  * 提案的「一句话说明」。
@@ -276,15 +290,20 @@ export async function openMemoryPanel(sessionId, opts = {}) {
         `${kindSummary}（斜线后为该类总数；共 ${patchTotal} 条，列表只显示最近 ${shown.length} 条，未逐条列出不代表没有问题）`));
     }
     for (const p of shown) {
-      const pending = p.status !== 'applied' && p.status !== 'dismissed';
-      patchList.appendChild(el('div', { class: 'mem-patch' + (pending ? ' is-pending' : '') },
+      // `failed`（D31：模型给出的修复提案形态不对、或那类通道根本没实现）是终态，
+      // 再点「接受」也不会执行——只有 `open` 才是等人裁决。把它当 pending 会给出
+      // 两个按了没反应的按钮，比不显示更坏。
+      const pending = p.status !== 'applied' && p.status !== 'dismissed' && p.status !== 'failed';
+      const terminalFail = p.status === 'failed';
+      patchList.appendChild(el('div', { class: 'mem-patch' + (pending ? ' is-pending' : '') + (terminalFail ? ' is-failed' : '') },
         el('span.mem-patch-kind', {}, PATCH_KIND_LABEL[p.kind] || p.kind),
         el('span.mem-patch-sev', {}, SEVERITY_LABEL[p.severity] || p.severity),
         el('span.mem-patch-agent', {}, p.agent),
         // 各类提案把话放在不同字段，统一走 patchClaim 归一，不要把 JSON 铺在界面上。
         el('span.mem-patch-claim', {}, truncate(patchClaim(p), 140)),
         p.evidence ? el('span.mem-patch-ev', {}, truncate(p.evidence, 120)) : null,
-        el('span.mem-patch-status', {}, p.status),
+        el('span.mem-patch-status', {}, terminalFail ? '未执行' : p.status),
+        terminalFail ? el('span.mem-patch-note', {}, FAIL_REASON_LABEL[patchFailReason(p)] || '这条修复无法自动执行') : null,
         pending ? el('div.mem-patch-actions', {},
           el('button.btn-sm', {
             onclick: async () => {

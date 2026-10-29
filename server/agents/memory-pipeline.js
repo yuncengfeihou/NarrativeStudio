@@ -441,6 +441,30 @@ export function applyContinuityFixes(sessionId, {
 }) {
   let applied = 0;
   const maxApplied = config.context.continuityMaxApplied;
+  /**
+   * 记一条**终态**提案：执行不了，且不会因为「再等一拍」而变得可执行。
+   *
+   * 为什么不是 `open`：`open` 在本系统里的唯一语义是「等人裁决」，记忆面板会给它
+   * 「接受 / 忽略」两个按钮。而形态填错的 set_state、没实现的 merge_alias、非人物 subject
+   * 这三类，人点了接受也不会执行——它们过去全记 open，于是**看起来像在排队等人**，
+   * 实际上是一批死通道，报告只能数出「执行 0 条」，数不出「它们已经废了」（D31）。
+   *
+   * `reason` 要区分「模型的错」（形态没写对）与「代码按设计拒写」（不是人物 / 字段不在表里），
+   * 因为前者下一轮改提示词能修，后者修不了也不该修。
+   */
+  const reject = (issue, reason) => {
+    issue.fix_result = {
+      action: issue.fix.action || null,
+      target: String(issue.fix.target || ''),
+      state: 'unmatched',
+      retryable: false,
+      ...(reason ? { reason } : {}),
+    };
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo,
+      status: 'failed', severity: issue.severity, payload: issue, evidence: issue.evidence,
+    });
+  };
   for (const issue of issues) {
     const { action, target, value } = issue.fix;
     let status = 'open';
@@ -478,12 +502,8 @@ export function applyContinuityFixes(sessionId, {
     } else if (action === 'set_state' && issue.subject && value && String(target || '').includes('::')) {
       const [who, field] = String(target).split('::').map((x) => str(x)).filter(Boolean);
       if (!who || !field) {
-        // 形态不完整就当作没执行，把原因写进 payload。
-        issue.fix_result = { action, target: String(target || ''), state: 'unmatched' };
-        addPatch(sessionId, {
-          branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
-          severity: issue.severity, payload: issue, evidence: issue.evidence,
-        });
+        // 形态不完整（`大黑牛::`）——模型的错，下一轮提示词能让它写对。
+        reject(issue, 'bad_target_form');
         continue;
       }
       const ref = resolveEntity(who, aliasIndex);
@@ -495,23 +515,12 @@ export function applyContinuityFixes(sessionId, {
       // 一个谁都不读、却会在场记单候选里排队的人物（D15 实测）。
       // 这两类要改写的是「这条断言的对象过时了」，不是人物状态，所以拒写并留痕。
       if (!isPlayer && kind !== PERSON_TYPE) {
-        issue.fix_result = {
-          action, target: String(target || ''), state: 'unmatched', reason: 'not_a_person',
-        };
-        addPatch(sessionId, {
-          branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
-          severity: issue.severity, payload: issue, evidence: issue.evidence,
-        });
+        // 代码按设计拒写，不是模型的错，重试也不会变。
+        reject(issue, 'not_a_person');
         continue;
       }
       if (!STATE_FIELDS.includes(field)) {
-        issue.fix_result = {
-          action, target: String(target || ''), state: 'unmatched', reason: 'unknown_field',
-        };
-        addPatch(sessionId, {
-          branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
-          severity: issue.severity, payload: issue, evidence: issue.evidence,
-        });
+        reject(issue, 'unknown_field');
         continue;
       }
       setCharState(sessionId, { branchId, who, field, value, turn: turnNo });
@@ -542,14 +551,21 @@ export function applyContinuityFixes(sessionId, {
         applied++;
       }
     }
-    // 提案了但没执行：把原因写进 payload。否则它和「等人裁决的提案」在库里长得一模一样，
-    // 报告只能数出「0 执行」，数不出「为什么 0」（D12 就是这么 40 拍没被发现的）。
+    // 提案了但没执行：把原因写进 payload，并把它**判成终态**（status='failed'）。
+    // 过去这里记 `open`，而 `open` 在本系统里的含义是「等人裁决」——于是一条永远不可能
+    // 执行的提案会在记忆面板里永久排队，报告也只能数出「执行 0 条」，数不出「它已经废了」。
+    // 只有 `action:'none'`（模型自己说不确定）才真的需要人来裁决，那种仍记 open。
     if (status !== 'applied' && action && action !== 'none') {
-      issue.fix_result = { action, target: String(target || ''), state: 'unmatched' };
+      status = 'failed';
+      issue.fix_result = { action, target: String(target || ''), state: 'unmatched', retryable: false };
       // merge_alias 从来没有实现过（提示词里曾把它列进 action 枚举，代码里没有分支，
       // 于是 100% 落 unmatched 且记 open，看起来像「等人裁决」）。合并别名要改实体名，
       // 属于要人确认的操作，所以这里不补实现，只把「没有这条通道」和「形态填错」分开记。
       if (action === 'merge_alias') issue.fix_result.reason = 'not_implemented';
+      // set_state 的 value 是「校勘那一拍应有的值」，不是「现在应有的值」：
+      // 隔了 N 拍再执行会把状态改回 N 拍前，比不执行更坏。所以它不可重放，
+      // 只能等下一次校勘重新发现问题（那时提示词已要求 `人物::字段`，形态是对的）。
+      if (action === 'set_state') issue.fix_result.reason = 'stale_value';
     }
     addPatch(sessionId, {
       branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,

@@ -1749,6 +1749,11 @@ try {
   });
   const contMajor = contRows.filter((r) => r.severity === 'major');
   const contMajorOpen = contMajor.filter((r) => r.status === 'open');
+  // D31：形态不对 / 通道没实现的提案不再记 `open`，改成 `failed` 终态。
+  // 这不是「发明了一个新状态」，而是**把「等人裁决」和「永远执行不了」分开**：
+  // 过去两者都是 open，于是「major 挂 open N 条」既可能是待人工裁决，也可能是一条
+  // 100% 落空的通道在排队，报告只能数出数、数不出性质。存量会话仍是 open，所以两列都要报。
+  const contFailed = contRows.filter((r) => r.status === 'failed');
   const contMinor = contRows.filter((r) => r.severity !== 'major');
   // D12：校勘的自动修复是否真的执行过。
   //
@@ -2092,7 +2097,8 @@ try {
   console.log(`场外引用     ${offstageRows.length} 条（可进提示词 ${offstageVisible} / hidden ${offstageHidden}）｜被后文点名 ${offstageCited}（${pct(offstageCited, offstageVisible)} of visible）` +
     `｜按正文拍 ${offstageCitedBodyTurns.size}/${narr.length}（${pct(offstageCitedBodyTurns.size, narr.length)}）` +
     (offstageDetail.length ? '｜' + offstageDetail.slice(0, 6).map((o) => `t${o.turn_no}:${o.who.join('/') || '?'}${o.cited_at ? '✓' : '✗'}`).join(' ') : ''));
-  console.log(`校勘         ${contRows.length} 条（major ${contMajor.length}｜其中挂 open ${contMajorOpen.length}｜minor ${contMinor.length}）`);
+  console.log(`校勘         ${contRows.length} 条（major ${contMajor.length}｜其中挂 open ${contMajorOpen.length}｜minor ${contMinor.length}）` +
+    (contFailed.length ? `｜未执行终态 ${contFailed.length}` : ''));
   console.log(`  自动修复     fix 提案 ${contFixRows.length} 条｜已执行 ${contFixApplied.length} 条｜target 带 # 的 ${contHashTargets.length} 条` +
     (contFixRows.length && !contFixApplied.length
       ? '  ← 提案全落空：检查 memory-pipeline.js 的 /^\\d+$/ 是否该接受 # 前缀（D12）'
@@ -2487,7 +2493,13 @@ try {
       ? '本局未触发 major 级校勘（间隔/切场才触发，样本不足）'
       : `major ${contMajor.length} 条，open ${contMajorOpen.length} 条` +
         (contMajorOpen.length ? '：' + contMajorOpen.map((r) => `t${r.turn_no}/${r.kind}`).join(',') : '') +
-        `｜minor ${contMinor.length} 条只计数`
+        `｜minor ${contMinor.length} 条只计数` +
+        // D31：failed 是终态（形态不对 / 通道没实现 / 按设计拒写），它**不是**待裁决，
+        // 所以不能算进「挂 open」。但也不能不提——「有 4 条已经判死」和「一条都没有」
+        // 是两种状态，混在一起会让一个死通道看起来像健康的。
+        (contFailed.length
+          ? `｜已判终态 ${contFailed.length} 条（${Object.entries(contFailReasons).map(([k, n]) => `${k} ${n}`).join('，')}）`
+          : '')
   );
 
   add(
@@ -2528,10 +2540,24 @@ try {
   // D29：`set_state` 的 target 形态。代码只认 `人物::字段`；双局长跑实测 7 条 set_state
   // 全部落空，形态是 `大黑牛.condition`（点号）、`凌玥`（裸人名）、`伍卿 —拥有→ 金钱`。
   // 原因在提示词：schema 只写「状态键 / 线索标题」，没规定分隔符，模型就自己发明了。
-  // 这条判据要能区分三种落空：形态没写对（可修）/ subject 不是人物（该拒）/ 字段不在受控表。
+  //
+  // D31 之后 `fix_reason` 把这些落空拆开了，判据要跟着改：
+  //   stale_value    = target 解析不出 `人物::字段`（模型的错，改提示词能修）→ 形态问题
+  //   bad_target_form= 有 `::` 但人名/字段为空（模型的错）→ 形态问题
+  //   not_a_person / unknown_field = 代码按设计拒写（不该修）→ 不是形态问题
+  //   reason 为空    = 修复前的存量行（那时根本没人写 reason），无法判定，只能单列
+  // 继续用老判据（unmatched && !reason && 不含 ::）会让这条在修复后恒为 PASS——
+  // 一个只剩合格证的判据。
   const contSetState = contRows.filter((r) => r.fix === 'set_state');
+  const FORM_REASONS = new Set(['stale_value', 'bad_target_form']);
   const contSetStateBadForm = contSetState.filter(
-    (r) => r.fix_state === 'unmatched' && !r.fix_reason && !String(r.fix_target || '').includes('::')
+    (r) => r.fix_state === 'unmatched' && FORM_REASONS.has(r.fix_reason)
+  );
+  const contSetStateRejected = contSetState.filter(
+    (r) => r.fix_state === 'unmatched' && r.fix_reason && !FORM_REASONS.has(r.fix_reason)
+  );
+  const contSetStateLegacy = contSetState.filter(
+    (r) => r.fix_state === 'unmatched' && !r.fix_reason
   );
   // alias 类问题只报告：`merge_alias` 没有实现分支，提示词里已从 action 枚举删掉。
   // 模型仍写出来的话，这里单独可见——不然它和「填错形态」混在同一个 unmatched 里。
@@ -2552,7 +2578,13 @@ try {
         `形态没写对 ${contSetStateBadForm.length} 条` +
         (contSetStateBadForm.length
           ? `：${contSetStateBadForm.slice(0, 5).map((r) => `t${r.turn_no} ${JSON.stringify(r.fix_target)}`).join('，')}` +
-            '｜代码只认 `人物::字段`（两个半角冒号）。形态不对 = 静默丢弃，不是「等人裁决」'
+            '｜代码只认 `人物::字段`（两个半角冒号）。形态不对的提案现在记 failed 终态，不再冒充「等人裁决」'
+          : '') +
+        (contSetStateRejected.length
+          ? `｜按设计拒写 ${contSetStateRejected.length} 条（不是人物 / 字段不在受控表）`
+          : '') +
+        (contSetStateLegacy.length
+          ? `｜存量无原因 ${contSetStateLegacy.length} 条（D31 之前写的，那时没人记 reason，无法判定形态，要验证必须重跑）`
           : '') +
         `｜merge_alias 提案 ${contMergeAlias.length} 条（没有实现分支，提示词已删掉这个枚举）`
   );
@@ -2980,6 +3012,10 @@ try {
   // 7.9c 空正文回合（静默落库的空拍）
   // 判据只看**落库正文长度 == 0**，不看 `narration.fallback`——后者是「重试过」的痕迹。
   // 主库 146 拍里 7 次重试全部救回；把 fallback 当失败会把自愈报成缺陷（给合格发缺陷通知）。
+  //
+  // D31 之后这条判据在**新会话**上应当恒为 PASS：重试仍空的回合不再落库（整拍回滚），
+  // 所以旧会话里能查到空正文行 = 修复前的存量。两者要分开报，否则「0/44」既可能是
+  // 修好了、也可能只是这一局没撞上。
   add(
     'empty_narration',
     '没有静默落库的空正文回合',
@@ -2991,8 +3027,9 @@ try {
           : '')
       : `${emptyTurns.length}/${narr.length} 拍正文为空：`
         + emptyTurns.map((e) => `t${e.turn_no}(ct=${num(e.completion_tokens)}${e.retried ? ',首次也空' : ''}${e.fed_into_next ? ',已进下一拍上下文' : ''})`).join(' ')
-        + '｜成因：上游只产出 reasoning、content 为空；orchestrator 关推理重试一次仍空后落库 content=\'\'（`orchestrator.js:311`）。'
+        + '｜成因：上游只产出 reasoning、content 为空；重试一次仍空后落库 content=\'\'。'
         + '影响：该拍进入字数统计与重复率分母，并以空 assistant 消息进入下一拍 recent 层；下游记账拿到空正文、这一拍的玩家行动等于没发生。'
+        + '｜D31 起这类回合整拍回滚、不再落库，所以本项非 0 说明这局跑在修复前'
   );
 
   // 7.9 结尾公式化（辅助项：超阈值只 WARN，它衡量文风而不衡量正确性）
