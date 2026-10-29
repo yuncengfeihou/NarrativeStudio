@@ -9,6 +9,25 @@ import { estimateTokens, truncateToTokens } from '../tokens.js';
 
 const join = (arr, sep = '、') => (arr || []).filter(Boolean).join(sep);
 
+/**
+ * 场记单里「未回收的线索」最多渲染几条。
+ *
+ * 这是**渲染容量**，也是线索账本的 WIP 上限的唯一真源：`archivist.js` 从这里 import
+ * 去拒绝第 N+1 条 open 线索。两处必须共读一个数——上限大于渲染容量 = 埋了但看不见，
+ * 小于渲染容量 = 白白浪费注意力预算。曾把 8 写死在 `.slice(0, 8)` 里，埋线索的一端
+ * 完全不知道有上限。
+ */
+export const THREAD_RENDER_MAX = 8;
+
+/**
+ * 线索权重低于这个值就不进账本（卡内预埋的 seeds 豁免——它们是「必须回收的钩子」
+ * 唯一的初始值来源，作者标 0.55 也是作者的意思）。
+ *
+ * 0.6 是「值得写进场记单」的下限：再低就是气氛，不是钩子。判据在提示词里，
+ * 这个数只做兜底——两个地方共读，别各写一份。
+ */
+export const THREAD_MIN_WEIGHT = 0.6;
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* 1. 世界索引（常驻）                                                     */
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -321,8 +340,19 @@ function renderCastLine(c, ledgerChar, voices) {
   if (know.length) lines.push(`  边界：${know.join('；')}`);
   // 原声按「规范名」存（voices.who 是 canon 名），但卡司条目可能是 id，
   // 两个键都要查，否则原声永远匹配不到（旧实现只查 id，导致 voices 传了也白传）。
+  // 带「第N轮」：回声段删除后（D18），这里是模型唯一能判断「这句话是什么时候说的」的地方。
+  // 兼容纯字符串（旧调用方/测试直接传台词文本）。
   const v = voices?.[c.id] || voices?.[c.name];
-  if (v?.length) lines.push(`  原声：${join(v.slice(0, 2), '／')}`);
+  if (v?.length) {
+    const quoted = v.slice(0, 2).map((x) => {
+      if (x && typeof x === 'object') {
+        const tn = Number(x.turn_no) || 0;
+        return tn > 0 ? `第${tn}轮${x.text || ''}` : str(x.text);
+      }
+      return String(x ?? '');
+    }).filter(Boolean);
+    if (quoted.length) lines.push(`  原声：${join(quoted, '／')}`);
+  }
   return lines.join('\n');
 }
 
@@ -396,7 +426,7 @@ function renderCodexBrief(entry) {
 
 /**
  * 按整条条目裁剪：超预算时从末尾整条丢弃，绝不切半条。
- * 第一行是段落标题，后续条目由 entryStart 开头（codex 是「· 」，回声是「（」）。
+ * 第一行是段落标题，后续条目由 entryStart 开头（codex / facts / relations 都是「· 」）。
  */
 function fitEntries(text, maxTokens, entryStart = '· ') {
   if (!text) return '';
@@ -433,10 +463,10 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  * @param {object} args.ledger      当前场景账本
  * @param {Array}  args.present     在场卡司（normalizeCard 后的 cast 条目）
  * @param {Array}  args.relations   关系切片（已过滤）
+ * @param {number} args.relationLimit 关系渲染条数（由装配层按预算推导，不再写死 8）
  * @param {Array}  args.threads     未回收线索
  * @param {Array}  args.codex       选中的辞书条目（selectCodex 的 entry）
- * @param {object} args.voices      castId -> [原声台词]
- * @param {Array}  args.echoes      [{who,text,turn_no}]
+ * @param {object} args.voices      castId -> [{text, turn_no}]（渲染成「原声：第N轮…」）
  * @param {Array}  args.rumors     世界呼吸推演的幕外流言 [{who,what,visibility}]
  * @param {string} args.directive   用户的本场指令
  * @param {number} args.capTokens
@@ -444,15 +474,15 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  */
 export function renderSceneSheet({
   ledger = {}, present = [], relations = [], threads = [], codex = [], codexBrief = [],
-  voices = {}, echoes = [], facts = [], worldRuntime = {}, playerNow = null,
-  knowledgeMatrix = null, omens = null, rumors = [], directive = '', absentees = [], capTokens = 2200,
+  voices = {}, facts = [], worldRuntime = {}, playerNow = null,
+  knowledgeMatrix = null, omens = null, rumors = [], directive = '', absentees = [],
+  capTokens = 2200, relationLimit = Number.POSITIVE_INFINITY,
 } = {}) {
   const L = ledger || {};
   const meta = {
     present: present.length,
     codex: codex.length,
     codex_brief: codexBrief.length,
-    echoes: echoes.length,
     facts: facts.length,
     rumors: (rumors || []).length,
     kept: [],
@@ -460,7 +490,7 @@ export function renderSceneSheet({
     codex_rendered: 0,
     codex_brief_rendered: 0,
   };
-  if (!present.length && !L.place && !L.time) return { text: '', meta };
+  if (!present.length && !L.place && !L.time) return { text: '', meta, head: '', sections: [] };
 
   const head = [];
   head.push(`【场记单】这是当前这一刻世界的既定事实，不是新的用户发言。`);
@@ -489,7 +519,11 @@ export function renderSceneSheet({
     if (p.goal) playerBits.push(`当下想要 ${str(p.goal)}`);
     // 银钱是唯一的数值路径：由代码累加，模型每拍都能看见「现在一共有多少」，
     // 而不是每条断言各记一个互相矛盾的余额。
-    if (typeof p.money === 'number') playerBits.push(`银钱 ${p.money}`);
+    // 余额为负说明在欠债：**必须照实渲染成「欠 X」**，不能显示成 0 或隐藏——
+    // 模型看不见负数就会照自己正文里的账继续花钱，账本与正文公开分裂（D11）。
+    if (typeof p.money === 'number') {
+      playerBits.push(p.money < 0 ? `银钱 欠 ${Math.abs(p.money)}` : `银钱 ${p.money}`);
+    }
   }
   const playerLine = playerBits.length ? `主角此刻：${playerBits.join('｜')}` : '';
 
@@ -499,10 +533,21 @@ export function renderSceneSheet({
   const absentLine = renderAbsentLine(absentees);
   const castBody = (body) => [body ? `在场\n${body}` : '', absentLine].filter(Boolean).join('\n');
 
+  // 关系条数由装配层按预算推导（context-engine 的 RELATION_SHARE），这里不再二次切片。
+  // 旧实现的 `.slice(0, 8)` 是又一道写死的闸：长跑实测 51 拍里只有 11/42 条过场关系
+  // 曾经露过面（8 个常驻槽位被同几条强关系锁死），而关系段只占场景层配额的 1.6%——
+  // 与 D9 的 `slice(0, 24)` 完全同构：不是没预算，是写死了条数。
+  const presentNames = new Set(present.flatMap((p) => [p.name, p.id]));
   const relLines = (relations || [])
-    .filter((r) => present.some((p) => p.name === r.from_name || p.id === r.from_name || p.name === r.to_name || p.id === r.to_name))
-    .slice(0, 8)
-    .map((r) => {
+    .filter((r) => presentNames.has(r.from_name) || presentNames.has(r.to_name))
+    // 两端都在场的关系优先：只有双方都在这一拍的人，他们的关系才撑得住镜头。
+    // SQL 的 `ORDER BY ABS(sentiment)` 完全不含「谁在场」，于是「伍卿→大黑牛 s=0.9」
+    // 这种牛不在场的关系长期占前 8 位（实测前 8 条里只有 2–3 条两端在场）。
+    // 组内仍按 |sentiment| 降序（排序稳定，不改变装配层传入的顺序）。
+    .map((r) => ({ r, both: presentNames.has(r.from_name) && presentNames.has(r.to_name) }))
+    .sort((a, b) => (b.both ? 1 : 0) - (a.both ? 1 : 0))
+    .slice(0, relationLimit)
+    .map(({ r }) => {
       const senti = typeof r.sentiment === 'number'
         ? (r.sentiment > 0.3 ? '亲近' : r.sentiment < -0.3 ? '敌意' : '微妙')
         : '';
@@ -510,13 +555,24 @@ export function renderSceneSheet({
       return `· ${r.from_name} → ${r.to_name}${bits2 ? `［${bits2}］` : ''}${r.note ? `：${r.note}` : ''}`;
     });
 
+  // 线索行的来源标注（D5）：`planted_turn === 0` 是卡作者预埋的 seeds，
+  // 其余是本局挖出来的。两者抢同一块渲染容量（8 条），但**回收时机不同**——
+  // 预置钩子什么时候能收由剧情决定，运行时钩子则由模型自己调度。
+  // 混在一张清单里时模型看不出这个区别，会以为每条都由它决定；标出来不占新通道、
+  // 不加新段，只是同一行里多一个词。
+  const seedMark = (t) => (Number(t.planted_turn) === 0 ? '预置' : '');
   const threadLines = (threads || [])
     .filter((t) => t.status === 'open')
-    .slice(0, 8)
-    .map((t) => `· ${t.title}${t.note ? `（${t.note}）` : ''}${t.weight >= 0.8 ? '［主线］' : ''}`);
+    .slice(0, THREAD_RENDER_MAX)
+    .map((t) => {
+      const tags = [t.weight >= 0.8 ? '主线' : '', seedMark(t)].filter(Boolean).join('·');
+      return `· ${t.title}${t.note ? `（${t.note}）` : ''}${tags ? `［${tags}］` : ''}`;
+    });
 
+  // 条数由装配层按预算推导（context-engine 的 manyLimit），这里不再二次切片。
+  // 旧实现的 `.slice(0, 24)` 是第二道写死的闸：它遮蔽了第一道闸的问题
+  // （只改 manyLimit 会被这里切回来，只改这里而 manyLimit 没超就毫无变化）。
   const factLines = (facts || [])
-    .slice(0, 24)
     .map((f) => `· ${f.subject} —${f.predicate}→ ${f.object}${f.visibility === 'secret' ? '［引擎掌握，不得说破］' : ''}`);
 
   const pressure = [];
@@ -551,10 +607,6 @@ export function renderSceneSheet({
   const codexBlock = (codex || []).map((c) => renderCodexEntry(c.entry || c)).join('\n');
   const codexBriefBlock = (codexBrief || []).map((c) => renderCodexBrief(c.entry || c)).join('\n');
 
-  const echoLines = (echoes || [])
-    .slice(0, 4)
-    .map((e) => `（${e.who ? `${e.who}·` : ''}第${e.turn_no}轮）${e.text}`);
-
   /* ---- 分段装配：可选段落整条取舍，不做半句截断 ---- */
   const sections = [];
   if (whenLine) sections.push({ key: 'when', text: whenLine, need: true });
@@ -580,13 +632,12 @@ export function renderSceneSheet({
   if (pressure.length) sections.push({ key: 'pressure', text: `压力\n${pressure.join('\n')}` });
   if (codexBlock) sections.push({ key: 'codex', text: `本场可用设定\n${codexBlock}` });
   if (codexBriefBlock) sections.push({ key: 'codexBrief', text: `附近设定（只给一句，展开前先查辞书）\n${codexBriefBlock}` });
-  if (echoLines.length) sections.push({ key: 'echoes', text: `回声（过去的原话，可自然带出，不要整段复述）\n${echoLines.join('\n')}` });
   if (directive) sections.push({ key: 'directive', text: `本场指令（作者钦定，优先级最高）\n${directive}` });
 
   const headerCost = estimateTokens(head.join('\n')) + 2;
   // directive 声明「优先级最高」，就必须排在可选设定之前；放不下时它还能靠尾注通道活下来。
   // 主角运行态必须紧跟时间地点（它是「此刻」的一部分），不能被裁掉。
-  const order = ['when', 'world', 'player', 'cast', 'directive', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief', 'echoes'];
+  const order = ['when', 'world', 'player', 'cast', 'directive', 'pressure', 'threads', 'facts', 'relations', 'knowledge', 'codex', 'codexBrief'];
   // 「此刻」骨架先占位：它们在第一轮吃预算，可选段只能在剩下的空间里排。
   // 旧实现按 order 一次过，人群场会先丢在场段、给后面的设定/知识/关系腾地方——
   // 9 人同场时旁白会失去全部人物锚点，而知识边界和辞书反而回来，优先级是反的。
@@ -630,9 +681,10 @@ export function renderSceneSheet({
 
     const room = capTokens - used - 2;
     if (room <= 60) { dropped.push(key); continue; }
-    // 辞书/回声按整条取舍：宁可少一条，也不留下半条设定。
-    const fitted = (key === 'codex' || key === 'codexBrief' || key === 'echoes')
-      ? fitEntries(sec.text, room, key === 'echoes' ? '（' : '· ')
+    // 辞书/事实/关系按整条取舍：宁可少一条，也不留下半条设定。
+    // facts 与 relations 现在按预算推导（可能上百条），整段丢弃太粗暴：按整条退让，能留几条留几条。
+    const fitted = (key === 'codex' || key === 'codexBrief' || key === 'facts' || key === 'relations')
+      ? fitEntries(sec.text, room, '· ')
       : '';
     if (fitted) {
       kept.push({ ...sec, text: fitted });
@@ -655,11 +707,35 @@ export function renderSceneSheet({
   meta.codex_brief_rendered = briefText
     ? briefText.split('\n').filter((line) => line.startsWith('· ')).length
     : 0;
+  // 事实按预算推导后可能上千条，实际渲染多少要能核对（D9）：上面 factsRendered
+  // 读的就是这个值，缺了它「预算涨了但渲染没涨」在报告里看不出来。
+  const factsText = kept.find((s) => s.key === 'facts')?.text || '';
+  meta.facts_rendered = factsText
+    ? factsText.split('\n').filter((line) => line.startsWith('· ')).length
+    : 0;
+  // 关系同理（D17）：条数由预算推导后，「装配层给了 45 条、渲染端只留了 20 条」必须可核对。
+  const relText = kept.find((s) => s.key === 'relations')?.text || '';
+  meta.relations_rendered = relText
+    ? relText.split('\n').filter((line) => line.startsWith('· ')).length
+    : 0;
 
   const body = kept.map((s) => s.text).join('\n\n');
-  const text = body ? `${head.join('\n')}\n\n${body}` : '';
+  const headText = head.join('\n');
+  const text = body ? `${headText}\n\n${body}` : '';
   meta.tokens = estimateTokens(text);
-  return { text, meta };
+  // sections 只给调用方拼变体用（D26：走向 Agent 不要「附近设定」段），不落库：
+  // meta 里只有 kept 的 key 列表，正文不进 meta_json。
+  return { text, meta, head: headText, sections: kept.map((s) => ({ key: s.key, text: s.text })) };
+}
+
+/**
+ * 用同一份 head + 选中的段重新拼场记单正文。
+ * 用处只有一个：给旁路 Agent 一个「同一张单子少一段」的版本（D26），
+ * 保证除了被删的那段之外逐字节相同——不是各渲染一份（那样字数和取舍都会变）。
+ */
+export function composeSheetText(headText, sections = []) {
+  const body = (sections || []).map((s) => s.text).join('\n\n');
+  return body ? `${headText || ''}\n\n${body}` : '';
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

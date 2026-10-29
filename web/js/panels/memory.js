@@ -16,7 +16,7 @@ const VISIBILITY_LABEL = { public: '公开', engine: '引擎', secret: '只你�
 const PATCH_KIND_LABEL = {
   contradiction: '矛盾', knowledge_breach: '知识越界', timeline: '时间线',
   alias: '别名冲突', stale_thread: '线索陈旧', state_jump: '状态跳变',
-  offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '事实记录',
+  offstage_event: '幕后事件', scene: '场次', assertion: '事实记录',
   world_change: '世界变化', rejected_delta: '数值被拒',
   // 下面四类没进标签表会以裸标识符露在分组摘要里（`skipped_targets 10`），
   // 面板面向作者，代码标识符不该出现在界面上。
@@ -28,8 +28,8 @@ const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', in
 /**
  * 提案的「一句话说明」。
  *
- * 各类提案把话放在不同字段（断言/矛盾是 claim，待确认是 text，世界变化是
- * path/op/value 三元组），缺一档就会把整条 JSON 原样显示给作者。
+ * 各类提案把话放在不同字段（断言/矛盾是 claim，世界变化是 path/op/value 三元组），
+ * 缺一档就会把整条 JSON 原样显示给作者。
  * 世界变化最多，且 payload 全是机器字段，退回 JSON 等于面板里一大片花括号。
  */
 function patchClaim(p) {
@@ -261,8 +261,8 @@ export async function openMemoryPanel(sessionId, opts = {}) {
     body.appendChild(el('p.muted', {}, 'Agent 只提案，代码才落库。这里能看到谁提的、证据是什么。'));
     const patchList = el('div.mem-patches');
     if (!patches.length) patchList.appendChild(el('p.muted', {}, '暂无提案。'));
-    // 按类分堆：待确认（uncertain）每拍产出 3–5 条，混在一起会把真正需要处置的少数几条挤出可视范围。
-    // 这里显示每一类的总数，并说明列表里只展示最近多少条——不静默截断。
+    // 按类分堆：不同 kind 的产出速率差两个数量级，混在一起会把真正需要处置的少数几条
+    // 挤出可视范围。这里显示每一类的总数，并说明列表里只展示最近多少条——不静默截断。
     const shown = patches.slice(0, 40);
     const counts = patchCounts || {};
     const shownKinds = {};

@@ -37,12 +37,13 @@ export function renderRecallResults(query, hits, { maxTokens = DEFAULT_MAX_TOKEN
  * @param {string} [args.branchId]  当前分支；传入后按分支可见性过滤（含继承的父分支）
  * @param {number} [args.forkTurn]  没有分支记录时的兜底分叉点
  * @param {number} [args.atTurn]    检索时点，默认到最新
+ * @param {number} [args.excludeFrom]  这几拍之后（含）不查——上下文里已经逐字可见的部分（D4）
  * @param {string} args.query
  * @param {number} [args.limit]     1-8，默认 4
- * @returns {{text:string, hits:Array, meta:{query,hits,limit,tokens,engine}}}  engine ∈ fts5|like|none
+ * @returns {{text:string, hits:Array, meta:{query,hits,limit,tokens,engine,excluded}}}  engine ∈ fts5|like|none
  */
 export function recallHistory({
-  sessionId, branchId = null, forkTurn = null, atTurn, query, limit = 4,
+  sessionId, branchId = null, forkTurn = null, atTurn, excludeFrom = null, query, limit = 4,
   kinds = ['player', 'narrator'], maxTokens = DEFAULT_MAX_TOKENS,
 } = {}) {
   const q = String(query || '').trim();
@@ -50,11 +51,16 @@ export function recallHistory({
     return { text: '错误：query 不能为空。', hits: [], meta: { query: q, hits: 0, limit: 0, tokens: 0, engine: 'none' } };
   }
   const lim = Math.max(1, Math.min(8, Number(limit) || 4));
-  const { hits, engine } = searchTurnsDetailed(sessionId, q, { branchId, forkTurn, atTurn, limit: lim, kinds });
+  const { hits, engine } = searchTurnsDetailed(sessionId, q, {
+    branchId, forkTurn, atTurn, excludeFrom, limit: lim, kinds,
+  });
   const text = renderRecallResults(q, hits, { maxTokens });
   return {
     text,
     hits,
-    meta: { query: q, hits: hits.length, limit: lim, tokens: estimateTokens(text), engine },
+    meta: {
+      query: q, hits: hits.length, limit: lim, tokens: estimateTokens(text), engine,
+      excluded: Number.isInteger(excludeFrom) && excludeFrom > 0 ? excludeFrom : null,
+    },
   };
 }

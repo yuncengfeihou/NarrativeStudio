@@ -13,7 +13,7 @@
 import { config } from '../config.js';
 import { chat } from '../llm.js';
 import { currentPlan } from '../memory/context-plan.js';
-import { buildAliasIndex, normalizeCard, PERSON_TYPE, resolveEntity } from '../world/schema.js';
+import { buildAliasIndex, linkEntities, normalizeCard, PERSON_TYPE, resolveEntity } from '../world/schema.js';
 import { pathsFor } from '../world/state-paths.js';
 import {
   addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getRelations, getScenes,
@@ -23,6 +23,7 @@ import {
 import {
   continuitySystemPrompt, continuityUserPrompt, librarianSystemPrompt, librarianUserPrompt,
   LIFE_STATES, sceneKeeperSystemPrompt, sceneKeeperUserPrompt, worldTickSystemPrompt, worldTickUserPrompt,
+  STATE_FIELDS,
 } from '../prompts/archivist.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
@@ -52,6 +53,57 @@ function branchCtx(session) {
 /* ══════════════════════════════════════════════════════════════════════ */
 
 /**
+ * `gone` 的回程通道（D10-A）：玩家这一拍**点名**了一个标记为 `gone` 的人，
+ * 说明他已经在镜头里回来了——把她写回 `alive`。
+ *
+ * 为什么由代码做而不是让模型写：模型看不到 `life_state`，它只在正文里写「凌玥站在门口」，
+ * 不会想到要回头改一个它看不见的字段。而 `linkEntities` 已经算出了「玩家点名了谁」，
+ * 这是红线 2 允许的唯一字符串匹配，**不是新的注入通道，只是同一信号的第二个消费者**。
+ *
+ * 边界（宁缺勿滥）：
+ * - 只认**玩家这一拍亲自写到的名字**，不认旁白顺带提及（旁白常写回忆/幻觉）。
+ * - 只处理 `gone`，不处理 `dead`——死人回来必须模型显式写，代码不替他决定。
+ * - 只对卡里存在 / 账本里有过状态的人生效（`resolveEntity` 能解析的）。
+ *
+ * @returns {Array} 实际写回的条目（供 SSE / 测试）
+ */
+export function reviveNamedGone({
+  sessionId, branchId, turnNo, world = null, card = null, playerText = '', ledger = null,
+}) {
+  const text = str(playerText);
+  if (!text) return [];
+  const worldCard = normalizeCard(card || world?.card || {});
+  const aliasIndex = buildAliasIndex(worldCard);
+  const linked = linkEntities(text, aliasIndex);
+  if (!linked.person?.length) return [];
+  const stateMap = getCharStateMap(sessionId, { branchId });
+  const nameOf = new Map((worldCard.entities || []).map((e) => [e.id, e.name]));
+  const applied = [];
+  for (const id of linked.person) {
+    const who = nameOf.get(id) || id;
+    const life = str(stateMap[who]?.life_state) || str(stateMap[id]?.life_state);
+    if (life !== 'gone') continue;
+    // 玩家这一拍确实写到了「这个人」本身（而不是旁白里的回忆），才算回到镜头里。
+    setCharState(sessionId, { branchId, who, field: 'life_state', value: 'alive', turn: turnNo });
+    addWorldState(sessionId, {
+      branch_id: branchId, entity_kind: 'person', entity_id: id,
+      path: 'life_state', op: 'set', value: 'alive', turn: turnNo,
+      source: 'archivist', evidence: `玩家这一拍点名了 ${who}`,
+    });
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'life_state_revived', turn_no: turnNo,
+      status: 'applied', severity: 'info',
+      payload: { who, from: 'gone', to: 'alive', reason: 'named_by_player' },
+      evidence: text.slice(0, 120),
+    });
+    applied.push({ who, from: 'gone', to: 'alive' });
+  }
+  return applied;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/**
  * 一场戏结束时调用：读这一场的完整原文，写一行场次记录。
  * 记录是检索入口，不是摘要——它必须能让人判断「这场里有什么」。
  */
@@ -74,6 +126,13 @@ function branchCtx(session) {
  * 边界：只补「史官还没写成 dead/gone」的；值必须在 `LIFE_STATES` 内且只认本场 cast
  * （在调用方过滤）；落库仍走 store 具名函数，并留 `life_state_inferred` 审计。
  *
+ * **`gone` 是「这一场不在镜头里」，不是永别（D10）**：曾经这里对 `dead` 和 `gone` 一视同仁
+ * 地 `continue`，于是「第二见证人」也被永久挡住——50 拍实测：凌玥 t19 离场、t25/t33 玩家
+ * 主动去找她、正文每拍都在写她说话，`life_state` 却一直是 `gone`，场记单每拍印
+ * 「已故／离场：凌玥」，模型同时收到「她已离场」和「她在说话」两个矛盾信号。
+ * 现在只挡 `dead`（真死了要模型显式写回），`gone → alive/injured` 放行。
+ * 这不是第二个注入通道，是同一事实的第二次独立见证。
+ *
  * @returns {Array} 实际写入的条目（供测试与 SSE 统计）
  */
 export function applyLifeChanges({
@@ -85,7 +144,7 @@ export function applyLifeChanges({
   const applied = [];
   for (const c of lifeChanges) {
     const prevLife = stateMap[c.who]?.life_state;
-    if (prevLife === 'dead' || prevLife === 'gone') continue;
+    if (prevLife === 'dead') continue;
     const resolved = resolveEntity(c.who, aliasIndex);
     setCharState(sessionId, {
       branchId, who: c.who, field: 'life_state', value: c.life_state, turn: turnNo,
@@ -302,7 +361,9 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
 
   const assertions = getAssertions(sessionId, { branchId, limit: 200 });
   const states = getCharStateMap(sessionId, { branchId });
-  const threads = getThreads(sessionId, { branchId, limit: 40 });
+  // 校勘的回收靶池必须覆盖全量 open 线索：WIP 上限（THREAD_RENDER_MAX）已经保证
+  // open 不超过 8 条，所以这里给全量，避免「第 41 条起连回收机会都没有」的老问题。
+  const threads = getThreads(sessionId, { branchId, limit: -1 });
   const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { from: Math.max(1, turnNo - 12), to: turnNo });
   const recentText = rows.map((r) => `第${r.turn_no}轮${r.kind === 'player' ? '（玩家）' : ''}：${r.content}`).join('\n\n');
   if (!recentText) return { issues: [], healthy: [] };
@@ -361,6 +422,23 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
   }
 
   /* ---- 应用安全补丁 ---- */
+  const applied = applyContinuityFixes(sessionId, {
+    branchId, turnNo, issues, threads, aliasIndex, playerName,
+  });
+
+  return { issues, healthy: arr(parsed.healthy).map(str).filter(Boolean), applied, usage };
+}
+
+/**
+ * 把校勘的 fix 提案落库。抽成纯函数（不调模型）以便单测——
+ * 此前这段逻辑内联在 `runContinuity` 里，`tests/` 对它零覆盖，
+ * 于是「`target` 带 `#` 导致每条 invalidate_assertion 都落空」40 拍没被发现（D12）。
+ *
+ * @returns {number} 真正执行成功的条数
+ */
+export function applyContinuityFixes(sessionId, {
+  branchId, turnNo, issues = [], threads = [], aliasIndex = [], playerName = '',
+}) {
   let applied = 0;
   const maxApplied = config.context.continuityMaxApplied;
   for (const issue of issues) {
@@ -374,16 +452,69 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
       });
       continue;
     }
-    if (action === 'invalidate_assertion' && /^\d+$/.test(target)) {
-      invalidateAssertion(sessionId, Number(target), { validTo: turnNo });
+    // target 允许带 `#` 前缀：提示词里断言是渲染成 `#123` 给模型看的
+    // （`continuityUserPrompt` 的 `#${a.id}`），模型照着抄就会带上井号。
+    // 只认 `/^\d+$/` 会让**每一条** invalidate_assertion 落空——40 拍长跑实测
+    // 7 条 fix 提案、0 条执行，而且状态仍记 open，看起来像「等人裁决」。
+    // 这里只放宽一个可选的 `#`，不接受其它前缀（不要变成模糊匹配）。
+    const fixTargetId = String(target || '').trim().replace(/^#/, '');
+    if (action === 'invalidate_assertion' && /^\d+$/.test(fixTargetId)) {
+      invalidateAssertion(sessionId, Number(fixTargetId), { validTo: turnNo });
       status = 'applied';
       applied++;
-    } else if (action === 'set_state' && issue.subject && value) {
-      const [who, field] = target.includes('::') ? target.split('::') : [issue.subject, 'condition'];
-      setCharState(sessionId, { branchId, who, field, value, turn: turnNo });
+    } else if (action === 'set_state' && value && /^\d+$/.test(fixTargetId) && String(target || '').includes('#')) {
+      // 模型把「断言的对象过时了」写成 `set_state` + 断言 id（`target:"#2023"`、
+      // `value:"贴胸藏于衣襟内"`）。这不是状态改写，是「这条断言该失效了」——
+      // 按 set_state 处理会落到下面的 `[subject,'condition']` 兜底，把地点写进
+      // condition，还会给「伍卿的积蓄」「无纹玉佩」造出两个假人物（D15 实测）。
+      // 意图与 invalidate_assertion 完全一致（红线 5：失效不删除），所以按它执行，
+      // 并把「模型填错了 action」记进 payload，别静默改写语义。
+      invalidateAssertion(sessionId, Number(fixTargetId), { validTo: turnNo });
+      issue.fix_result = {
+        action, target: String(target || ''), state: 'applied', interpreted_as: 'invalidate_assertion',
+      };
+      status = 'applied';
+      applied++;
+    } else if (action === 'set_state' && issue.subject && value && String(target || '').includes('::')) {
+      const [who, field] = String(target).split('::').map((x) => str(x)).filter(Boolean);
+      if (!who || !field) {
+        // 形态不完整就当作没执行，把原因写进 payload。
+        issue.fix_result = { action, target: String(target || ''), state: 'unmatched' };
+        addPatch(sessionId, {
+          branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
+          severity: issue.severity, payload: issue, evidence: issue.evidence,
+        });
+        continue;
+      }
       const ref = resolveEntity(who, aliasIndex);
       const isPlayer = who === playerName;
-      const kind = isPlayer ? 'player' : (ref.type || PERSON_TYPE);
+      const kind = isPlayer ? 'player' : (ref.type || '');
+      // character_states 只装人物。校勘常把物品/钱财当成 subject（「伍卿的积蓄」
+      // 「无纹玉佩」），按老逻辑会 setCharState 出一条假人物，投影时
+      // `applyDelta` 再凭空 `emptyPersonEntry` 造出「伍卿的积蓄（临时登场）」——
+      // 一个谁都不读、却会在场记单候选里排队的人物（D15 实测）。
+      // 这两类要改写的是「这条断言的对象过时了」，不是人物状态，所以拒写并留痕。
+      if (!isPlayer && kind !== PERSON_TYPE) {
+        issue.fix_result = {
+          action, target: String(target || ''), state: 'unmatched', reason: 'not_a_person',
+        };
+        addPatch(sessionId, {
+          branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
+          severity: issue.severity, payload: issue, evidence: issue.evidence,
+        });
+        continue;
+      }
+      if (!STATE_FIELDS.includes(field)) {
+        issue.fix_result = {
+          action, target: String(target || ''), state: 'unmatched', reason: 'unknown_field',
+        };
+        addPatch(sessionId, {
+          branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
+          severity: issue.severity, payload: issue, evidence: issue.evidence,
+        });
+        continue;
+      }
+      setCharState(sessionId, { branchId, who, field, value, turn: turnNo });
       // 校勘模型可能给出任意字段；只有投影器认识的路径才写进世界状态。
       if (pathsFor(kind)?.has(field)) {
         addWorldState(sessionId, {
@@ -411,13 +542,21 @@ export async function runContinuity({ session, world, turnNo, signal, guard }) {
         applied++;
       }
     }
+    // 提案了但没执行：把原因写进 payload。否则它和「等人裁决的提案」在库里长得一模一样，
+    // 报告只能数出「0 执行」，数不出「为什么 0」（D12 就是这么 40 拍没被发现的）。
+    if (status !== 'applied' && action && action !== 'none') {
+      issue.fix_result = { action, target: String(target || ''), state: 'unmatched' };
+      // merge_alias 从来没有实现过（提示词里曾把它列进 action 枚举，代码里没有分支，
+      // 于是 100% 落 unmatched 且记 open，看起来像「等人裁决」）。合并别名要改实体名，
+      // 属于要人确认的操作，所以这里不补实现，只把「没有这条通道」和「形态填错」分开记。
+      if (action === 'merge_alias') issue.fix_result.reason = 'not_implemented';
+    }
     addPatch(sessionId, {
       branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,
       severity: issue.severity, payload: issue, evidence: issue.evidence,
     });
   }
-
-  return { issues, healthy: arr(parsed.healthy).map(str).filter(Boolean), applied, usage };
+  return applied;
 }
 
 /** 供 UI 的 canon 健康度：最近未处理的补丁 + 断言规模。 */

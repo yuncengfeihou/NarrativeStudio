@@ -97,6 +97,9 @@ schema：
 - 与 ledger.characters 二选一即可，都写则以 states 为准。字段限定：${STATE_FIELDS.join(' / ')}
 - life_state 只取这四种值之一：${LIFE_STATES.join(' / ')}（活着 / 受伤 / 已死 / 已离场）。
   任何角色**死亡或离场**都必须写 life_state，否则下一拍他还会被当成在场者说话。
+- **gone 是「这一次走开了」，不是「从此不再出现」**：离场的人重新回到正文里（走回来、
+  被找到、被叫来），同样要写 life_state 为 alive 或 injured。不写回就会一直按离场处理：
+  场记单每拍印「已故／离场」，模型同时看到「她已离场」和「她在说话」。
 
 ## changes（世界线的运行期状态）
 - 用来记「这个世界后来变了什么」，只写本轮正文明确支撑的变化。
@@ -134,9 +137,10 @@ schema：
 - note 写变化的**触发点**，一句话。
 
 ## threads
-- action: "plant" 埋下新线索/伏笔；"resolve" 回收已埋线索（title 必须与下面给出的未回收线索**完全一致**）。
-- weight 0-1：主线伏笔 0.8-1.0，小悬念 0.3-0.5。
-- 不要为凑数而编造线索；只有正文真的留下了「未解之事」才记。
+- 线索 = 读者会追问「后来呢」的那件事（没兑现的承诺、没解释的物件、没说完的话）。
+  气氛、情绪、普通动作、本场已交代的事都不是线索；**多数回合不该有新线索**。
+- action: "plant" 埋新线索；"resolve" 回收（title 必须与下面清单里的一条完全一致）。
+- weight 0-1：主线 0.8-1.0，支线钩子 0.6-0.7。低于 0.6 撑不起一次回收，不要提。
 
 ## quotes
 - 只摘**真正出现在本轮正文里**的原话，带引号，不超过 40 字。
@@ -154,16 +158,23 @@ schema：
 
 export function archivistUserPrompt({
   turnNo, playerText, branchChoice, narrative,
-  castIndex = '', codexIndex = '', openThreads = [], playerName = '',
+  castIndex = '', codexIndex = '', openThreads = [], threadLimit = 0, playerName = '',
 }) {
   const refs = [];
   refs.push(castIndex
     ? `【已知人物】（主语/宾语/键名一律用这里的规范名）\n${castIndex}`
     : '（作者未提供卡司）');
   if (codexIndex) refs.push(`【已知事物】\n${codexIndex}`);
+  // 余量是**事实**不是催告：并进「未回收的线索」这一块的表头，不新开一个注入通道。
+  // 到顶时说清楚，模型才知道该优先回收而不是按惯性每拍埋一条。限额本身由代码强制
+  // （archivist.js 会拒绝第 N+1 条并留 patch），这里只是让它不至于撞墙才知道。
+  const threadRoom = threadLimit - openThreads.length;
+  const threadLeft = threadLimit > 0
+    ? (threadRoom > 0 ? `，还可新埋 ${threadRoom} 条` : `，已满，这一拍只能推进或回收`)
+    : '';
   refs.push(openThreads.length
-    ? `【当前未回收的线索】（resolve 时 title 必须与这里完全一致）\n${openThreads.map((t) => `· ${t}`).join('\n')}`
-    : '（暂无未回收线索）');
+    ? `【当前未回收的线索】（共 ${openThreads.length} 条${threadLeft}；resolve 时 title 必须与这里完全一致）\n${openThreads.map((t) => `· ${t}`).join('\n')}`
+    : `（暂无未回收线索${threadLeft}）`);
   if (playerName) refs.push(`【玩家角色】${playerName}——他的行动由玩家决定，你只记录后果，不替他做决定。`);
 
   const parts = [
@@ -252,13 +263,21 @@ export function continuitySystemPrompt() {
       "subject": "涉及的人物或事物",
       "claim": "问题是什么，一句话",
       "evidence": "原文或账本里的依据，必须引用具体内容",
-      "fix": {"action": "invalidate_assertion|set_state|resolve_thread|merge_alias|none", "target": "断言 id / 状态键 / 线索标题", "value": "新值"}
+      "fix": {"action": "invalidate_assertion|set_state|resolve_thread|none", "target": "见下方「target 写法」", "value": "新值"}
     }
   ],
   "healthy": ["没问题的部分，一句话，用于确认你确实看过"]
 }
 
-# 五类问题
+# target 写法（写错就等于没提，代码只认下面这几种形态）
+- invalidate_assertion → target 填断言 id，就写数字（「2517」，带不带 # 都行）。
+- set_state → target 必须是「人物名::字段名」，中间是**两个半角冒号**，字段只能取
+  condition / mood / location / goal / life_state（例：「凌玥::location」）。
+  写「凌玥.location」「凌玥位置」「凌玥」都不会执行——等于没提。
+- resolve_thread → target 填线索标题原文。
+- alias 类问题（同一实体两个名字）只报告，action 填 none：合并别名要人确认，没有自动通道。
+
+# 六类问题
 1. contradiction：两条断言同时有效却互相冲突（注意：被标记为「曾经」的不算冲突）。
 2. knowledge_breach：角色说出/用上了他不可能知道的信息。
 3. timeline：时间顺序对不上，或同一时间出现在两个地方。

@@ -27,8 +27,9 @@ const playerView = await import('../server/memory/player-view.js');
 const recall = await import('../server/memory/recall-history.js');
 const { pickOffstagePersons, detectSceneChange, isSubstantivePlaceShift } = await import('../server/agents/memory-pipeline.js');
 const pipe = await import('../server/agents/memory-pipeline.js');
-const { worldTickUserPrompt, archivistSystemPrompt } = await import('../server/prompts/archivist.js');
+const { worldTickUserPrompt, archivistSystemPrompt, continuitySystemPrompt } = await import('../server/prompts/archivist.js');
 const config = (await import('../server/config.js')).config;
+const { pathsFor } = await import('../server/world/state-paths.js');
 
 let pass = 0;
 let fail = 0;
@@ -76,6 +77,18 @@ console.log('\n=== 断言：冲突失效，不删除 ===');
 
   store.retractAssertion(sid, a2);
   eq(store.getAssertions(sid, { branchId: 'main' }).length, 1, '撤回后退出有效集');
+
+  /* ---- countAssertions 必须与 getAssertions 同口径（D3 的 total 用它） ---- */
+  // 这里是 D3 自己踩过的坑：loaded 用 atTurn 回溯（窗口里含「当拍已失效」的历史断言），
+  // 而 total 最初只数 status='active'，于是 t18 出现 loaded=75 > total=75 的临界、
+  // 过了 300 条之后会变成「看见的比库里还多」，报告判据自相矛盾。
+  const at3Count = store.countAssertions(sid, { branchId: 'main', atTurn: 3 });
+  eq(at3Count, store.getAssertions(sid, { branchId: 'main', atTurn: 3, limit: 1000 }).length,
+    'countAssertions(atTurn) 与 getAssertions(atTurn) 同口径');
+  ok(!store.getAssertions(sid, { branchId: 'main' }).some((a) => a.id === a1),
+    'a1 已失效，不在 active 集合里');
+  ok(store.getAssertions(sid, { branchId: 'main', atTurn: 3 }).some((a) => a.id === a1),
+    '但 a1 在第 3 拍仍然有效，落在回溯窗口里');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -143,6 +156,26 @@ console.log('\n=== 原声 ===');
   eq(map['凌玥'].map((v) => v.text), ['第5句', '第4句'], '每人限量取最近（最新在前）');
   eq(map['凌玥'].map((v) => v.turn_no), [5, 4], '原声保留真实轮次（不再丢成第 0 轮）');
   eq(map['张兰'].map((v) => v.text), ['去去去'], '其他人不受影响');
+
+  // D23：每人限量必须是**按人分区**的，不是「全局前 400 行再按人切」。
+  // 旧实现下，一个高频角色（这里是 500 行的凌玥）就能把全局窗口吃满，
+  // 久没开口的角色整段掉出去、声线永久消失，而 meta 里没有任何信号。
+  {
+    const noisy = `s-${Date.now()}-d23`;
+    store.createSession({ id: noisy, title: 't' });
+    store.createBranch(noisy, { branchId: 'main' });
+    for (let i = 1; i <= 500; i++) {
+      store.addVoice(noisy, { branchId: 'main', who: '凌玥', text: `高频第${i}句`, turn_no: i });
+    }
+    store.addVoice(noisy, { branchId: 'main', who: '谢沐', text: '我走了', turn_no: 3 });
+    const big = store.getVoiceMap(noisy, { branchId: 'main', perWho: 2 });
+    eq(big['谢沐']?.map((v) => v.text), ['我走了'], '低频角色不会被高频角色挤出窗口（按人分区取前 N）');
+    eq(big['凌玥'].map((v) => v.text), ['高频第500句', '高频第499句'], '高频角色仍取各自最近 2 条');
+    const pinnedOk = store.addVoice(noisy, { branchId: 'main', who: '谢沐', text: '（钉选）别忘了我', turn_no: 2 });
+    store.setVoicePinned(noisy, pinnedOk, 1);
+    const withPin = store.getVoiceMap(noisy, { branchId: 'main', perWho: 2 });
+    eq(withPin['谢沐'][0].pinned, true, '钉选的原声排在该人前面（不会被 newer 挤掉）');
+  }
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -214,6 +247,26 @@ console.log('\n=== 历史检索：FTS5 + 分支可见性 ===');
   ok(r.hits.length >= 1 && r.meta.tokens > 0, 'recallHistory 返回命中与 token 预算');
   eq(r.meta.engine, 'fts5', 'recallHistory meta 自报检索引擎');
   ok(!r.text.includes('书院'), '召回文本不泄漏兄弟分支内容');
+
+  /* ---- 下界（D4 后验）：上下文里已经逐字可见的段不再检索 ---- */
+  // 50 轮实测：20 条历史查询里 15 条是本拍玩家动作的子串，跨距长的查询全部落空——
+  // 因为模型拿「刚说过的话」当查询词，搜回来的必然是它眼前已经有的东西。
+  const all = await recall.recallHistory({ sessionId: sid, branchId: 'b2', atTurn: 3, query: '旧仓库' });
+  ok(all.hits.some((h) => h.turn_no <= 2), '不设下界时能查到早期回合');
+  eq(all.meta.excluded, null, '不传下界时 meta.excluded 为 null');
+  // 「旧仓库」只出现在第 2 拍；excludeFrom=2 表示第 2 拍起已逐字可见，不该再查。
+  const bounded = await recall.recallHistory({
+    sessionId: sid, branchId: 'b2', atTurn: 3, excludeFrom: 2, query: '旧仓库',
+  });
+  eq(bounded.hits.length, 0, 'excludeFrom=2 时第 2 拍起不再检索');
+  ok(bounded.text.includes('没有在已经发生的回合里找到'), '落空时明确告知而不是留白');
+  eq(bounded.meta.excluded, 2, 'meta 记下排除起点（报告要能核对）');
+  // 下界不该把「更早的命中」也一起挡掉：它只影响 >= excludeFrom 的部分。
+  const keepEarly = await recall.recallHistory({
+    sessionId: sid, branchId: 'b2', atTurn: 3, excludeFrom: 2, query: '玥姐姐',
+  });
+  ok(keepEarly.hits.length >= 1 && keepEarly.hits.every((h) => h.turn_no < 2),
+    '下界只挡较新的段，早期命中仍可查');
 
   const empty = recall.renderRecallResults('旧仓库', []);
   ok(empty.includes('没有在已经发生的回合里找到'), 'renderRecallResults 空命中给出确定文案');
@@ -459,6 +512,72 @@ console.log('\n=== 史官：确定性落库 ===');
   eq(r.threads, 1, '回收线索');
   eq(store.getThreads(sid, { status: 'open' }).length, 0, '回收后无未回收线索');
 
+  /* ---- 线索账本 WIP 上限与权重阈值（D5） ----
+   * 上限 = 场记单渲染容量：埋下的线索若渲染不出来，等于埋了个看不见的东西。
+   * 到顶拒绝新埋（并留 thread_rejected 审计），但 resolve 永远允许——它减少条数。 */
+  const sheetMod = await import('../server/world/scene-sheet.js');
+  eq(sheetMod.THREAD_RENDER_MAX, 8, '线索渲染容量 = 8（与场记单 slice 共读一个常量）');
+  eq(sheetMod.THREAD_MIN_WEIGHT, 0.6, '线索落库权重下限 = 0.6');
+
+  // 低权重：不落库，留痕。
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 12,
+    update: { scene_change: {}, threads: [{ action: 'plant', title: '气氛有点沉', weight: 0.4 }] },
+  });
+  eq(r.threads, 0, '权重 0.4 的线索不落库');
+  eq(r.threads_rejected, 1, '被拒线索计数 = 1');
+  eq(store.getThreads(sid, { status: 'open' }).length, 0, '低权重线索没写进表');
+  const rejPatch = store.listPatches(sid, { branchId: 'main', kind: 'thread_rejected' })[0];
+  eq(rejPatch?.payload?.items?.[0]?.reason, 'low_weight', 'thread_rejected 记录拒绝原因 low_weight');
+  eq(rejPatch?.status, 'rejected', 'thread_rejected 的 status = rejected');
+
+  // 填满到上限。
+  for (let i = 1; i <= sheetMod.THREAD_RENDER_MAX; i++) {
+    arch.applyArchivistUpdate({
+      sessionId: sid, branchId: 'main', turnNo: 13,
+      update: { scene_change: {}, threads: [{ action: 'plant', title: `钩子${i}`, weight: 0.7 }] },
+    });
+  }
+  eq(store.getThreads(sid, { branchId: 'main', status: 'open' }).length, sheetMod.THREAD_RENDER_MAX,
+    `开放线索填满到 ${sheetMod.THREAD_RENDER_MAX} 条`);
+
+  // 到顶：第 N+1 条被拒，原因 wip_full。
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 14,
+    update: { scene_change: {}, threads: [{ action: 'plant', title: '溢出的钩子', weight: 0.9 }] },
+  });
+  eq(r.threads, 0, '到顶后新线索不落库');
+  const rej2 = store.listPatches(sid, { branchId: 'main', kind: 'thread_rejected' })[0];
+  eq(rej2?.payload?.items?.[0]?.reason, 'wip_full', 'thread_rejected 记录拒绝原因 wip_full');
+  eq(rej2?.payload?.wip_limit, sheetMod.THREAD_RENDER_MAX, 'patch 里带 wip_limit 便于诊断');
+  ok(!store.getThreads(sid, { branchId: 'main', status: 'open' }).some((t) => t.title === '溢出的钩子'),
+    '溢出的钩子确实没写进表（不是静默写入后不渲染）');
+
+  // 到顶时 resolve 仍然允许——它让条数下降，是唯一的出口。
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 15,
+    update: { scene_change: {}, threads: [{ action: 'resolve', title: '钩子1' }] },
+  });
+  eq(r.threads, 1, '到顶时 resolve 仍然生效');
+  eq(store.getThreads(sid, { branchId: 'main', status: 'open' }).length, sheetMod.THREAD_RENDER_MAX - 1,
+    '回收后开放线索少一条');
+
+  // 已存在的标题重复 plant 是「更新」，不受权重阈值与上限约束（否则改不动已有线索）。
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 16,
+    update: { scene_change: {}, threads: [{ action: 'plant', title: '钩子2', weight: 0.2, note: '降级' }] },
+  });
+  eq(r.threads, 1, '重复 plant 已存在标题 = 更新，不拒绝');
+  eq(r.threads_rejected, 0, '重复 plant 不记 rejected');
+
+  // 卡内预埋伏笔（seeds）不受阈值约束：它们是「必须回收的钩子」唯一的初始值来源，
+  // 播种走 upsertThread 直写、不经 applyArchivistUpdate。预设里真有一条 0.55。
+  store.upsertThread(sid, {
+    branch_id: 'main', title: '作者预埋的低权伏笔', status: 'open', weight: 0.55, planted_turn: 0, turn_no: 0,
+  });
+  ok(store.getThreads(sid, { branchId: 'main', status: 'open' }).some((t) => t.title === '作者预埋的低权伏笔'),
+    'seeds 播种路径不受 0.6 阈值影响（作者写了就是作者的意思）');
+
   // 地点名能对上辞书 place 时自动补 place_id（当前地点加分不再依赖模型手写 id）。
   const placeIdx = [{ alias: '司楼', kind: 'codex', id: 'silou', name: '司楼', type: 'place' }];
   arch.applyArchivistUpdate({
@@ -576,6 +695,28 @@ console.log('\n=== 提案白名单：越界目标拒写并留痕 ===');
   ok(declaredTargets.includes('凌玥') && declaredTargets.includes('伍卿'), '声明集合包含人物实体');
   ok(declaredTargets.includes('玥姐姐'), '声明集合包含别名');
   ok(declaredTargets.includes('player'), '玩家永远允许');
+  // D25：`world` 和 `player` 一样不是卡里的实体，而是投影目标。曾经只放行了 player，
+  // 于是史官每一次世界局势变更都被这道校验静默拦掉（全库 `entity_kind='world'` 的
+  // world_state 写入 0 行），而消费方一直在（场记单「局势 …」行 + 定稿常驻笔记）。
+  ok(declaredTargets.includes('world'), '世界局势永远允许（D25：world 是投影目标，不是卡实体）');
+
+  // 端到端：写一条 world/status 必须真的落库、且投影后能渲染出「局势」行。
+  // 只断言 declaredTargets 里有 'world' 不够——守卫有三段（声明集合 → sanitizeChange
+  // 的 pathsFor → applyDelta 的投影），任何一段断开都等于写不进去。
+  {
+    const before = store.getWorldState(sid, { branchId: 'main' }).length;
+    arch.applyArchivistUpdate({
+      sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex, declaredTargets,
+      update: { changes: [{ kind: 'world', id: 'world', path: 'status', op: 'set', value: '全城戒严' }] },
+    });
+    const ws = store.getWorldState(sid, { branchId: 'main' })
+      .filter((d) => d.entity_kind === 'world' && d.path === 'status');
+    ok(ws.length === 1, '世界局势写入真的落库（不再被目标声明静默拦掉）',
+      `world_state 新增 ${store.getWorldState(sid, { branchId: 'main' }).length - before} 行`);
+    eq(ws[0]?.value, '全城戒严', '世界局势的值原样落库');
+    const graded = effective.buildEffectiveWorld(world.card, ws, []);
+    eq(graded.runtime?.status, '全城戒严', '投影后 world.runtime.status 可读（消费方接得上）');
+  }
 
   const r = arch.applyArchivistUpdate({
     sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex, declaredTargets,
@@ -645,6 +786,77 @@ console.log('\n=== 提案白名单：越界目标拒写并留痕 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 简称指代：introduce 吸收正文前缀 + 变更能对上实体（D13） ===');
+{
+  const sid = `d13-${Date.now()}`;
+  const world = {
+    id: `w13-${Date.now()}`, title: 't',
+    card: schema.normalizeCard({
+      title: 't',
+      entities: [{ type: 'person', name: '伍卿' }],
+    }),
+  };
+  store.saveWorld(world);
+  store.createSession({ id: sid, title: 't', worldId: world.id });
+  store.createBranch(sid, { branchId: 'main' });
+
+  // ① introduce 时把「正文里真出现过」的名字前缀收成别名（纯确定性，不猜）。
+  const intro = arch.sanitizeChange(
+    { kind: 'item', op: 'introduce', fields: { name: '蛇纹圆印纸', summary: '一张旧纸' } },
+    { aliasIndex: schema.buildAliasIndex(world.card), narrative: '我把那张蛇纹纸摊开，纸角发脆。' },
+  );
+  ok(intro.value.aliases?.includes('蛇纹'), '正文里出现过的名字前缀被收成别名');
+  eq(intro.aliases_from_narrative, ['蛇纹'], '吸收了什么进提案里可见');
+  const noNarr = arch.sanitizeChange(
+    { kind: 'item', op: 'introduce', fields: { name: '蛇纹圆印纸' } },
+    { aliasIndex: [], narrative: '我把那张纸摊开。' },
+  );
+  ok(!noNarr.value.aliases, '正文里没出现过就不收（不凭名字自己造简称）');
+  const tooShort = arch.sanitizeChange(
+    { kind: 'item', op: 'introduce', fields: { name: '玉佩' } },
+    { aliasIndex: [], narrative: '玉佩碎了。' },
+  );
+  ok(!tooShort.value.aliases, '三字以下的名字不做前缀吸收（避免「玉」这种噪声）');
+
+  // ② 落地后：正文里的简称能对上实体，变更不再被白名单静默拒掉。
+  const aliasIndex = schema.buildAliasIndex(world.card);
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex, declaredTargets: null,
+    update: { scene_change: {}, changes: [intro] },
+  });
+  const projected = schema.normalizeCard({
+    ...world.card,
+    entities: [...world.card.entities, intro.value],
+  });
+  const aliasIndex2 = schema.buildAliasIndex(projected);
+  const declaredTargets = arch.buildDeclaredTargets({
+    card: projected, present: [], codex: [], ledgerCharacters: [], playerName: '伍卿',
+  });
+  const r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 2, aliasIndex: aliasIndex2, declaredTargets,
+    update: {
+      scene_change: {},
+      changes: [{ kind: 'item', op: 'set', id: '蛇纹纸', path: 'status', value: '被水泡软' }],
+    },
+  });
+  eq(r.changes, 1, '简称变更写进账本（旧实现被 skipped_targets 静默拒）');
+  eq(r.skipped, 0, '不再记为越界目标');
+  const ws = store.getWorldState(sid, { branchId: 'main', atTurn: 2 });
+  ok(ws.some((d) => d.op === 'set' && d.path === 'status' && d.value === '被水泡软'
+    && d.entity_id === intro.entity_id), '落库到正确实体（按简称归一到 id）');
+
+  // ③ 多命中不猜：简称同时指向两个实体时保持原样，仍交给白名单判。
+  const ambiguous = arch.sanitizeChange(
+    { kind: 'item', op: 'set', id: '纸', path: 'status', value: 'x' },
+    { aliasIndex: [
+      { alias: '纸', kind: 'item', id: 'a', name: '甲纸', type: 'item' },
+      { alias: '纸', kind: 'item', id: 'b', name: '乙纸', type: 'item' },
+    ] },
+  );
+  ok(!!ambiguous, '多命中时不清空提案（只不归一）');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 提案审计表 ===');
 {
   const sid = `s-${Date.now()}`;
@@ -663,12 +875,12 @@ console.log('\n=== 提案窗口：按 kind 取数 + 计数不静默截断 ===');
   const sid = `s-patchwin-${Date.now()}`;
   store.createSession({ id: sid, title: 't' });
   store.createBranch(sid, { branchId: 'main' });
-  // 复现长跑的形状：uncertain 每拍 3 条，offstage_event 每拍 1 条，共 10 拍。
+  // 复现长跑的形状：高频类（越界目标，每拍 3 条）+ 低频类（幕外流言，每拍 1 条），共 10 拍。
   for (let t = 1; t <= 10; t++) {
     for (let k = 0; k < 3; k++) {
       store.addPatch(sid, {
-        branchId: 'main', agent: 'archivist', kind: 'uncertain', turn_no: t, status: 'open',
-        payload: { text: `第 ${t} 拍未知项 ${k}` }, severity: 'minor',
+        branchId: 'main', agent: 'archivist', kind: 'skipped_targets', turn_no: t, status: 'skipped',
+        payload: { items: [{ path: `x.${t}.${k}` }] }, severity: 'warn',
       });
     }
     store.addPatch(sid, {
@@ -676,28 +888,148 @@ console.log('\n=== 提案窗口：按 kind 取数 + 计数不静默截断 ===');
       payload: { who: `人物${t}`, what: `第 ${t} 拍幕外`, visibility: 'rumor' }, severity: 'minor',
     });
   }
-  // 混 kind 的 24 条窗口里以 uncertain 为主（复现「流言被挤到最旧的一小撮」）
-  const mixed = store.listPatches(sid, { status: 'open', limit: 24 });
+  // 混 kind 的 24 条窗口里以高频类为主（复现「流言被挤到最旧的一小撮」）
+  const mixed = store.listPatches(sid, { limit: 24 });
   eq(mixed.filter((x) => x.kind === 'offstage_event').length, 6,
-    '混 kind 的 24 条窗口只有 6 条是流言（其余 18 条被 uncertain 占掉）');
+    '混 kind 的 24 条窗口只有 6 条是流言（其余 18 条被高频类占掉）');
   // 按 kind 过滤后，窗口真的属于流言，而且拿到的是最新的
   const rumors = store.listPatches(sid, { status: 'open', kind: 'offstage_event', limit: 24 });
   eq(rumors.length, 10, 'kind 过滤后拿到全部 10 条流言');
   eq(rumors[0].turn_no, 10, '窗口里最新的一条在前');
   eq(store.countPatches(sid, { kind: 'offstage_event' }), 10, '计数按 kind');
-  eq(store.countPatches(sid, { status: 'open' }), 40, '计数不静默截断');
-  const counts = store.patchKindCounts(sid, { status: 'open' });
-  eq(counts.uncertain, 30, '分组计数：uncertain');
-  eq(counts.offstage_event, 10, '分组计数：offstage_event');
+  eq(store.countPatches(sid, { status: 'open' }), 10, '计数不静默截断');
+  const counts = store.patchKindCounts(sid);
+  eq(counts.skipped_targets, 30, '分组计数：高频类');
+  eq(counts.offstage_event, 10, '分组计数：流言');
+  eq(counts.uncertain, undefined, 'uncertain 不再落库（D6：保留出口、不写表）');
   eq(store.countVoices(sid), 0, '原声计数（空表为 0）');
+}
 
-  // 收敛：只保留最近 N 条 open，更旧的置 dismissed（不删行，审计链保留）
-  const retired = store.retirePatchesBeyond(sid, { kind: 'uncertain', keep: 5 });
-  eq(retired, 25, '把超出的 25 条置为 dismissed');
-  eq(store.countPatches(sid, { kind: 'uncertain', status: 'open' }), 5, '只留最近 5 条 open');
-  eq(store.countPatches(sid, { kind: 'uncertain' }), 30, '行没有被删掉（审计链保留）');
-  const keptTurns = store.listPatches(sid, { kind: 'uncertain', status: 'open', limit: 10 }).map((x) => x.turn_no);
-  ok(keptTurns.every((t) => t >= 9), '留下的是最近几拍的');
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
+{
+  const sid = `s-contfix-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const a1 = store.addAssertion(sid, {
+    branch_id: 'main', subject: '伍卿', predicate: '相信', object: '凌玥要走',
+    visibility: 'public', valid_from: 1, turn_no: 1,
+  });
+  const a2 = store.addAssertion(sid, {
+    branch_id: 'main', subject: '伍卿', predicate: '相信', object: '凌玥会留下',
+    visibility: 'public', valid_from: 2, turn_no: 2,
+  });
+  ok(a1 > 0 && a2 > 0, '两条冲突断言落库');
+
+  const issue = (target) => ({
+    kind: 'contradiction', severity: 'major', subject: '伍卿',
+    claim: '两条信念互相冲突', evidence: '第2轮原文',
+    fix: { action: 'invalidate_assertion', target, value: '' },
+  });
+
+  // 提示词把断言渲染成 `#123`（continuityUserPrompt 的 `#${a.id}`），模型照着抄带井号。
+  const n1 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 5, threads: [], aliasIndex: new Map(),
+    issues: [issue(`#${a1}`)],
+  });
+  eq(n1, 1, 'target 带 # 时 fix 真的执行了（旧实现这里恒为 0）');
+  const row1 = store.getAssertions(sid, { branchId: 'main', includeInvalid: true }).find((x) => x.id === a1);
+  eq(row1.status, 'invalidated', '断言被失效而不是删除');
+  eq(row1.valid_to, 5, 'valid_to 记成校勘那一拍');
+
+  // 不带 # 的仍然工作
+  const n2 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 6, threads: [], aliasIndex: new Map(),
+    issues: [issue(String(a2))],
+  });
+  eq(n2, 1, 'target 不带 # 时照旧执行');
+
+  // 脏 target 不执行，且把原因记进 payload（旧实现只记 open，看不出为什么没执行）
+  const n3 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 7, threads: [], aliasIndex: new Map(),
+    issues: [issue('第 3 条断言')],
+  });
+  eq(n3, 0, '非数字 target 不执行');
+  const p = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
+  eq(p.status, 'open', '未执行的提案仍是 open（等人裁决）');
+  eq(p.payload?.fix_result?.state, 'unmatched', '未执行的原因记进 payload（报告能看见为什么 0 执行）');
+
+  /* ---- D15：模型把断言 id 填进 set_state，不能当成状态改写 ---- */
+  // 实测形状：{"action":"set_state","target":"#2036","value":"伍家竹院牛棚"}。
+  // 老逻辑会落到 [subject,'condition'] 兜底 → 把地点写进 condition，
+  // 还给「伍卿的积蓄」这种非人物 subject 造出一个假人物（投影时 emptyPersonEntry）。
+  const a3 = store.addAssertion(sid, {
+    branch_id: 'main', subject: '大黑牛', predicate: '位于', object: '断墙根另一侧',
+    visibility: 'public', valid_from: 1, turn_no: 1,
+  });
+  const stateIssue = (subject, target, value) => ({
+    kind: 'contradiction', severity: 'major', subject,
+    claim: '断言里的位置已经过时', evidence: '第10轮原文',
+    fix: { action: 'set_state', target, value },
+  });
+
+  const n4 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 10, threads: [], aliasIndex: new Map(),
+    issues: [stateIssue('大黑牛', `#${a3}`, '伍家竹院牛棚')],
+  });
+  eq(n4, 1, 'set_state + 断言 id 按 invalidate_assertion 执行（不是写 condition）');
+  const row3 = store.getAssertions(sid, { branchId: 'main', includeInvalid: true }).find((x) => x.id === a3);
+  eq(row3.status, 'invalidated', '过时的断言被失效');
+  const p4 = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
+  eq(p4.payload?.fix_result?.interpreted_as, 'invalidate_assertion', '改写了模型原意要留痕');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['大黑牛'], undefined, '没有把「伍家竹院牛棚」写进人物 condition');
+
+  // 非人物 subject + who::field 形态：拒写并留痕，不造假人物
+  const n5 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 11, threads: [], aliasIndex: [],
+    issues: [stateIssue('伍卿的积蓄', '伍卿的积蓄::condition', '怀里（粗布小包）')],
+  });
+  eq(n5, 0, '非人物 subject 的 set_state 拒写（不造「伍卿的积蓄」这种假人物）');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['伍卿的积蓄'], undefined, 'character_states 里没有假人物');
+  const p5 = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
+  eq(p5.payload?.fix_result?.reason, 'not_a_person', '拒写原因留痕（报告能看见为什么没执行）');
+
+  // 合法形态仍然工作：who::field
+  // aliasIndex 必须是 buildAliasIndex() 产出的数组（`resolveEntity` 用 `.find`）；
+  // 前面几条传 `new Map()` 不会出事，只是因为它们全在 resolveEntity 之前就返回了。
+  const contCard = schema.normalizeCard({ title: 't', entities: [{ type: 'person', name: '大黑牛' }] });
+  const n6 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 12, threads: [], aliasIndex: schema.buildAliasIndex(contCard),
+    issues: [stateIssue('大黑牛', '大黑牛::location', '牛棚')],
+  });
+  eq(n6, 1, 'who::field 的 set_state 照旧执行');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['大黑牛']?.location, '牛棚', '合法字段真的写进去了');
+
+  /* ---- D29：提示词没写清 target 形态，模型写「人物.字段」→ 100% 落空却记 open ---- */
+  // 双局长跑实测：set_state 7 条全部 unmatched，形态分别是 `大黑牛.condition`（点号）、
+  // `凌玥`（裸人名）、`伍卿 —拥有→ 金钱`（把断言三元组填进 target）。
+  const n7 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 13, threads: [], aliasIndex: schema.buildAliasIndex(contCard),
+    issues: [stateIssue('大黑牛', '大黑牛.condition', '平静吃草')],
+  });
+  eq(n7, 0, '点号形态 `人物.字段` 不执行（代码只认 `::`，这是提示词该说清的事）');
+  const p7 = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
+  eq(p7.payload?.fix_result?.state, 'unmatched', '落空原因留痕，不是静默挂 open');
+
+  // merge_alias 从来没有实现分支。提示词已把它从 action 枚举删掉；万一模型仍写出来，
+  // 要能和「形态填错」区分开——否则又是一个「看起来在等人裁决」的死通道。
+  const n8 = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 14, threads: [], aliasIndex: schema.buildAliasIndex(contCard),
+    issues: [{
+      kind: 'alias', severity: 'minor', subject: '东宫玄衣人', claim: '同一实体的两个名字',
+      evidence: '第36-37轮原文', fix: { action: 'merge_alias', target: '2677', value: '东宫玄衣人' },
+    }],
+  });
+  eq(n8, 0, 'merge_alias 不执行（没有这条自动通道）');
+  const p8 = store.listPatches(sid, { kind: 'alias', limit: 5 })[0];
+  eq(p8.payload?.fix_result?.reason, 'not_implemented', 'merge_alias 的落空原因是「没有实现」，不是「填错了」');
+
+  // 提示词必须写明 set_state 的 target 形态，且不能把 merge_alias 列成可用的 action——
+  // 这两条是上面的代码约束在提示词侧的唯一证据，写漏一条就回到 D29。
+  const contPrompt = continuitySystemPrompt();
+  ok(contPrompt.includes('::'), '校勘提示词写明了 `人物::字段` 分隔符');
+  ok(!/action[^\n]*merge_alias/.test(contPrompt), '校勘提示词的 action 枚举里没有 merge_alias');
+  ok(contPrompt.includes('merge_alias') === false, '提示词完全不再提 merge_alias（避免模型照抄）');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -768,11 +1100,16 @@ console.log('\n=== 世界状态：变更校验 ===');
   );
   eq(oddDeath.path, 'status', '枚举外的生死值回退 status（保留信息）');
   eq(oddDeath.value, '战死', '回退后原文仍在');
+  // 玩家**没有** life_state（D14）：主角不会「这一场不在镜头里」，离场整场戏就结束了。
+  // 没有消费方读 player.life_state（absentees 只挑 type==='person'），
+  // 曾经放行的后果是史官写一条 gone 之后 `card.player.life_state` 永久停在 gone。
   const playerHurt = arch.sanitizeChange(
     { kind: 'player', id: '伍卿', path: 'life_state', op: 'set', value: 'injured' },
     { aliasIndex: idx, playerName: '伍卿' },
   );
-  eq(playerHurt.value, 'injured', '玩家也支持 life_state');
+  eq(playerHurt, null, '玩家没有 life_state 这条路（D14：主角不会离场）');
+  ok(!pathsFor('player').has('life_state'), 'PLAYER_SCALARS 不含 life_state');
+  ok(pathsFor('person').has('life_state'), '人物仍然有 life_state（受控值不变）');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -864,16 +1201,57 @@ console.log('\n=== 数值账本：模型只报变化量，加减与余额由代�
   });
   eq(project(2).player.money, 45.5, '再次 delta 累加到同一余额');
 
-  // 余额不会被扣成负数：整条拒绝，并留可查的拒绝记录（不静默 clamp 成 0）。
+  // 余额可以扣成负数（欠债）：**照常落库**，并记进 overdrafts 供报告看见（D11）。
+  // 旧实现整条拒绝且不改正基准，prev=0 时任何负数都被拒 → 余额永久卡在 0，
+  // 模型看不到余额也看不到被拒，只能照正文里的账继续花钱（实测公开矛盾 19 拍）。
   arch.applyArchivistUpdate({
     sessionId: sid, branchId: 'main', turnNo: 3, aliasIndex: [], playerName: '伍卿',
     update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: -100 }] },
   });
   const eff3 = project(3);
-  eq(eff3.player.money, 45.5, '超支的 delta 不把余额写成负数');
-  ok((eff3.rejected_deltas || []).some((r) => r.reason === 'negative' && r.path === 'money'),
-    '被拒的数值增量留下 rejected_deltas 证据');
-  ok(!String(eff3.rejected_deltas?.[0]?.reason || '').includes('__'), '拒绝记录用可序列化的键名，不进提示词');
+  eq(eff3.player.money, -54.5, '超支的 delta 落成负余额（欠债），不再被拒绝');
+  ok((eff3.overdrafts || []).some((r) => r.path === 'money' && r.next === -54.5),
+    '负余额留下 overdrafts 证据（报告能看见「开始欠债」）');
+  eq((eff3.rejected_deltas || []).filter((r) => r.reason === 'negative').length, 0,
+    '负数不再走 rejected_deltas（那是「模型输出错」的口径，不是「钱不够」）');
+
+  // 关键：被拒之后基准不前进才是死锁的成因。现在负余额可写，后续负数继续正常累加。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 4, aliasIndex: [], playerName: '伍卿',
+    update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: -10 }] },
+  });
+  eq(project(4).player.money, -64.5, '负余额之后继续扣钱仍然生效（旧实现这里永久卡在 0）');
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 5, aliasIndex: [], playerName: '伍卿',
+    update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: 70 }] },
+  });
+  eq(project(5).player.money, 5.5, '还债后回到正数');
+
+  // 非数字仍然是拒绝（那是模型输出错，不是世界状态）——在 sanitize 阶段就被挡下，
+  // 所以既不会写库，也不会产生 rejected_delta（rejected_delta 只留给「进到写数层的非法值」）。
+  arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 6, aliasIndex: [], playerName: '伍卿',
+    update: { changes: [{ kind: 'player', id: 'player', path: 'money', op: 'delta', value: '很多' }] },
+  });
+  const eff6 = project(6);
+  eq(eff6.player.money, 5.5, '非数字 delta 被拒，余额不变');
+  eq((eff6.rejected_deltas || []).length, 0, '非数字在 sanitize 阶段就挡下，不到写数层');
+
+  // 渲染层：负余额必须显示「欠 X」，不能显示成 0 或隐藏。
+  {
+    const sheetMod = await import('../server/world/scene-sheet.js');
+    const sheet = sheetMod.renderSceneSheet({
+      ledger: { time: '次日', place: '镇上', present: ['伍卿'] },
+      present: [], playerNow: { name: '伍卿', money: -54.5 }, capTokens: 4000,
+    });
+    ok(String(sheet.text || '').includes('欠 54.5'), '场记单把负余额渲染成「欠 X」');
+    const pos = sheetMod.renderSceneSheet({
+      ledger: { time: '次日', place: '镇上', present: ['伍卿'] },
+      present: [], playerNow: { name: '伍卿', money: 5.5 }, capTokens: 4000,
+    });
+    ok(String(pos.text || '').includes('银钱 5.5') && !String(pos.text || '').includes('欠'),
+      '正余额照旧渲染成「银钱 X」，不带「欠」');
+  }
 
   // 数值路径的判定只看白名单，不看模型吐出的字面量：给 status 塞数字不能把它变成数字。
   const dirty = arch.sanitizeChange(
@@ -1060,6 +1438,78 @@ console.log('\n=== 生死交叉校正：场记读整场原文，补史官漏掉�
   eq(pipe.applyLifeChanges({
     sessionId: sid, branchId: 'main', turnNo: 3, world: { card }, lifeChanges: [],
   }).length, 0, '没有生死变化就不写库');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== gone 的回程通道（D10）===');
+{
+  const sid = `s-gone-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const card = schema.normalizeCard({
+    title: 't',
+    entities: [
+      { id: 'ling-yue', type: 'person', name: '凌玥', aliases: ['玥姐姐'] },
+      { id: 'xie-mu', type: 'person', name: '谢沐' },
+    ],
+  });
+  // t19：凌玥离场（长跑里的原样）
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 19 });
+
+  // 场记这个「第二见证人」不再被 gone 永久挡住：gone → alive 必须放行（旧实现 continue）。
+  const back = pipe.applyLifeChanges({
+    sessionId: sid, branchId: 'main', turnNo: 25, world: { card },
+    outcome: '凌玥跟到镇上，站在药店门口', sceneId: 'S006',
+    lifeChanges: [{ who: '凌玥', life_state: 'alive' }],
+  });
+  eq(back.length, 1, '场记能把 gone 改回 alive（旧实现被 continue 永久挡住）');
+  eq(back[0].from, 'gone', '记下前值 gone');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'alive', 'gone 不再是终态');
+
+  // dead 仍是终态：场记不能把死人写活。
+  store.setCharState(sid, { branchId: 'main', who: '谢沐', field: 'life_state', value: 'dead', turn: 7 });
+  const noRevive = pipe.applyLifeChanges({
+    sessionId: sid, branchId: 'main', turnNo: 30, world: { card },
+    lifeChanges: [{ who: '谢沐', life_state: 'alive' }],
+  });
+  eq(noRevive.length, 0, 'dead 仍是终态，场记不能把死人写活');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['谢沐'].life_state, 'dead', 'dead 不被覆盖');
+
+  // ---- 当拍回程：玩家点名 —— 代码补写 alive，而不是靠模型 ----
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 26 });
+  const revived = pipe.reviveNamedGone({
+    sessionId: sid, branchId: 'main', turnNo: 33, world: { card },
+    playerText: '把陆可的话原样告诉凌玥。',
+  });
+  eq(revived.length, 1, '玩家点名 gone 的人 → 代码写回 alive');
+  eq(revived[0].who, '凌玥', '写回的是被点名的那个人');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'alive', 'life_state 已回写');
+  ok(store.listPatches(sid, { branchId: 'main', limit: 80 })
+    .some((p) => p.kind === 'life_state_revived' && p.payload?.who === '凌玥'),
+  '回程留了 life_state_revived 审计');
+
+  // 只处理 gone：dead 的人被点名也不复活（死人回来必须模型显式写）。
+  const deadNamed = pipe.reviveNamedGone({
+    sessionId: sid, branchId: 'main', turnNo: 34, world: { card },
+    playerText: '我去找谢沐。',
+  });
+  eq(deadNamed.length, 0, 'dead 的人被点名也不复活（与 gone 区别对待）');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['谢沐'].life_state, 'dead', '谢沐仍是 dead');
+
+  // 只认玩家点名：旁白式提及（不经过 playerText）不该触发。
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 35 });
+  eq(pipe.reviveNamedGone({
+    sessionId: sid, branchId: 'main', turnNo: 36, world: { card }, playerText: '我继续赶路。',
+  }).length, 0, '玩家没点名就不回程');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'gone', '没点名时保持 gone');
+
+  // 别名也算点名（红线 2 的实体链接本来就认别名）。
+  const aliasRevive = pipe.reviveNamedGone({
+    sessionId: sid, branchId: 'main', turnNo: 37, world: { card },
+    playerText: '我问玥姐姐那封信的事。',
+  });
+  eq(aliasRevive.length, 1, '用别名点名也回程');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'alive', '别名回程生效');
 }
 
 {

@@ -28,9 +28,15 @@ const FACT_SCALARS = [
   'reveal', 'facets.sensory',
 ];
 
+// 玩家**没有** life_state：主角不会「这一场不在镜头里」，他离场整场戏就结束了。
+// 曾经放行过，后果是史官偶尔写一条 `player/player life_state='gone'`，
+// 投影后 `card.player.life_state` 永久停在 gone（D14：50 拍里抽检到 t6 写入、
+// 直到 t8 也没被清掉），场记单每拍印「已故／离场：主角」。没有任何消费方读它——
+// `absentees` 只挑 type==='person'，player 不是实体。所以按 §5.3「加新的数值路径
+// 必须先有消费方」的口径，直接不给这条路，而不是加特判。
 const PLAYER_SCALARS = [
   'situation', 'capability', 'inner_voice', 'wants', 'afraid', 'age', 'identity',
-  'status', 'condition', 'mood', 'location', 'goal', 'life_state',
+  'status', 'condition', 'mood', 'location', 'goal',
 ];
 
 // 时间/地点/天气/张力属于场次账本（states），不在这里重复维护。

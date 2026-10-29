@@ -17,7 +17,7 @@
  */
 
 import { buildWorldGraph } from './graph.js';
-import { renderWorldTree } from './scene-sheet.js';
+import { THREAD_RENDER_MAX, renderWorldTree } from './scene-sheet.js';
 
 /**
  * 世界索引的名义容量：与 renderWorldTree 默认 cap 对齐。
@@ -26,6 +26,16 @@ import { renderWorldTree } from './scene-sheet.js';
  * 必须用运行期同一个渲染器（tree）：平铺会多算出一批其实能进树的实体。
  */
 const INDEX_NOMINAL_TOKENS = 1200;
+
+/**
+ * 运行时至少该剩几个新挖钩子的额度（D5 可见性）。
+ *
+ * 判定口径：`THREAD_RENDER_MAX - seeds.length <= 这个数` 就要提醒作者。
+ * 取 2 的依据是长跑实测——`nvzun-jianpolan` 的 6 条 seeds 让运行时只剩 2 条，
+ * 45 拍里 open 一直贴着 8 条上限，A 局正是靠 t31 回收两条种子才腾出空间多埋进 2 条。
+ * 这是经验阈值：它只影响"要不要提醒"，不参与装配、不改上限（上限仍是渲染事实）。
+ */
+const RUNTIME_ROOM_MIN = 2;
 
 const stripRef = (v) => String(v || '').trim().replace(/^(?:cast|codex|entity):/, '');
 const isPerson = (e) => e?.type === 'person';
@@ -226,6 +236,32 @@ export function lintCard(card) {
       `世界索引在 ${INDEX_NOMINAL_TOKENS} tok 名义容量下放不下 ${notInIndex.length}/${entities.length} 个实体`
       + `（如 ${notInIndex.slice(0, 5).map((e) => e.name).join('、')}）：它们不会自动出现在系统层，演绎时容易被当成不存在`,
       { ids: notInIndex.slice(0, 20).map((e) => e.id), dropped: notInIndex.length });
+  }
+
+  /* ---- 预埋伏笔超出线索账本的渲染容量（major）----
+   * 线索账本有 WIP 上限（`THREAD_RENDER_MAX`，场记单最多渲染这么多条 open），
+   * 也就是说超过这个数的预埋伏笔**开局就不可能出现在场记单里**，模型看不见、
+   * 只能靠正文偶然撞上才回收。这是制卡期的问题（作者埋了 20 条钩子），不是运行时 bug，
+   * 但必须报出来，否则作者会以为那些伏笔在生效。 */
+  const seeds = Array.isArray(card.seeds) ? card.seeds : [];
+  if (seeds.length > THREAD_RENDER_MAX) {
+    push('major', 'seeds_over_thread_capacity',
+      `预埋伏笔 ${seeds.length} 条，超过线索账本容量 ${THREAD_RENDER_MAX} 条：`
+      + `第 ${THREAD_RENDER_MAX + 1} 条起开局就不会出现在场记单里，模型看不见`
+      + `（它们仍在卡里，可被正文偶遇）。要么减到 ${THREAD_RENDER_MAX} 条以内，要么把它们拆成「前史事实」而不是伏笔`,
+      { dropped: seeds.length - THREAD_RENDER_MAX });
+  } else if (THREAD_RENDER_MAX - seeds.length <= RUNTIME_ROOM_MIN) {
+    /* ---- 预埋伏笔吃掉了大部分运行时额度（minor，D5 可见性）----
+     * 没超容量，所以两件事都成立：这些伏笔开局全都看得见，同时**本局能新挖的钩子
+     * 只剩个位数里的几条**。额度本身不是 bug（总数 ≤ 8 是渲染事实），
+     * 但作者不该在制卡时看不见这个交换——它决定了这张卡跑起来是「玩家线长钩子」
+     * 还是「围着作者预埋的主线转」。只提醒，不拦保存。 */
+    const room = THREAD_RENDER_MAX - seeds.length;
+    push('minor', 'seeds_eat_runtime_room',
+      `预埋伏笔 ${seeds.length} 条，占掉线索账本 ${THREAD_RENDER_MAX} 个额度里的 ${seeds.length} 个：`
+      + `本局运行时最多再新挖 ${room} 条（到顶后史官埋线索会被拒并记 patches(kind='thread_rejected')）。`
+      + `想给玩家线留更多空间，就减几条 seeds，或把不打算在这一局回收的降成「前史事实」`,
+      { seeds: seeds.length, runtime_room: room });
   }
 
   /* ---- 仅供作者参考的改编元数据（info）----

@@ -22,9 +22,10 @@ import { resolveAgent } from '../model-registry.js';
 import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId, runEffectOnce } from '../memory/branch-guard.js';
 import { buildPlayerView } from '../memory/player-view.js';
 import { recallHistory } from '../memory/recall-history.js';
+import { recallVisibleFrom } from '../memory/context-engine.js';
 import {
   accumulateUsage, addPatch, addTurn, copyBranchState, createBranch, createSession,
-  getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession,
+  getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession, latestScene,
   getState, getThreads, getTurnsForBranch, getWorld, getWorldState, listBranches, saveWorld,
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
   upsertRelation,
@@ -127,7 +128,20 @@ async function runTurnInner({
   // auto = 只在大卡上开；会话 settings.codex_retrieval 可强制 on/off。
   let retrieval = null;
   const retrievalMode = session.settings?.codex_retrieval || 'auto';
-  const factCount = (world?.card?.entities || []).filter((e) => !isPerson(e)).length;
+  // 两个通道的判定都必须用**投影后的卡**，不是冻结的模板卡。
+  // 理由：D4 的历史通道由「点名了人」触发，而运行期 introduce 出来的 NPC 只存在于
+  // world_state 增量里；拿模板卡建别名索引，玩家点名「卖炭翁张三」永远匹配不到，
+  // 「老朋友重逢」这个原始动机场景反而触发不了。辞书计数同理——`introduce` 也能新增设定集条目。
+  // 投影成本实测 1.6ms/次（109 行增量），只为判定多算一次不值得省。
+  const effectiveForRetrieval = world?.card
+    ? buildEffectiveWorld(
+      normalizeCard(session.card_snapshot || world.card || {}),
+      getWorldState(sessionId, { branchId, atTurn: Math.max(0, turnNo - 1) }),
+      [],
+    )
+    : null;
+  const retrievalCard = effectiveForRetrieval || world?.card || null;
+  const factCount = (retrievalCard?.entities || []).filter((e) => !isPerson(e)).length;
   // 分段模式自带 codex_lookup，不再额外跑检索预检，避免同一拍查两次。
   const wantRetrieval = narrationMode !== 'segmented' && !isOpening
     && shouldPrecheckRetrieval({
@@ -136,16 +150,50 @@ async function runTurnInner({
       minCodex: config.context.retrievalMinCodex,
       playerText,
       branchChoice,
-      card: world?.card || null,
+      card: retrievalCard,
     });
   if (wantRetrieval && !signal?.aborted) {
     try {
       const ledger = getState(sessionId, { branchId, atTurn: Math.max(0, turnNo - 1) })?.state || null;
-      retrieval = await runRetrieval({ card: world?.card || null, playerText, ledger, signal });
+      // 上一拍正文：资料员判断「这一拍要不要回查历史」时唯一的锚点。
+      // 不传的话提示词里的【上一拍结尾】永远是空，它只能凭玩家这一句瞎猜。
+      const lastNarrative = getTurnsForBranch(sessionId, branchId, branch?.fork_turn ?? null, {
+        from: Math.max(0, turnNo - 1), to: Math.max(0, turnNo - 1), kinds: ['narrator'],
+      }).map((t) => t.content).join('\n');
+      // 上下文里已经逐字可见的那几拍不必再查（D4 后验）：不设这条下界，
+      // 模型会拿「这一拍刚说的话」当查询词，搜回来的就是它眼前已经有的东西。
+      // 起点与装配层共读 recallVisibleFrom()（同一个 overlapWindowFrom），不各写一份规则。
+      // 场次边界只认「本轮之前已封场」的：scenes 表每行都是一场，最新一行就是边界。
+      const closedTo = Math.min(
+        Number(latestScene(sessionId, branchId)?.turn_to) || 0,
+        Math.max(0, turnNo - 1),
+      );
+      const excludeFrom = recallVisibleFrom(closedTo, turnNo, config.context.recentOverlapTurns);
+      retrieval = await runRetrieval({
+        card: retrievalCard, playerText, ledger, lastNarrative, signal,
+        // 历史回查要按分支可见性过滤：不能查到废弃线上的原文。
+        sessionId, branchId, forkTurn: branch?.fork_turn ?? null, atTurn: Math.max(0, turnNo - 1),
+        excludeFrom,
+      });
       trackUsage('retrieval', retrieval?.usage);
     } catch (err) {
       if (err?.name === 'AbortError') throw err;
       console.warn(`[orchestrator] 检索预检失败：${err?.message || err}`);
+    }
+  }
+
+  // 2.2) `gone` 的回程通道（D10-A）：玩家这一拍点名了某个被标成「已离场」的人，
+  // 说明她已经回到镜头里了。模型看不见 life_state，不会自己写回；由代码按
+  // 「玩家点名」这个已经算出来的信号补一次，并留 life_state_revived 审计。
+  // 只认 playerText（不认旁白顺带提及），只处理 gone（dead 必须模型显式写回）。
+  // 必须在装配之前：写回的 life_state 要能在这一拍的场记单里生效。
+  // 不新增 SSE 事件：审计落在 patches，报告与记忆面板都能读。
+  if (!isOpening && world?.card) {
+    try {
+      const { reviveNamedGone } = await import('./memory-pipeline.js');
+      reviveNamedGone({ sessionId, branchId, turnNo, world, playerText });
+    } catch (err) {
+      console.warn(`[orchestrator] gone 回程失败：${err?.message || err}`);
     }
   }
 
@@ -333,9 +381,12 @@ async function runTurnInner({
     memoryStats = arch;
     if (!archRun.skipped) trackUsage('archivist', arch.usage);
 
-    // 数值增量被拒（值不是数字 / 加减后余额为负）：不 clamp、不静默吞，落成 patch 供排查。
+    // 数值增量被拒（值不是数字）：不 clamp、不静默吞，落成 patch 供排查。
     // 必须在本轮 delta 写完之后重新投影一次——装配时那份 card 是 turnNo-1 的，
     // 拿它看不到本轮刚写进去的 delta。只有本轮真写过数值路径才需要投影。
+    //
+    // 余额转负**不再**算拒绝（D11）：它照常落库、渲染成「欠 X」，这里记成
+    // `overdrawn` 只是留痕（正文里真的开始欠债了，报告该看得见）。
     if (!archRun.skipped) {
       const turnDeltas = getWorldState(sessionId, { branchId, atTurn: turnNo })
         .filter((d) => Number(d.turn ?? d.valid_from) === turnNo);
@@ -350,6 +401,14 @@ async function runTurnInner({
             branch_id: branchId, agent: 'archivist', kind: 'rejected_delta', turn_no: turnNo,
             status: 'failed', severity: 'warn', payload: r,
             evidence: `${r.path || ''} ${r.op || ''} ${r.value ?? ''}`.trim(),
+          });
+        }
+        for (const r of projected.overdrafts || []) {
+          if (Number(r.turn) !== turnNo) continue;
+          addPatch(sessionId, {
+            branch_id: branchId, agent: 'archivist', kind: 'overdrawn', turn_no: turnNo,
+            status: 'applied', severity: 'info', payload: r,
+            evidence: `${r.path || ''} ${r.prev} ${r.value >= 0 ? '+' : ''}${r.value} = ${r.next}`.trim(),
           });
         }
       }
@@ -449,7 +508,8 @@ async function runTurnInner({
         state: st?.state || null,
         recentNarrative: narrative,
         present: context.meta?.present || [],
-        sceneSheet: context.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '',
+        sceneSheet: context.branchSheet
+          || context.messages.find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '',
         craft: context.craft || null,
         options: options.branch || {},
         signal,
@@ -497,7 +557,7 @@ async function runTurnInner({
  * 装配清单：把「这一轮模型看到了什么、为什么」写进 turns.meta_json。
  * 只存摘要级信息（层预算、在场、辞书候选与原因、降级标记），不存正文。
  */
-function buildAssemblyMeta(context, narrator) {
+export function buildAssemblyMeta(context, narrator) {
   const meta = context?.meta || {};
   const budget = context?.budget || {};
   // 生效的 narrator 参数（DB 绑定优先于 .env）；这里记录的是配置来源，不是单次覆盖。
@@ -508,10 +568,48 @@ function buildAssemblyMeta(context, narrator) {
     codex: meta.codex || [],
     theme_tags: meta.theme_tags || [],
     facts: meta.facts ?? 0,
+    // 断言真正进了提示词的是 `selectFacts` 的结果，不是 `getAssertions` 的返回。
+    // 「单值谓词全渲染、多值谓词只留 manyLimit 条」这一步此前完全没有落库，
+    // 于是报告只能看到 SQL `LIMIT 300` 那道窗，看不到窗内还有 5–10 倍的丢弃
+    // （实测 t31：窗口内 123 条断言，实际渲染 24 条）。与 layers_truncated 同类，
+    // 必须在白名单里，否则算出来也读不到。
+    facts_candidates: meta.facts_candidates ?? 0,
+    facts_single: meta.facts_single ?? 0,
+    facts_many_rendered: meta.facts_many_rendered ?? 0,
+    facts_many_dropped: meta.facts_many_dropped ?? 0,
+    // D9 之后多值条数由场记单配额推导，不是一个常量。把它记下来才能区分
+    // 「预算小所以渲染少」和「又退回写死 24 了」——报告里只看渲染数分不清这两者。
+    facts_many_limit: meta.facts_many_limit ?? null,
+    // 关系同理（D17）：`LIMIT 60` 只是加载量，真正决定模型看见什么的是渲染上限；
+    // 只记 loaded/window 会让「8 条已经填满」在报告里显示成「8/60 还很空」。
+    relations_limit: meta.relations_limit ?? null,
+    relations_rendered: meta.relations_rendered ?? null,
     world_state_changes: meta.world_state_changes ?? 0,
     timeline_past: meta.timeline_past ?? 0,
     timeline_future_held: meta.timeline_future_held ?? 0,
+    // 实体链接命中了谁（红线 2 的唯一字符串匹配出口，D24）：报告里追问
+    // 「这个人为什么在场/为什么不在场」时，这是唯一的证据。
+    mentioned: meta.mentioned || null,
+    // 实体图规模（D24）：大卡的边数直接决定图遍历成本与「谁说认识谁」的可用性。
+    graph: meta.graph || null,
     codex_total: meta.codex_total ?? 0,
+    // 辞书两道出口的丢弃数（D24）：全文 codexT0 基本全渲染，但**简报** codexT1
+    // 只取 floor(sceneCap*0.2/40) 条（200K 窗口下 112 条），51 拍实测丢了 4840/10552
+    // = 46%，而这三个数此前一个都没落库——和 D3/D9/D17 同形：一个写死的上限，
+    // 报告量不到，就一直显示健康。
+    codex_candidates: meta.codex_candidates ?? null,
+    codex_rendered: meta.codex_rendered ?? null,
+    codex_dropped: meta.codex_dropped ?? null,
+    codex_brief_candidates: meta.codex_brief_candidates ?? null,
+    codex_brief_rendered: meta.codex_brief_rendered ?? null,
+    // 渲染前体检的干预记录（D24）：lint-state 会从 present 里剔人、改物品持有人。
+    // 51 拍实测 8 拍发生干预（全是「gone 的凌玥被剔出在场」，其中 4 拍玩家当拍名了她），
+    // 但 state_fixes 从未落库，报告里连一行都没有——D10 那类缺陷正是靠它才看得见。
+    state_fixes: meta.state_fixes || [],
+    state_warnings: meta.state_warnings || [],
+    // 成长曲线（D24）：total / unlocked / omens 三个数此前也没落库，
+    // 于是「这条曲线一次都没解锁过」在报告里同样看不见。
+    fates: meta.fates || null,
     branch: meta.branch || null,
     degraded: meta.degraded || [],
     summary: meta.summary || null,
@@ -532,6 +630,10 @@ function buildAssemblyMeta(context, narrator) {
     // 只在装配出口存在、不落库的话，事后无法回答「这一拍到底给了模型什么」。
     messages: meta.messages || [],
     scene_sheet: meta.scene_sheet || null,
+    // SQL 层截断可见化（D3）：断言/关系/线索各取了窗口里的多少行、库里共有多少行。
+    // 必须在白名单里，否则上面算出来的数字永远落不了库——报告读不到就等于没做
+    // （初版就漏了这一条：`meta.layers_truncated` 已产出，`turns.meta_json` 里没有）。
+    layers_truncated: meta.layers_truncated || null,
     model: narrator?.model || null,
     effort: narratorAgent.effort,
     temperature: narratorAgent.temperature,
@@ -545,7 +647,8 @@ function summarizeMemory(sessionId, arch, context = null, branchId = 'main') {
   return {
     ...arch.applied,
     scene_change: arch.scene_change,
-    uncertain: arch.uncertain || [],
+    // `uncertain` 是史官自述的「正文没明说」清单，用完即弃：没有消费方，
+    // 既不落库也不再经 SSE 外发（见 archivist.js 的「未确定项」注释）。
     stale: !!arch.stale,
     summary: context?.meta?.summary || null,
     retrieval: context?.meta?.retrieval || null,
@@ -856,3 +959,5 @@ export async function auditSession({ sessionId, signal }) {
   if (!report.stale) lastContinuity.set(sessionId, report);
   return report;
 }
+
+

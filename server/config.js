@@ -54,6 +54,13 @@ export const config = {
     // 实体链接扫描最近几轮原文（只用于「玩家提到了谁」，不用于触发设定）
     loreScanDepth: int(env.LORE_SCAN_DEPTH, 8),
 
+    // 封场后仍逐字带上的回合数（0 = 关）。
+    // 场次内原文本来就完整；问题是**封场那一刻**整场逐字原文全部消失，只剩索引一行，
+    // 上一拍的用词/句长/引号风格全丢。长跑实测引号风格逐拍随机、13 次切换里 9 次
+    // 正发生在原文窗口为空时。重叠 2 拍 = 还能看出「一来一回」，成本约软目标的 2%。
+    // 按**回合**（turn_no）算，不按消息条数：一个回合本来就含 player+narrator 两条行。
+    recentOverlapTurns: int(env.RECENT_OVERLAP_TURNS, 2),
+
     // 后台 Agent 节奏
     continuityEvery: int(env.CONTINUITY_EVERY, 10),   // 每 N 轮跑一次校勘
     continuityMaxApplied: int(env.CONTINUITY_MAX_APPLIED, 20), // 单次校勘最多自动落库几条

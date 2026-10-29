@@ -833,6 +833,14 @@ export function getRelations(sessionId, { branchId = null, limit = 60 } = {}) {
   return getDb().prepare(sql).all(...params);
 }
 
+/** 关系行数（同 `countAssertions`：只给截断可见化用）。 */
+export function countRelations(sessionId, { branchId = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM relations WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
 export function upsertThread(sessionId, t) {
   const now = Date.now();
   const branchId = t.branch_id || 'main';
@@ -891,8 +899,19 @@ export function getThreads(sessionId, { branchId = null, status = null, limit = 
   if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
   if (status) { sql += ` AND status=?`; params.push(status); }
   sql += ` ORDER BY status ASC, weight DESC, updated_at DESC LIMIT ?`;
+  // `limit = -1` = 不设上限（SQLite 的 LIMIT -1 就是这个意思）。
+  // 只给「必须看见全部」的调用方用（校勘的回收靶池）；渲染/提示词路径一律给正数。
   params.push(limit);
   return getDb().prepare(sql).all(...params);
+}
+
+/** 线索行数（同 `countAssertions`：只给截断可见化用）。 */
+export function countThreads(sessionId, { branchId = null, status = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM threads WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -1456,6 +1475,33 @@ export function getAssertions(sessionId, {
   return getDb().prepare(sql).all(...params);
 }
 
+/**
+ * 断言行数（与 `getAssertions` 同口径但去掉 limit）。
+ *
+ * **只给「截断可见化」用**：装配层给 `getAssertions` 的 300 条是 SQL 层截断，
+ * 被挡在外面的行根本进不了进程，`meta.facts_many_dropped` 只能统计 300 之内的再丢弃。
+ * 于是「断言长到看不见」这件事在报告里永远显示为健康（O-长跑实测）。有了这个计数，
+ * 装配层才能说「我看见了 300 条，库里共有 N 条」。
+ *
+ * **必须传 `atTurn` 才是同一口径**：装配层用的是 `atTurn` 回溯（按有效期窗口筛，
+ * 很久以前成立、当拍已失效的断言也算在窗口里），与「只数 status='active'」不是一回事。
+ * 只数 active 会让 total 小于 loaded——报告上表现为「看见的比库里还多」，判据自相矛盾。
+ * 不传 atTurn 时退回 active 口径（历史调用方/测试用）。
+ */
+export function countAssertions(sessionId, { branchId = null, atTurn = null, includeInvalid = false } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM assertions WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (atTurn != null) {
+    // 与 getAssertions 的 atTurn 分支逐字同口径：有效期窗口 + 排除 retracted。
+    sql += ` AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) AND status<>'retracted'`;
+    params.push(atTurn, atTurn);
+  } else if (!includeInvalid) {
+    sql += ` AND status='active'`;
+  }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
 /** 找出与待写入断言冲突的旧断言：同主同谓、对象不同、有效期重叠。 */
 export function findConflictingAssertions(sessionId, { branchId, subject, predicate, object, validFrom }) {
   if (!subject || !predicate || !object) return [];
@@ -1535,6 +1581,42 @@ export function getVoices(sessionId, { branchId = null, who = null, limit = 40, 
   return getDb().prepare(sql).all(...params);
 }
 
+/**
+ * 原声的「按人取最近 N 条」版本。
+ *
+ * D23：旧实现是 `getVoices(limit: 400)` 再在内存里按人切前 N 条——那 400 是**跨所有人的
+ * 全局窗口**，长跑会顶穿：实测 d7a6f899 每拍新增 4.88 行，第 82 拍就填满 400 行，
+ * 之后窗口只保留「最近 82 拍里说过话的人」，久没开口的角色（谢沐 t7、陆可 t31）
+ * 整段掉出窗口、声线永久消失，而这件事在任何 meta 里都看不见。
+ *
+ * 现在用窗口函数在 SQL 里按人分区取前 N 条：**每人各自最近 N 条，与总行数无关**。
+ * `perWho` 是唯一的上限，语义与调用方 `voices[who].slice(0, 2)` 的渲染上限一致。
+ * 保留 `pinned` 优先（作者钉选的台词必须能进）。
+ */
+export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
+  const n = Math.max(1, Number(perWho) || 3);
+  const sql = `
+    SELECT who, text, turn_no, pinned FROM (
+      SELECT who, text, turn_no, pinned,
+             ROW_NUMBER() OVER (PARTITION BY who ORDER BY pinned DESC, turn_no DESC, id DESC) AS rn
+        FROM voices
+       WHERE session_id=${branchId ? '?' : '?'}${branchId ? ' AND branch_id=?' : ''}
+    ) WHERE rn <= ?
+    ORDER BY who ASC, rn ASC
+  `;
+  const params = [sessionId];
+  if (branchId) params.push(branchId);
+  params.push(n);
+  const rows = getDb().prepare(sql).all(...params);
+  const out = {};
+  for (const r of rows) {
+    if (!r.who) continue;
+    out[r.who] = out[r.who] || [];
+    out[r.who].push({ text: r.text, turn_no: Number(r.turn_no) || 0, pinned: !!r.pinned });
+  }
+  return out;
+}
+
 /** 台词样本总数（`getVoices` 带 limit，面板需要知道列表之外还有多少）。 */
 export function countVoices(sessionId, { branchId = null } = {}) {
   let sql = `SELECT COUNT(*) AS c FROM voices WHERE session_id=?`;
@@ -1549,28 +1631,6 @@ export function setVoicePinned(sessionId, id, pinned) {
 
 export function deleteVoice(sessionId, id) {
   return Number(getDb().prepare(`DELETE FROM voices WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
-}
-
-/**
- * 每个 who 最近 n 条原声，**最近的在前**，且保留 turn_no。
- *
- * 旧实现返回 {who: [text]}，把轮次丢掉了，装配层只好写死 turn_no:0，
- * 渲染出来是「第0轮」——出处信息是假的，模型无法判断这是什么时候说的话。
- *
- * 顺序约定：本函数返回「最新 → 最旧」。需要顺着剧情读的渲染方自行 reverse。
- * 因为 `perWho` 的语义是「最近 N 条」，slice(0,2) 必须拿到最新的那条。
- */
-export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
-  const rows = getVoices(sessionId, { branchId, limit: 400 });
-  const out = {};
-  for (const r of rows) {
-    if (!r.who) continue;
-    out[r.who] = out[r.who] || [];
-    if (out[r.who].length < perWho) {
-      out[r.who].push({ text: r.text, turn_no: Number(r.turn_no) || 0, pinned: !!r.pinned });
-    }
-  }
-  return out;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -1594,9 +1654,9 @@ export function addPatch(sessionId, p) {
 /**
  * 列出提案，新的在前。
  *
- * `kind` 用于「窗口式取数」：`uncertain` 这类只留痕、无消费方的提案
- * 会以每拍 3–5 条的速率把窗口挤满（实测 65 拍后 open 窗口 24 条里 17 条是它），
- * 让真正的消费者（场记单的幕外流言）只能看到最旧的一小撮。调用方要么给 kind，
+ * `kind` 用于「窗口式取数」：不同 kind 的产出速率差两个数量级，混在一起的固定窗口
+ * 会被高频类挤满（实测幕外流言 24 条窗口里只剩 6 条是真流言），
+ * 让真正的消费者只能看到最旧的一小撮。调用方要么给 kind，
  * 要么自己接受「翻到哪条算哪条」。
  */
 export function listPatches(sessionId, { branchId = null, status = null, kind = null, limit = 50 } = {}) {
@@ -1622,10 +1682,9 @@ export function countPatches(sessionId, { branchId = null, status = null, kind =
 
 /**
  * 按 kind 分组计数。
- *
- * 面板要按类分堆显示（矛盾 / 知识越界 / 待确认 …）：混在一起时数量最大的那一类
- * （实测 `uncertain` 在 65 拍后占 open 提案的九成）会把真正需要人工处置的少数几条
- * 挤出可视范围。分组计数让面板能说「这一类共 N 条，显示最近 M 条」。
+ * 面板要按类分堆显示（矛盾 / 知识越界 / 越界目标 …）：混在一起时数量最大的那一类
+ * 会把真正需要人工处置的少数几条挤出可视范围。
+ * 分组计数让面板能说「这一类共 N 条，显示最近 M 条」。
  */
 export function patchKindCounts(sessionId, { branchId = null, status = null } = {}) {
   let sql = `SELECT kind, COUNT(*) AS c FROM patches WHERE session_id=?`;
@@ -1636,32 +1695,6 @@ export function patchKindCounts(sessionId, { branchId = null, status = null } = 
   const out = {};
   for (const row of getDb().prepare(sql).all(...params)) out[row.kind] = Number(row.c) || 0;
   return out;
-}
-
-/**
- * 把某一类提案里「超出保留条数的最旧 open 条目」置为 dismissed。
- *
- * 用在 `uncertain`（史官每拍的「正文没明说」清单）：它每拍产出 2–5 条、
- * 实测 65 拍积到 209 条 open，且几乎全都不重复（去重率 0.5%）——
- * 也就是说它不是「同一件事反复报」，而是**一条逐拍增长的未知项流水**。
- * 没有上限时它会一直长下去（1000 拍 ≈ 3200 行），面板里也永远翻不到底。
- *
- * 这里只改 `status`，不删行（审计链保留），保留最近 `keep` 条 open。
- * 返回被置为 dismissed 的条数。
- */
-export function retirePatchesBeyond(sessionId, { branchId = null, kind, status = 'open', keep = 120 } = {}) {
-  const n = Math.max(0, Math.trunc(Number(keep) || 0));
-  let where = `session_id=? AND kind=? AND status=?`;
-  const params = [sessionId, kind, status];
-  if (branchId) { where += ` AND branch_id=?`; params.push(branchId); }
-  const info = getDb().prepare(`
-    UPDATE patches SET status='dismissed'
-     WHERE ${where}
-       AND id NOT IN (
-         SELECT id FROM patches WHERE ${where} ORDER BY id DESC LIMIT ?
-       )
-  `).run(...params, ...params, n);
-  return Number(info.changes) || 0;
 }
 
 export function setPatchStatus(sessionId, id, status) {
@@ -1840,10 +1873,20 @@ export function getRecentTextForBranch(sessionId, branchId, forkTurn, turnsBack 
  *
  * @returns {{hits:Array<{turn_no, kind, snippet, token_count}>, engine:'fts5'|'like'|'none'}}
  */
+/**
+ * 按关键词检索回合原文（供 recall_history / 资料员历史通道使用）。
+ *
+ * `excludeFrom` 是**已经在上下文里逐字可见的那一段的起点**：检索跳过 `turn_no >= excludeFrom`
+ * 的回合。不设它的时候，模型很容易拿「这一拍刚说的话」当查询词，搜回来的就是它已经
+ * 看得见的东西——50 轮实测 20 条历史查询里 15 条是本拍玩家动作的子串，跨距长的查询全部落空。
+ * 它和 `atTurn` 不是一回事：`atTurn` 是「世界线走到哪」（分支可见性），
+ * `excludeFrom` 是「哪几拍不必再查」（上下文已经给了）。
+ */
 export function searchTurnsDetailed(sessionId, query, {
   branchId = null,
   forkTurn = null,
   atTurn = Number.MAX_SAFE_INTEGER,
+  excludeFrom = null,
   limit = 8,
   kinds = ['player', 'narrator'],
 } = {}) {
@@ -1852,6 +1895,9 @@ export function searchTurnsDetailed(sessionId, query, {
   const db = getDb();
   const kindSql = kinds.map(() => '?').join(',');
   const cap = Math.max(limit * 4, limit); // 先多取候选，分支过滤后再截断
+  const upper = Number.isInteger(excludeFrom) && excludeFrom > 0
+    ? Math.min(atTurn, excludeFrom - 1)
+    : atTurn;
   let rows = [];
   let engine = 'like';
 
@@ -1863,7 +1909,7 @@ export function searchTurnsDetailed(sessionId, query, {
         FROM turns_fts f JOIN turns t ON t.id = f.rowid
         WHERE turns_fts MATCH ? AND t.session_id=? AND t.kind IN (${kindSql}) AND t.turn_no<=?
         ORDER BY t.turn_no DESC, t.id DESC LIMIT ?
-      `).all(match, sessionId, ...kinds, atTurn, cap);
+      `).all(match, sessionId, ...kinds, upper, cap);
       if (rows.length) engine = 'fts5';
     } catch { rows = []; }
   }
@@ -1874,7 +1920,7 @@ export function searchTurnsDetailed(sessionId, query, {
       SELECT turn_no, kind, content, token_count, branch_id FROM turns
       WHERE session_id=? AND kind IN (${kindSql}) AND turn_no<=? AND content LIKE ? ESCAPE '\\'
       ORDER BY turn_no DESC, id DESC LIMIT ?
-    `).all(sessionId, ...kinds, atTurn, like, cap);
+    `).all(sessionId, ...kinds, upper, like, cap);
   }
 
   const chain = branchId ? branchChain(sessionId, branchId) : null;

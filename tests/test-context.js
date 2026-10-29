@@ -312,7 +312,65 @@ console.log('\n=== 装配清单：系统层索引覆盖 + 场记单元信息 ===
   ok(idx.rendered > 0 && idx.rendered <= idx.total, 'rendered 落在 0..total');
   ok(idx.tokens > 0 && idx.cap > 0, '索引自带 token 与容量');
   ok(Array.isArray(idx.dropped_names), '被截断的实体名可审计');
-  eq(ctx.meta.scene_sheet, { cast_mode: 'full', absentees: [], rumors: 0 }, '场记单元信息：完整在场、无缺席者');
+  // 原声可见性（D23）：`voices` 按人分区取 perWho 条（不是全局窗口），
+  // 在场者里有几个真有声线锚点，也要能读到。
+  // （回声段已删（D18）；走向版场记单少哪段、省多少 token 由 branch_sheet 记录（D26）。）
+  eq(
+    ctx.meta.scene_sheet,
+    {
+      cast_mode: 'full', absentees: [], rumors: 0,
+      voice_speakers: 0, voice_lines: 0, voice_present_covered: 0,
+      branch_sheet: {
+        trim: 'default',
+        dropped_sections: ['codexBrief'], tokens: 120, full_tokens: 150,
+      },
+    },
+    '场记单元信息：完整在场、无缺席者、声线计数与走向版裁剪可读',
+  );
+}
+
+console.log('\n=== 走向版场记单：档位开关只裁走向那一份（D26）===');
+{
+  // 默认档位必须与旧实现逐字节等价：只少「附近设定」。
+  ok(engine.resolveBranchSheetTrim({}) === 'default', '缺省档位 = default');
+  ok(engine.resolveBranchSheetTrim({ branch_sheet_trim: '瞎写' }) === 'default', '非法档位不静默生效');
+  ok(engine.resolveBranchSheetTrim({ branch_sheet_trim: 'core_only' }) === 'core_only', '合法档位透传');
+
+  const secs = [
+    { key: 'cast', text: '在场\n甲' },
+    { key: 'facts', text: '已成立的事实\n· 甲 —知道→ 乙' },
+    { key: 'knowledge', text: '知识边界\n甲不知道丙' },
+    { key: 'codex', text: '本场可用设定\n· 物件' },
+    { key: 'codexBrief', text: '附近设定\n· 一条' },
+  ];
+  eq(
+    engine.selectBranchSections(secs, 'default').map((s) => s.key),
+    ['cast', 'facts', 'knowledge', 'codex'],
+    'default 只去掉「附近设定」（与旧实现逐字节等价）',
+  );
+  eq(
+    engine.selectBranchSections(secs, 'core_only').map((s) => s.key),
+    ['cast'],
+    'core_only 只留走向真正会读的段',
+  );
+
+  // 会话级开关：同一拍、同一上下文，只换档位 → 送模那份场记单必须逐字节不变。
+  const def = await engine.assembleContext({ session: S, world, turnNo: 1, isOpening: true });
+  const core = await engine.assembleContext({
+    session: { ...S, settings: { ...S.settings, branch_sheet_trim: 'core_only' } },
+    world, turnNo: 1, isOpening: true,
+  });
+  const sheetOf = (c) => c.messages
+    .find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  eq(sheetOf(core), sheetOf(def), '开关只影响走向那一份，送模场记单逐字节不变');
+  ok(core.branchSheet.length < def.branchSheet.length || def.branchSheet === '',
+    'core_only 的走向版更短', `def=${def.branchSheet.length} core=${core.branchSheet.length}`);
+  ok((core.meta.scene_sheet.branch_sheet?.tokens ?? 0) <= (def.meta.scene_sheet.branch_sheet?.tokens ?? 0),
+    'meta 记录的走向版 token 不增');
+  ok((core.meta.scene_sheet.branch_sheet?.dropped_sections || []).includes('codexBrief'),
+    'core_only 下 codexBrief 仍记为被丢');
+  ok(!def.meta.scene_sheet.branch_sheet.dropped_sections.includes('facts'),
+    'default 下 facts 不被记为丢弃');
 }
 
 console.log('\n=== 死亡：life_state 让死亡进入提示词 ===');
@@ -383,6 +441,85 @@ console.log('\n=== 装配清单：候选 vs 实际渲染 ===');
   ok(ctx.meta.codex_rendered <= ctx.meta.codex_candidates, '渲染数不超过候选');
   ok(Array.isArray(ctx.meta.dropped_sections), '记录被丢弃的段');
   ok(ctx.meta.facts_candidates >= ctx.meta.facts, '事实候选数不小于渲染数');
+  // 断言的真渲染上限不是 SQL 的 300，而是 selectFacts 的 manyLimit——
+  // 而 manyLimit 现在是**按预算推导**的变量（D9-A1），不是写死的 10。
+  ok(typeof ctx.meta.facts_single === 'number', '单值断言条数可数');
+  ok(typeof ctx.meta.facts_many_rendered === 'number', '多值断言渲染条数可数');
+  ok(typeof ctx.meta.facts_many_dropped === 'number', '多值断言丢弃条数可数');
+  ok(typeof ctx.meta.facts_many_limit === 'number', '多值条数上限可数（推导值要能被核对）');
+  eq(ctx.meta.facts_single + ctx.meta.facts_many_rendered, ctx.meta.facts, '渲染数 = 单值 + 多值（口径闭合）');
+  // 推导式对着 plan 核一遍：场记单配额的 25% ÷ 单条成本 12.4，下限 10。
+  eq(ctx.meta.facts_many_limit,
+    Math.max(10, Math.floor((ctx.meta.plan.layers.scene * 0.25) / 12.4)),
+    '多值条数上限 = 场记单配额 × 25% ÷ 12.4（预算驱动，不是魔数）');
+  ok(ctx.meta.facts_many_limit > 10, '200K 窗口下上限远大于旧的魔数 10');
+
+  /* ---- 截断可见化（D3）：SQL LIMIT 挡掉的行必须可数 ---- */
+  // 之前只有 facts_many_dropped，它只统计「已取回 300 条里再丢的」，被 SQL 窗口挡在
+  // 外面的永远测不到 → 「断言长到看不见」在报告里显示为健康。
+  const lt = ctx.meta.layers_truncated;
+  ok(!!lt, 'meta 里有 layers_truncated 分账');
+  eq(lt.assertions.window, 300, '断言 SQL 窗口 = 300');
+  eq(typeof lt.assertions.total, 'number', '断言总行数可数');
+  ok(lt.assertions.total >= lt.assertions.loaded, '总行数不小于已取回数');
+  eq(lt.assertions.sql_window_full, lt.assertions.loaded >= 300, 'sql_window_full 与 loaded 一致');
+  eq(typeof lt.relations.total, 'number', '关系总行数可数');
+  eq(lt.threads.window, 40, '线索 SQL 窗口 = 40');
+  eq(typeof lt.threads.open_total, 'number', '开放线索总数可数');
+}
+
+console.log('\n=== 断言渲染条数由预算决定（D9）：不再卡在两个魔数上 ===');
+{
+  // 造一个会话，塞 120 条多值断言（知道/拥有），全落在同一批在场者身上。
+  const sid = `s-d9-${Date.now()}`;
+  const s9 = store.createSession({
+    id: sid, title: 'd9', worldId: world.id, cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  store.setState(sid, 0, {
+    place: '雨街', present: ['ling-yue'], characters: { 'ling-yue': {} }, turn_no: 0,
+  }, 'main');
+  for (let i = 0; i < 120; i += 1) {
+    store.addAssertion(sid, {
+      branch_id: 'main', subject: '凌玥', predicate: '知道',
+      object: `第${i}件事`, valid_from: 1, source_turn: 1, confidence: 1, visibility: 'public',
+    });
+  }
+  const c9 = await engine.assembleContext({
+    session: { ...s9, branch_id: 'main', anchor_id: 'prologue' },
+    world, turnNo: 2, playerText: '我看着她。',
+  });
+  const limit9 = c9.meta.facts_many_limit;
+  const rendered9 = c9.meta.facts_many_rendered;
+  ok(limit9 > 24, '上限不再是 10（也不会被渲染端切回 24）');
+  // 真正的回归判据：候选远超旧的两道闸时，渲染数必须跟着上限走，而不是停在 24。
+  eq(rendered9, Math.min(120, limit9), '多值渲染数 = min(候选数, 推导上限)');
+  ok(c9.meta.facts > 24, '送模事实数超过旧的 24 条硬顶');
+  // 渲染端确实没有二次切片：场记单里的事实行数 = 装配层给出的条数。
+  const sheet9 = c9.messages
+    .find((m) => typeof m.content === 'string' && m.content.startsWith('【场记单】'))?.content || '';
+  const factBlock = sheet9.split('\n\n').find((b) => b.startsWith('已成立的事实')) || '';
+  const lines = factBlock.split('\n').filter((l) => l.startsWith('· ')).length;
+  eq(lines, c9.meta.facts_many_rendered, '场记单事实行数 = 装配层渲染条数（渲染端没有再 slice）');
+}
+
+console.log('\n=== 断言的重复是可量化的（D9-A2 的判据）===');
+{
+  // 同主同谓的重复率必须能被算出来：这是判断「该不该合并渲染」的唯一依据。
+  // selectFacts 自己不去重（它只按相关性排序），所以这里量的是**候选里**的重复形状。
+  const many = [];
+  for (let i = 0; i < 20; i += 1) {
+    many.push({ subject: '伍卿', predicate: '知道', object: `事${i % 5}`, visibility: 'public' });
+  }
+  const groups = new Map();
+  for (const a of many) {
+    const k = `${a.subject}|${a.predicate}`;
+    groups.set(k, (groups.get(k) || 0) + 1);
+  }
+  eq(groups.get('伍卿|知道'), 20, '同主同谓可分组计数（报告口径）');
+  const dupRate = (many.length - groups.size) / many.length;
+  eq(Math.round(dupRate * 100), 95, '重复率 = (条数 − 组数) / 条数');
 }
 
 console.log('\n=== 辞书场景视图：T0 / T1 两档 ===');
@@ -441,7 +578,67 @@ console.log('\n=== 检索预检门控 ===');
   ok(shouldPrecheckRetrieval({ mode: 'on', codexCount: 1, minCodex: 24, playerText: '走', card: gCard }) === true, 'on 强制预检');
   ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我往前走', card: gCard }) === false, 'auto：没点名不预检');
   ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我去司楼', card: gCard }) === true, 'auto：点名辞书才预检');
-  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 10, minCodex: 24, playerText: '我去司楼', card: gCard }) === false, 'auto：小卡不预检');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 10, minCodex: 24, playerText: '我去司楼', card: gCard }) === false, 'auto：小卡不预检辞书');
+
+  /* ---- 历史通道（D4）：点名「人」就跑，与卡大小无关 ---- */
+  // 记忆一致性不该依赖卡上有多少辞书条目：小卡一样会忘掉第 3 轮说过的承诺。
+  const personCard = schema.normalizeCard({
+    title: 'p',
+    entities: [
+      { id: 'lingyue', type: 'person', name: '凌玥' },
+      { id: 'wuwu', type: 'person', name: '伍卿', aliases: ['卿儿'] },
+    ],
+  });
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 0, minCodex: 24, playerText: '我问凌玥她还记得那件事吗', card: personCard }) === true,
+    'auto：点名人物就预检（历史通道不看卡大小）');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 0, minCodex: 24, playerText: '「卿儿，过来。」', card: personCard }) === true,
+    'auto：用别名点名人物也预检');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 0, minCodex: 24, playerText: '我四处看看', card: personCard }) === false,
+    'auto：没点名任何人就不预检');
+  ok(shouldPrecheckRetrieval({ mode: 'off', codexCount: 0, minCodex: 24, playerText: '我问凌玥', card: personCard }) === false,
+    'off 仍然压过历史通道');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我问凌玥司楼在哪', card: personCard }) === true,
+    '人和事物同时点名时仍预检');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 30, minCodex: 24, playerText: '我往前走', card: null }) === true,
+    '无卡时退回「够大就预检」的旧行为');
+
+  /* ---- 触发必须看投影后的卡，不是冻结的模板卡 ---- */
+  // 运行期 introduce 出来的 NPC 只存在于 world_state 增量里。若拿模板卡建别名索引，
+  // 玩家点名「卖炭翁张三」匹配不到任何人 → 历史通道不触发——而「老朋友重逢」正是
+  // D4 加 person 通道的原始动机。这条测试锁的是 orchestrator 传哪个 card 进来。
+  const { buildEffectiveWorld } = await import('../server/world/effective.js');
+  const tplCard = schema.normalizeCard({
+    title: 't',
+    entities: [{ id: 'lingyue', type: 'person', name: '凌玥' }],
+  });
+  const effCard = buildEffectiveWorld(tplCard, [{
+    entity_kind: 'person', entity_id: 'zhangsan', path: '', op: 'introduce',
+    value: { name: '卖炭翁张三', type: 'person' },
+    valid_from: 1,
+  }], []);
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 0, minCodex: 24, playerText: '我去找卖炭翁张三', card: tplCard }) === false,
+    '模板卡看不到 introduce 出来的人（这就是要修的缺口）');
+  ok(shouldPrecheckRetrieval({ mode: 'auto', codexCount: 0, minCodex: 24, playerText: '我去找卖炭翁张三', card: effCard }) === true,
+    '投影卡能看到 → 历史通道正常触发');
+}
+
+console.log('\n=== 资料员两通道解析（D4）===');
+{
+  const { parseRetrievalRequest } = await import('../server/agents/retrieval.js');
+  const both = parseRetrievalRequest('{"codex":["司楼"],"history":["凌玥","玉佩"]}');
+  eq(both.codex, ['司楼'], '解析 codex 通道');
+  eq(both.history, ['凌玥', '玉佩'], '解析 history 通道');
+
+  // 旧形状（当时只有辞书一条通道）等价于「只查辞书」，不能因为加通道就崩掉。
+  const legacy = parseRetrievalRequest('{"queries":["司楼","青楼"]}');
+  eq(legacy.codex, ['司楼', '青楼'], '旧 queries 形状当作 codex');
+  eq(legacy.history, [], '旧形状不产生 history 查询');
+
+  eq(parseRetrievalRequest('不需要查').history, [], '解析失败返回空 history');
+  eq(parseRetrievalRequest('{"codex":[],"history":[]}'), { codex: [], history: [] }, '两个空数组合法');
+  // 单字查询词无意义（FTS5 trigram 也要 3 字才走索引），空串/超长同样丢。
+  eq(parseRetrievalRequest(`{"history":["玥","","${'很长的句子'.repeat(10)}"]}`).history,
+    [], '单字/空/超长（>40 字）查询词被过滤');
 }
 
 console.log('\n=== 场记单内容 ===');
@@ -559,9 +756,11 @@ console.log('\n=== 体积不随轮数增长（原文窗口由场次边界控制�
     ok(ctx.meta.coverage.scene_to < turnNo, `第 ${turnNo} 轮：场次覆盖不含当前轮`);
     ok(
       ctx.meta.coverage.recent_from == null
-        || ctx.meta.coverage.recent_from === ctx.meta.coverage.scene_to + 1,
-      `第 ${turnNo} 轮：场次边界与原文起点首尾相接（无缝无洞）`,
+        || ctx.meta.coverage.recent_from === ctx.meta.coverage.scene_to + 1 - ctx.meta.coverage.overlap_turns,
+      `第 ${turnNo} 轮：场次边界与原文起点首尾相接（有意的重叠已在 overlap_turns 记账，没有洞）`,
     );
+    ok(ctx.meta.coverage.overlap_turns <= ctx.meta.coverage.overlap_limit,
+      `第 ${turnNo} 轮：重叠不超过配置上限`);
   }
   for (const s of sizes) {
     console.log(`  第 ${String(s.turnNo).padStart(3)} 轮  合计 ${s.total} tok（系统 ${s.system}｜场次索引 ${s.archive}｜原文 ${s.recent}｜场记单 ${s.scene}）`);
@@ -609,11 +808,102 @@ console.log('\n=== 覆盖不变量：场次覆盖过的回合不再逐字，边�
   const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
   ok(all.includes('旧正文7'), '场次边界之后的第一轮仍在（不再只取最后 8 轮）');
   ok(all.includes('旧正文20'), '最新一轮仍在');
-  ok(!all.includes('旧正文6'), '场次覆盖的回合不再逐字重复');
+  // 场次覆盖 1–6、重叠 2 拍 → 窗口从 5 起：旧正文5/6 作为封场尾巴有意重复，旧正文4 不该出现。
+  ok(!all.includes('旧正文4'), '场次记录里更早的回合不再逐字重复（重叠只回看 overlap_turns 拍）');
   ok(all.includes('前六轮的结论'), '被覆盖的剧情仍在场次记录里可寻址');
   eq(ctx.meta.coverage.scene_to, 6, 'meta 记录场次边界');
-  eq(ctx.meta.coverage.recent_from, 7, 'meta 记录原文起点');
+  eq(ctx.meta.coverage.recent_from, 5, '起点只由场次边界决定：scene_to + 1 − overlap_turns');
+  eq(ctx.meta.coverage.overlap_turns, 2, '重叠 2 拍一直陪到本场封场（有界，不是「收敛回去」）');
   eq(ctx.meta.coverage.recent_to, 20, 'meta 记录原文终点');
+}
+
+console.log('\n=== 封场尾巴（D1）：刚切场时上一场最后两拍仍逐字可见 ===');
+{
+  const sid = `s-overlap-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: 'overlap', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const ovSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  for (let i = 1; i <= 20; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `旧行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `旧正文${i}`, branch_id: 'main' });
+  }
+  // 第 1–20 轮全部封成一场：第 21 拍就是「刚切场的第一拍」，原文窗口本来是空的。
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 20,
+    place: '雨街', question: '前二十轮在问什么？', outcome: '前二十轮的结论。',
+    key_detail: '无纹玉佩', importance: 'major', hooks: ['玉佩为什么发光'],
+  });
+
+  const ctx = await engine.assembleContext({
+    session: ovSession, world, turnNo: 21, playerText: '我继续往前走。',
+  });
+  const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  // 这是 D1 的全部意义：封场那一刻原文窗口不再是空的，上一拍怎么说话还看得见。
+  ok(ctx.meta.coverage.recent_from !== null, '刚切场时原文窗口不为空（D1 的核心收益）');
+  eq(ctx.meta.coverage.recent_from, 19, '往回带 2 拍：起点 = scene_to + 1 − 2');
+  eq(ctx.meta.coverage.overlap_turns, 2, '重叠拍数记账为 2');
+  ok(all.includes('旧正文19') && all.includes('旧正文20'), '上一场最后两拍逐字可见');
+  ok(!all.includes('旧正文18'), '只带 2 拍，不整场回灌');
+  ok(all.includes('前二十轮的结论'), '场次索引仍然在场（重叠不等于用原文替掉索引）');
+  // 重叠永远不会变成洞：起点绝不会晚于 scene_to + 1。
+  ok(ctx.meta.coverage.recent_from <= ctx.meta.coverage.scene_to + 1, '窗口起点不晚于场次边界（没有洞）');
+
+  // 关掉重叠开关：行为退回旧口径（窗口为空），证明这个开关真的只有一个作用点。
+  const oldOverlap = config.context.recentOverlapTurns;
+  config.context.recentOverlapTurns = 0;
+  try {
+    const none = await engine.assembleContext({
+      session: ovSession, world, turnNo: 21, playerText: '我继续往前走。',
+    });
+    eq(none.meta.coverage.recent_from, null, 'RECENT_OVERLAP_TURNS=0 时退回「封场即清零」');
+    eq(none.meta.coverage.overlap_turns, 0, '关闭后无重叠');
+  } finally {
+    config.context.recentOverlapTurns = oldOverlap;
+  }
+}
+
+console.log('\n=== 原文窗口只追加、不滑动（D16）：同一场次内 recent_from 必须不动 ===');
+{
+  // 曾经写成 min(scene_to + 1, turnNo − overlap)：短场时 turnNo − overlap 被选中，
+  // 起点每拍往后爬一格，每拍丢掉最旧一条消息 → 缓存前缀每拍作废（报告里 broken 47/51）。
+  // 判据：封场之后连续几拍，起点恒等于 scene_to + 1 − overlap，逐字原文只增不减。
+  const sid = `s-slide-${Date.now()}`;
+  const created = store.createSession({
+    id: sid, worldId: world.id, title: 'slide', cardSnapshot: card, worldVersion: 1,
+  });
+  store.createBranch(sid, { branchId: 'main' });
+  store.setSessionAnchor(sid, 'prologue', 'main');
+  const slideSession = { ...created, branch_id: 'main', anchor_id: 'prologue' };
+
+  for (let i = 1; i <= 14; i++) {
+    store.addTurn(sid, { turn_no: i, kind: 'player', content: `旧行动${i}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: i, kind: 'narrator', content: `旧正文${i}`, branch_id: 'main' });
+  }
+  // 1–10 封成一场，之后第 11–14 拍属于当前场（不封场 → 起点必须一直停在 9）。
+  store.addScene(sid, {
+    branch_id: 'main', scene_id: 'S001', level: 1, turn_from: 1, turn_to: 10,
+    place: '雨街', question: '前十轮在问什么？', outcome: '前十轮的结论。',
+    key_detail: '无纹玉佩', importance: 'major', hooks: ['玉佩为什么发光'],
+  });
+
+  const starts = [];
+  const texts = [];
+  for (const turnNo of [11, 12, 13, 14, 15]) {
+    const one = await engine.assembleContext({
+      session: slideSession, world, turnNo, playerText: '我继续往前走。',
+    });
+    starts.push(one.meta.coverage.recent_from);
+    texts.push(one.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n'));
+  }
+  eq(starts, [9, 9, 9, 9, 9], '五个连续拍点：起点恒为 scene_to + 1 − 2，不随 turnNo 爬');
+  // 「只追加」的直接证据：第 12 拍的消息里，第 11 拍那条玩家行动仍在（没被滑掉）。
+  ok(texts[1].includes('旧行动11'), '第 12 拍仍看得见第 11 拍的玩家行动（窗口没有滑走最旧一条）');
+  ok(texts[4].includes('旧行动9'), '末尾拍仍看得见起点那一拍（起点固定 ⇒ 只追加）');
+  ok(!texts[0].includes('旧正文8'), '起点之前的一拍不回顾（重叠上限就是 overlap_turns）');
 }
 
 console.log('\n=== system：主角与作者笔记优先于世界索引 ===');
@@ -698,7 +988,7 @@ console.log('\n=== canon / runtime 分离：运行态不改 system 前缀 ===');
   ok(sheet.includes('左肩中箭'), '运行态进入场记单');
 }
 
-console.log('\n=== 原声：回声带真实轮次，且能按角色锚定声线 ===');
+console.log('\n=== 原声：带真实轮次、按角色锚定声线，且不再有回声段（D18） ===');
 {
   const sid = `s-voice-${Date.now()}`;
   const created = store.createSession({
@@ -721,9 +1011,13 @@ console.log('\n=== 原声：回声带真实轮次，且能按角色锚定声线 
 
   ok(sheet.includes('原声'), '在场者卡渲染原声');
   ok(sheet.includes('第3句原话'), '取到最近的台词');
-  ok(/第\s*[1-9]\d*轮/.test(sheet), '回声带真实轮次');
+  ok(/第\s*[1-9]\d*轮/.test(sheet), '原声带真实轮次（回声段删除后唯一的出处）');
   ok(!sheet.includes('第0轮'), '不再出现「第0轮」的假出处');
-  eq(ctx.echoes.every((e) => e.turn_no > 0), true, 'echoes 元数据里的轮次也是真的');
+  // D18：回声段是「原声：」的逐字复制品（76 拍 278/278 条 100% 重复），已删。
+  // 留一条「删干净的证据」：段头与括号出处都不该再出现。
+  ok(!sheet.includes('回声（过去的原话'), '回声段已删除（D18）');
+  ok(!ctx.echoes, '装配结果不再带 echoes 字段（D18）');
+  ok(!ctx.meta.scene_sheet.echoes && !ctx.meta.scene_sheet.echoes_rendered, '场景层不再产出回声计数（D18）');
 }
 
 console.log('\n=== 缓存前缀：system 必须逐字节冻结（10 轮含运行态写入） ===');
@@ -1087,6 +1381,27 @@ console.log('\n=== 渲染前体检：死亡角色不再占在场位 ===');
     assertions: [], scenes: [], turnNo: 1,
   });
   eq(alive.present.map((c) => c.name), ['甲'], 'life_state=alive 不被 status 里的「死亡」误伤');
+
+  // D14：玩家角色是「镜头本身」，不因 life_state 被移出在场。
+  // 长跑实测：史官某一拍给 player/player 写了 gone，投影后 card.player.life_state 永久停在
+  // gone（没有消费方会清它），场记单每拍在末尾印「已故／离场：主角」，而正文仍是第一人称。
+  const playerGone = lintState({
+    ledger: { characters: { 伍卿: { life_state: 'gone' } } },
+    present: [
+      { id: '伍卿', name: '伍卿', life_state: 'gone', is_player: true, knowledge: {} },
+      { id: 'li-po', name: '黎婆', life_state: 'gone', knowledge: {} },
+    ],
+    assertions: [], scenes: [], turnNo: 6, playerName: '伍卿', playerId: '伍卿',
+  });
+  eq(playerGone.present.map((c) => c.name), ['伍卿'], '玩家不因 life_state=gone 被踢出在场（D14）');
+  ok(playerGone.fixes.some((f) => f.kind === 'remove_gone_from_present' && f.who === '黎婆'),
+    '非玩家照旧被踢出（豁免只给主角）');
+  // 只靠名字也能认出玩家（原创主角造的最小条目不一定带 is_player）
+  const byName = lintState({
+    ledger: {}, present: [{ id: '伍卿', name: '伍卿', life_state: 'gone', knowledge: {} }],
+    assertions: [], scenes: [], turnNo: 1, playerName: '伍卿',
+  });
+  eq(byName.present.map((c) => c.name), ['伍卿'], '按 playerName 也能认出主角');
 }
 
 console.log('\n=== voice 层进场：称呼与「绝不说」 ===');
@@ -1206,8 +1521,11 @@ console.log('\n=== 超预算降级 ===');
     });
     ok(soft.meta.degraded.length > 0, `软目标超限有降级记录（${soft.meta.degraded.join(',')}）`);
     ok(soft.messages[0].role === 'system', '软降级不动 system');
-    const seam = soft.meta.coverage.recent_from ?? (soft.meta.coverage.scene_to + 1);
-    eq(soft.meta.coverage.scene_to + 1, seam, '软降级后场次覆盖与原文窗口仍无缝');
+    const seam = soft.meta.coverage.recent_from == null
+      ? null
+      : soft.meta.coverage.recent_from + soft.meta.coverage.overlap_turns;
+    eq(soft.meta.coverage.scene_to + 1, seam ?? soft.meta.coverage.scene_to + 1,
+      '软降级后场次覆盖与原文窗口仍无缝（重叠已记账）');
   } finally {
     config.context.softTokens = oldSoft;
   }
@@ -1357,12 +1675,34 @@ console.log('\n=== 检索结果：current 层、当拍注入 ===');
   ok(all.includes('入内即除籍'), '检索到的全文在场');
   ok(ctx.budget.retrieval > 0, '检索结果有独立预算');
   eq(ctx.meta.retrieval?.queries, ['司楼'], 'meta 记录检索词');
+  ok(ctx.meta.retrieval?.rendered === true, 'meta.retrieval.rendered 标记本次真的出了检索文本');
   ok(ctx.messages[ctx.messages.length - 1].role === 'user', '本轮输入仍在最后');
   ok(!all.includes('关键词触发'), '检索不是关键词触发文案');
 }
 
-console.log('\n=== 检索预检：解析与约束 ===');
+console.log('\n=== 检索结果：跑过但没查到也要留痕（D4 可观测） ===');
 {
+  // 资料员被调用了、但模型判断不需要查（或查了没命中）：这一拍没有【检索结果】消息，
+  // 但 meta.retrieval 必须存在且 rendered=false。否则报告里「没调用」和「调用了没查」
+  // 长得一模一样，history_queries 的比例就失去了分母。
+  const ctx = await engine.assembleContext({
+    session: S, world, turnNo: 5, playerText: '我站在原地想事情。',
+    retrieval: {
+      text: '', rendered: false, queries: [], entries: [],
+      codex_queries: [], history_queries: ['玉佩'], history_hits: [],
+      tokens: { codex: 0, history: 0 },
+    },
+  });
+  const all = ctx.messages.map((m) => (typeof m.content === 'string' ? m.content : '')).join('\n');
+  ok(!all.includes('【检索结果】'), '空检索不产生检索消息');
+  eq(ctx.budget.retrieval, 0, '空检索不占 retrieval 预算');
+  ok(!!ctx.meta.retrieval, 'meta.retrieval 仍然存在（跑过就记）');
+  eq(ctx.meta.retrieval?.rendered, false, 'rendered=false 表示没出文本');
+  eq(ctx.meta.retrieval?.history_queries, ['玉佩'], 'meta 记录历史查询词');
+  eq(ctx.meta.retrieval?.history_hits, [], 'meta 记录历史命中为空');
+}
+
+console.log('\n=== 检索预检：解析与约束 ===');{
   const { parseRetrievalQueries } = await import('../server/agents/retrieval.js');
   eq(parseRetrievalQueries('{"queries":["司楼","玉佩"]}'), ['司楼', '玉佩'], '解析查询数组');
   eq(parseRetrievalQueries('```json\n{"queries":["听雨楼"]}\n```'), ['听雨楼'], '容忍代码围栏');
@@ -1834,6 +2174,42 @@ console.log('\n=== 工艺层：卡级默认的优先级 / 取值被删后的回�
   eq(p.pacingText, craft.BUILTIN.pacing.bold.tail, 'pacing 尾注正文取 tail');
   eq(p.pacingBranch, craft.BUILTIN.pacing.bold.branch, 'pacing 走向正文取 branch');
   ok(p.pacingText !== p.pacingBranch, 'tail 与 branch 是两段不同的文本（不是同一份复用）');
+}
+
+console.log('\n=== meta 落库完整性：装配算出来的键必须都能读到（D24）===');
+{
+  // `assembleContext` 产出 41 个 meta 键，`buildAssemblyMeta()` 是一道**手写白名单**。
+  // 历史上漏过四次（layers_truncated / facts_many_limit / relations_limit，以及 D24 这批
+  // 10 个键），每次的症状都一样：装配层算得好好的，报告里读不到，于是「健康」。
+  // 这条断言用**运行时对象**而不是扫源码：源码里的键名会出现在注释、字符串、解构里，
+  // 只有装配出来的那个对象才是真的。新增 meta 键忘了进白名单，这里就红。
+  const { buildAssemblyMeta } = await import('../server/agents/orchestrator.js');
+  const { createSession, createBranch, setSessionAnchor, setState } = store;
+
+  const card = schema.normalizeCard({
+    premise: '落库完整性', player: { name: '甲', canon_character: 'a' },
+    entities: [{ id: 'a', name: '甲', type: 'person' }, { id: 'b', name: '乙', type: 'person' }],
+  });
+  const worldId = `w-wl-${Date.now()}`;
+  store.saveWorld({ id: worldId, title: card.title, card });
+  const s = createSession({ id: `s-wl-${Date.now()}`, title: '落库完整性', worldId });
+  createBranch(s.id, { branchId: 'main' });
+  setSessionAnchor(s.id, 'prologue', 'main');
+  setState(s.id, 1, { time: '午后', place: '院中', present: ['a'], characters: { a: {} }, turn_no: 1 }, 'main');
+
+  const ctx = await engine.assembleContext({
+    session: { ...s, branch_id: 'main', anchor_id: 'prologue', card_snapshot: card },
+    world: { card },
+    turnNo: 2,
+    playerText: '我看着他。',
+  });
+  const persisted = buildAssemblyMeta(ctx, { model: 'x' });
+  // `system_blocks` 是有意的聚合容器：落库时拆成 index / craft / timeline_past 三个平铺键
+  // （`index` 与 `craft` 直接给报告读），所以它本身不进白名单。
+  const ALLOWED_CONTAINERS = new Set(['system_blocks']);
+  const missing = Object.keys(ctx.meta).filter((k) => !(k in persisted) && !ALLOWED_CONTAINERS.has(k));
+  ok(missing.length === 0, '装配 meta 的每个键都进了 buildAssemblyMeta 白名单', missing.join(', '));
+  ok('index' in persisted && 'craft' in persisted, 'system_blocks 拆出来的 index / craft 都能读到');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

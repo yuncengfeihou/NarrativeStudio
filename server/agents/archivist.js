@@ -10,18 +10,19 @@
  */
 import { chat } from '../llm.js';
 import {
-  ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, normalizeCard, resolveEntity, slugify,
+  ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
   ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, isNumberPath, pathsFor,
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
-  getWorldState, invalidateAssertion, retirePatchesBeyond, setCharState, setState, upsertRelation, upsertThread,
+  getWorldState, invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
 } from '../memory/store.js';
 import {
   LIFE_STATES, PREDICATES, STATE_FIELDS, VISIBILITIES, archivistSystemPrompt, archivistUserPrompt,
 } from '../prompts/archivist.js';
+import { THREAD_MIN_WEIGHT, THREAD_RENDER_MAX } from '../world/scene-sheet.js';
 
 const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim();
 /** 生死/离场只认受控词；不做中文同义词映射（那会变成又一份名字名单）。 */
@@ -51,6 +52,15 @@ function canonicalize(name, aliasIndex) {
  * 输入都来自装配结果，不由模型声明：卡片（投影后）给作者公理里的实体，
  * present / codex 给本拍场记单里的条目，账本人物给本世界线已登场过的临时实体；
  * player 永远允许。未知实体只能走 introduce（见 sanitizeChange）。
+ *
+ * `world` 同样永远允许（D25）：它和 `player` 一样**不是卡里的实体**，而是投影目标
+ * （`world/status` → `world.runtime.status` → 场记单的「局势」行 + 常驻笔记）。
+ * 曾经只 add 了 `player` 没 add `world`，于是史官每一次世界局势变更都被这条
+ * 声明校验静默拦掉：全库实测 `world_state` 里 `entity_kind='world'` 的写入 **0 行**，
+ * 而这条路径的消费方一直在（场记单渲染「局势 …」、定稿时收进常驻笔记），
+ * 提示词里也一直写着「world: status」。这是「白名单挡住运行时才出现的东西」的
+ * 第六个实例（前五个：layers_truncated / facts_many_limit / relations_limit /
+ * echoes_rendered / 装配 meta 的 10 个键）。
  */
 export function buildDeclaredTargets({
   card, present = [], codex = [], ledgerCharacters = [], playerName = '',
@@ -63,7 +73,7 @@ export function buildDeclaredTargets({
     if (s) out.add(s);
   };
   for (const e of arr(card?.entities)) { add(e.id); add(e.name); add(e.aliases); }
-  add(present); add(codex); add(ledgerCharacters); add(playerName); add('player');
+  add(present); add(codex); add(ledgerCharacters); add(playerName); add('player'); add('world');
   return [...out];
 }
 
@@ -84,7 +94,15 @@ function declaredSetOf(declaredTargets, aliasIndex) {
   return set;
 }
 
-/** 目标是否在声明集合内。未启用白名单（declaredSet 为 null）时一律放行。 */
+/**
+ * 目标是否在声明集合内。未启用白名单（declaredSet 为 null）时一律放行。
+ *
+ * 除了精确名/别名/id，还接受**包含已声明别名的写法**（D13-A1）：
+ * 模型在正文里用简称指代长名（「蛇纹纸」指「蛇纹圆印纸」），简称本身永远不在别名里，
+ * 于是那个物件的每一次 change 都被静默拒绝。判据仍走唯一的字符串匹配入口
+ * （`linkEntities`，红线 2），且只在「解析出的实体确实已声明」时放行——
+ * 不做同义词映射，也叫不出没登场过的东西。
+ */
 function isDeclaredTarget(target, declaredSet, aliasIndex) {
   if (!declaredSet) return true;
   const raw = str(target);
@@ -93,7 +111,15 @@ function isDeclaredTarget(target, declaredSet, aliasIndex) {
   const canonical = canonicalize(raw, aliasIndex);
   if (canonical && declaredSet.has(canonical)) return true;
   const ref = resolveEntity(raw, aliasIndex);
-  return !!((ref.id && declaredSet.has(ref.id)) || (ref.name && declaredSet.has(ref.name)));
+  if ((ref.id && declaredSet.has(ref.id)) || (ref.name && declaredSet.has(ref.name))) return true;
+  // 简称：raw 里包含了某个已声明实体的别名（最长匹配由 linkEntities 负责）。
+  const linked = linkEntities(raw, aliasIndex);
+  for (const id of [...linked.person, ...linked.fact]) {
+    if (declaredSet.has(id)) return true;
+    const e = (aliasIndex || []).find((x) => x.id === id);
+    if (e && declaredSet.has(e.name)) return true;
+  }
+  return false;
 }
 
 /** 校验并清洗一条断言。不合法返回 null。 */
@@ -190,12 +216,38 @@ function sanitizeIntroduce(kind, fields, name) {
 }
 
 /**
+ * 从正文里吸收「名字的前缀简称」（D13-A1）。
+ *
+ * 中文叙事里用简称指代长名是默认行为：「蛇纹圆印纸」在正文里被简称 11 次，
+ * 而 `aliases` 只能由卡作者或 introduce 一次性声明——于是任何长名物品一旦被简称，
+ * 就永久写不进账本（`skipped_targets` 里反复出现同一个名字）。
+ *
+ * 判据**必须确定性、不猜**：只收 name 的前缀，且该前缀在正文里真的出现过。
+ * 不做「首 2 字 + 末 1 字」这类组合——那是在猜作者怎么简称，属于 §1.2 禁止的识别器堆叠。
+ * 代价是抓不到中段省略式简称（`蛇纹纸` 不是 `蛇纹圆印纸` 的连续子串），
+ * 但那部分由 `skipped_targets` 可见化兜住，不假装有解。
+ *
+ * @returns {string[]} 最多 1 个：最短的那个命中前缀（更长前缀对匹配是冗余的）
+ */
+function prefixesFoundIn(name, narrative, taken) {
+  const n = str(name);
+  const t = str(narrative);
+  if (n.length < 3 || !t) return [];
+  for (let len = 2; len < n.length; len += 1) {
+    const sub = n.slice(0, len);
+    if (taken.has(sub)) continue;
+    if (t.includes(sub)) return [sub];
+  }
+  return [];
+}
+
+/**
  * 校验一条实体变更提案。
  *
  * 只放行 state-paths 白名单；身份根（id/name/identity）不可写。
  * 未知实体默认当作「本世界线临时登场」，不会写回世界卡。
  */
-export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
+export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrative = '' } = {}) {
   const o = obj(raw);
   const op = str(o.op) || (o.fields ? 'introduce' : 'set');
   if (!['set', 'add', 'remove', 'introduce', 'delta'].includes(op)) return null;
@@ -207,13 +259,20 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
     const fields = obj(o.fields || o.value);
     const name = str(fields.name || o.id);
     if (!name) return null;
+    const value = sanitizeIntroduce(kind, fields, name);
+    // D13-A1：把正文里真的出现过的**名字前缀**收成别名。
+    // 落在这里而不是提示词里：模型不需要知道这件事，代码一次性吸收。
+    const taken = new Set([name, ...(value.aliases || [])]);
+    const shorts = prefixesFoundIn(name, narrative, taken);
+    if (shorts.length) value.aliases = [...(value.aliases || []), ...shorts];
     return {
       kind,
       entity_id: str(o.id) || slugify(name),
       path: '',
       op,
-      value: sanitizeIntroduce(kind, fields, name),
+      value,
       name,
+      ...(shorts.length ? { aliases_from_narrative: shorts } : {}),
     };
   }
 
@@ -232,6 +291,19 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '' } = {}) {
     if (resolved.type) {
       kind = resolved.type;
       entityId = resolved.id;
+    } else {
+      // D13-A1：简称（「蛇纹纸」→「蛇纹圆印纸」）不是别名也不是 id，
+      // 上面查不到。再用一次实体链接（红线 2 唯一允许的字符串匹配）看它是不是
+      // 指向了某个**已存在**的实体：唯一命中才归一，多命中就保持原样（交给白名单判）。
+      const linked = linkEntities(rawName, aliasIndex);
+      const ids = [...linked.person, ...linked.fact];
+      if (ids.length === 1) {
+        const hit = (aliasIndex || []).find((x) => x.id === ids[0]);
+        if (hit) {
+          kind = hit.type;
+          entityId = hit.id;
+        }
+      }
     }
   }
 
@@ -533,7 +605,11 @@ export async function runArchivist({
     .slice(0, 60)
     .map((e) => `· ${e.name}${e.aliases.length ? `（${e.aliases.join('、')}）` : ''}${e.summary ? `｜${e.summary}` : ''}`)
     .join('\n');
-  const openThreads = getThreads(sessionId, { branchId, status: 'open', limit: 12 }).map((t) => t.title);
+  // 给模型的未回收线索清单必须与**场记单渲染的那一份**同源同长（THREAD_RENDER_MAX）。
+  // 上限 = 渲染容量之后这里永远拿得到全部，所以 `resolve` 的「title 完全一致」
+  // 不再是「清单太长、末位看不见」的问题，而只是一层防误匹配的保护，保留。
+  const openThreads = getThreads(sessionId, { branchId, status: 'open', limit: THREAD_RENDER_MAX })
+    .map((t) => t.title);
 
   const baseMessages = [
     { role: 'system', content: archivistSystemPrompt() },
@@ -541,7 +617,8 @@ export async function runArchivist({
       role: 'user',
       content: archivistUserPrompt({
         turnNo: no, playerText, branchChoice, narrative,
-        castIndex, codexIndex, openThreads, playerName: card.player?.name,
+        castIndex, codexIndex, openThreads, threadLimit: THREAD_RENDER_MAX,
+        playerName: card.player?.name,
       }),
     },
   ];
@@ -609,7 +686,7 @@ export async function runArchivist({
 
   const applied = applyArchivistUpdate({
     sessionId, branchId, turnNo: no, update, aliasIndex, playerName: card.player?.name || '',
-    declaredTargets,
+    declaredTargets, narrative,
   });
   return { applied, scene_change: update.scene_change, uncertain: update.uncertain, usage };
 }
@@ -691,6 +768,7 @@ function collectPlaceEntities(aliasIndex, sessionId, branchId, turnNo) {
  */
 export function applyArchivistUpdate({
   sessionId, branchId, turnNo, update, aliasIndex = [], playerName = '', declaredTargets = null,
+  narrative = '',
 }) {
   const applied = {
     assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
@@ -700,12 +778,15 @@ export function applyArchivistUpdate({
   const declaredSet = declaredSetOf(declaredTargets, aliasIndex);
   const skipped = [];
   const skipTarget = (kind, target) => { skipped.push({ kind, target: str(target) }); };
+  // 被 WIP 上限/权重阈值挡下的线索提案。不静默丢：合并成一条
+  // patches(kind='thread_rejected')，让「模型一直在埋、系统一直在拒」在报告里看得见。
+  const rejectedThreads = [];
 
   // 同一批提案里，模型可能先写新角色的账本/状态/关系，再把 introduce 放进 changes。
   // 先扫一遍 introduce 纳入声明集合，避免「同拍引入的实体被自己的提案拒掉」。
   if (declaredSet) {
     for (const raw of update.changes || []) {
-      const c = sanitizeChange(raw, { aliasIndex, playerName });
+      const c = sanitizeChange(raw, { aliasIndex, playerName, narrative });
       if (c && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
     }
   }
@@ -806,6 +887,9 @@ export function applyArchivistUpdate({
   }
 
   /* ---- 线索账本 ---- */
+  // 上限 = 场记单的渲染容量（THREAD_RENDER_MAX）：超过它，埋下的线索根本不会出现在
+  // 下一拍的提示词里，等于埋了个自己看不见的东西。所以到顶就**拒绝新埋**并留痕，
+  // 而不是默默写进表里假装成功。`resolve` 永远允许——它减少条数。
   for (const raw of update.threads || []) {
     const t = obj(raw);
     const title = str(t.title);
@@ -825,6 +909,20 @@ export function applyArchivistUpdate({
     }
     const open = getThreads(sessionId, { branchId, status: 'open', limit: 50 });
     const hit = open.find((x) => x.title === title);
+    // 重复 plant（标题已存在）走更新，不受上限约束——它不是新增一条。
+    if (!hit) {
+      const weight = Number.isFinite(Number(t.weight))
+        ? Math.max(0, Math.min(1, Number(t.weight)))
+        : 0.5;
+      if (weight < THREAD_MIN_WEIGHT) {
+        rejectedThreads.push({ title, reason: 'low_weight', weight });
+        continue;
+      }
+      if (open.length >= THREAD_RENDER_MAX) {
+        rejectedThreads.push({ title, reason: 'wip_full', open: open.length });
+        continue;
+      }
+    }
     upsertThread(sessionId, {
       branch_id: branchId,
       title: hit ? hit.title : title,
@@ -849,7 +947,7 @@ export function applyArchivistUpdate({
 
   /* ---- 实体变更：世界线自己的运行期状态 ---- */
   for (const raw of update.changes || []) {
-    const c = sanitizeChange(raw, { aliasIndex, playerName });
+    const c = sanitizeChange(raw, { aliasIndex, playerName, narrative });
     if (!c) continue;
     // introduce 是唯一允许新实体的入口（且已限定 cast/codex）；其余变更受目标声明约束。
     if (declaredSet && c.op !== 'introduce' && !isDeclaredTarget(c.entity_id, declaredSet, aliasIndex)) {
@@ -901,23 +999,13 @@ export function applyArchivistUpdate({
   setState(sessionId, turnNo, next, branchId);
   applied.ledger = true;
 
-  /* ---- 未确定项：交给人，不当事实 ---- */
-  // `uncertain` 是逐拍增长的未知项流水（实测每拍 2–5 条、65 拍 209 条、去重率 0.5%），
-  // 只增不减会一直长下去。保留最近 120 条 open，更旧的置 dismissed——不删行，审计链保留。
-  for (const u of update.uncertain || []) {
-    addPatch(sessionId, {
-      branch_id: branchId, agent: 'archivist', kind: 'uncertain', turn_no: turnNo, status: 'open',
-      payload: { text: u }, severity: 'minor',
-    });
-  }
-  if (update.uncertain?.length) {
-    try {
-      retirePatchesBeyond(sessionId, { branchId, kind: 'uncertain', keep: 120 });
-    } catch (err) {
-      // 收敛失败不影响本拍写入：下一次写 uncertain 时会再收敛。
-      console.warn(`[archivist] uncertain 收敛失败：${err?.message || err}`);
-    }
-  }
+  /* ---- 未确定项：只保留提示词出口，不落库 ---- */
+  // `uncertain` 是给史官的**减压阀**：允许它说「正文没明说，我不猜」，从而不必编造。
+  // 但它没有消费方——不进提示词、不进 threads、没有任何 Agent 读它，45 拍长跑里积了
+  // 209 条（每拍 2–5 条、去重率 0.5%），只是 `patches` 表里的噪音。
+  // 所以提示词那一句保留（删了会诱发编造），写 `patches` 的这一段删掉。
+  // 解析仍然保留（`parseArchivistUpdate()` 的 `uncertain` 字段）：模型输出里还有这个键，
+  // 不解析会落进未知字段。它现在只是「模型自述的思考痕迹」，用完即弃。
 
   /* ---- 目标声明：越界提案留痕（不静默丢，也不阻断同批合法写入） ---- */
   applied.skipped = skipped.length;
@@ -929,5 +1017,21 @@ export function applyArchivistUpdate({
     });
   }
 
+  /* ---- 线索被拒留痕：WIP 到顶 / 权重太低 ---- */
+  // 和 skipped_targets 同一个口径：不写进提示词、不占预算，只让「写了但没落库」不失踪。
+  applied.threads_rejected = rejectedThreads.length;
+  if (rejectedThreads.length) {
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'thread_rejected', turn_no: turnNo,
+      status: 'rejected', severity: 'info', evidence: 'thread-wip',
+      payload: {
+        total: rejectedThreads.length,
+        wip_limit: THREAD_RENDER_MAX,
+        items: rejectedThreads.slice(0, 20),
+      },
+    });
+  }
+
   return applied;
 }
+

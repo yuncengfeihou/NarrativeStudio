@@ -76,6 +76,8 @@ ${pacingNote}
 export function branchUserPrompt({ sceneSummary, lastNarrative, state, present, sceneSheet }) {
   const parts = [];
   if (sceneSheet) {
+    // 场记单已由装配层裁到「走向需要的那几段」（D26-B：去掉「附近设定」）。
+    // 不要再在这里按段落名二次裁——两处各裁一次就会出现「谁裁的、裁掉了什么」说不清。
     parts.push(`【场记单】（此刻世界的既定事实：在场者、私心、关系、未回收线索、压力）\n${sceneSheet}`);
   }
   if (sceneSummary) parts.push(`【此刻局势】${sceneSummary}`);

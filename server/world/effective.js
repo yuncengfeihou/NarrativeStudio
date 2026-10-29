@@ -182,9 +182,17 @@ const round2 = (n) => Math.round(n * 100) / 100;
 /**
  * 写一条数值增量。
  *
- * delta 做加减；结果为负**不 clamp 成 0**，而是整条拒绝并记进 `__rejected`——
- * 静默 clamp 会让「钱变少了但没人知道为什么」，与静默失忆同罪。
- * `__rejected` 由装配层读走写成 patch，不进提示词、不占预算。
+ * delta 做加减，**结果允许为负**（欠债）。
+ *
+ * 这里曾经是「结果为负就整条拒绝」——理由是「静默 clamp 成 0 会让钱变少了却没人知道」。
+ * 但拒绝在长跑里造成了更坏的结果：`prev=0` 时任何负数必然被拒，**被拒又不改基准**，
+ * 于是余额永久卡在 0；模型看不到余额、也看不到被拒，只能照自己正文里的账继续花钱，
+ * 50 拍实测「正文说七十五块二、账本一直是 0」公开矛盾 19 拍（见 D11）。
+ * 唯一能解开的是模型偶然用一次 `op:'set'`。
+ *
+ * 现行口径：负数照常落，渲染成「欠 X」（`renderPlayerView`/场记单负责读），
+ * 并记进 `world.overdrafts` 供报告看见。真正的非法输入（不是数字）仍然拒绝，
+ * 因为那是模型输出错，不是世界状态。
  */
 function writeNumber(world, target, path, op, value, src = {}) {
   const n = numericOf(value);
@@ -199,11 +207,11 @@ function writeNumber(world, target, path, op, value, src = {}) {
   }
   const prev = numericOf(getAt(target, path)) ?? 0;
   const next = round2(prev + n);
-  if (next < 0) {
-    pushRejected(world, { ...tag, value: n, prev, next, reason: 'negative' });
-    return;
-  }
   setAt(target, path, next);
+  if (next < 0) {
+    if (!Array.isArray(world.overdrafts)) world.overdrafts = [];
+    world.overdrafts.push({ ...tag, value: n, prev, next });
+  }
 }
 
 function pushRejected(world, item) {

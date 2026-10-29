@@ -269,7 +269,6 @@ console.log('\n=== 场记单 ===');
     threads: [{ title: '七年前的雨夜', status: 'open', weight: 0.9, note: '凌玥知情' }],
     codex: [{ entry: { name: '司楼', summary: '官营青楼', reveal: 'public', facets: { rules: ['入内即除籍'] } }, why: ['实体在场'] }],
     voices: { 'ling-yue': ['「卿儿，过来。」'] },
-    echoes: [],
     directive: '这一场不要让她解释七年前',
     capTokens: 2400,
   });
@@ -367,6 +366,76 @@ console.log('\n=== 场记单 ===');
   });
   ok(crowdTight.text.includes('在场'), '小配额下人群场仍保留在场');
   ok(crowdTight.meta.cast_mode !== 'full', '小配额下 cast 降级（不是整段丢）');
+
+  // === 关系渲染条数与排序（D17）===
+  // 旧实现写死 `.slice(0, 8)`：51 拍长跑里只有 11/42 条过场关系曾经露过面，
+  // 而关系段只占场景层配额的 1.6%。条数必须由装配层按预算推导，这里只负责
+  // ①按 relationLimit 切 ②两端在场优先。
+  const relPresent = personsOf(schema.normalizeCard({
+    title: 'rp',
+    entities: [
+      { id: 'p1', type: 'person', name: '甲' },
+      { id: 'p2', type: 'person', name: '乙' },
+    ],
+  }));
+  const manyRels = Array.from({ length: 30 }, (_, i) => ({
+    from_name: `甲`, to_name: `路人${i}`, kind: '旧识', sentiment: 0.9,
+  }));
+  // 两端都在场的关系强度低得多：若排序只看 |sentiment| 就永远进不了前 8。
+  const bothPresentRels = Array.from({ length: 4 }, (_, i) => ({
+    from_name: i % 2 ? '乙' : '甲', to_name: i % 2 ? '甲' : '乙', kind: '同乡', sentiment: 0.05,
+  }));
+  const relOut = sheet.renderSceneSheet({
+    ledger: { place: '廊下' },
+    present: relPresent,
+    relations: [...manyRels, ...bothPresentRels],
+    capTokens: 4000,
+    relationLimit: 8,
+  });
+  const relLineCount = relOut.meta.relations_rendered;
+  eq(relLineCount, 8, '关系渲染条数 = relationLimit（不再写死 8 也不无视它）');
+  ok(relOut.text.includes('甲 → 乙［同乡') || relOut.text.includes('乙 → 甲［同乡'),
+    '两端都在场的关系优先于高 |sentiment| 的单端关系（D17：排序要看在场）');
+
+  // 预算放宽时条数跟着涨：这是「条数由预算推导」的可核对证据（同 D9 的 facts）。
+  const relWide = sheet.renderSceneSheet({
+    ledger: { place: '廊下' }, present: relPresent,
+    relations: [...manyRels, ...bothPresentRels], capTokens: 4000, relationLimit: 20,
+  });
+  eq(relWide.meta.relations_rendered, 20, 'relationLimit 放宽后渲染条数跟着涨');
+  // 没给 relationLimit 时不许无界：仍受 capTokens 约束、按整条退让，不截半句。
+  const relDefault = sheet.renderSceneSheet({
+    ledger: { place: '廊下' }, present: relPresent, relations: manyRels, capTokens: 150,
+  });
+  ok(relDefault.meta.relations_rendered < 30,
+    `没给 relationLimit 时仍受 capTokens 约束（渲染 ${relDefault.meta.relations_rendered}/30 条）`);
+
+  // D26-B：走向 Agent 的场记单要去掉「附近设定」段，且其余部分必须与完整版逐字节相同。
+  // 用同一份 head + sections 重拼（composeSheetText），不各渲染一份——否则字数取舍都会变，
+  // A/B 对比就不成立。
+  const withBrief = sheet.renderSceneSheet({
+    ledger: { time: '初冬 · 黄昏', place: '商务大厦门口' },
+    present: personsOf(card),
+    codexBrief: [
+      { entry: { name: '司楼', summary: '官营青楼' } },
+      { entry: { name: '太女殿', summary: '东宫正殿' } },
+    ],
+    capTokens: 4000,
+  });
+  ok(withBrief.text.includes('附近设定'), '完整场记单带「附近设定」段');
+  const branchText = sheet.composeSheetText(
+    withBrief.head,
+    (withBrief.sections || []).filter((s) => s.key !== 'codexBrief'),
+  );
+  ok(!branchText.includes('附近设定'), '走向用的场记单去掉了「附近设定」段（D26-B）');
+  ok(branchText.includes('在场'), '去掉「附近设定」后在场段还在（走向需要它）');
+  ok(withBrief.text.length > branchText.length, '走向版确实更短');
+  // 其余段的文本逐字相同：只有被删那一段不见了，别的一个字都没动。
+  for (const sec of (withBrief.sections || [])) {
+    if (sec.key === 'codexBrief') continue;
+    ok(branchText.includes(sec.text), `段 ${sec.key} 在走向版里逐字保留`);
+  }
+  eq(sheet.composeSheetText('', []), '', '空单子拼出来还是空串');
 }
 
 function estimate(s) {
@@ -470,6 +539,61 @@ console.log('\n=== 卡级 lint：世界索引容量 ===');
     title: 'small', entities: [{ type: 'person', name: '凌玥' }, { type: 'place', name: '雨街' }],
   }));
   ok(!small.issues.some((i) => i.code === 'index_overflow'), '小卡不报索引容量问题');
+
+  /* ---- 预埋伏笔超过线索账本容量（D5）----
+   * seeds 开局直接播种成 open 线索，而场记单只渲染 THREAD_RENDER_MAX 条。
+   * 超过的部分开局就不在场记单里，作者会以为它们在生效。 */
+  const tooManySeeds = lintLib.lintCard(schema.normalizeCard({
+    title: 'seeds', entities: [{ type: 'person', name: '凌玥' }],
+    seeds: Array.from({ length: 12 }, (_, i) => ({ title: `伏笔${i}`, weight: 0.9 })),
+  }));
+  const seedsIssue = tooManySeeds.issues.find((i) => i.code === 'seeds_over_thread_capacity');
+  ok(!!seedsIssue, '预埋伏笔超过线索容量时给出提示');
+  eq(seedsIssue?.severity, 'major', '线索容量不是 blocker（不拦保存）');
+  eq(seedsIssue?.dropped, 4, '报告超出容量的条数（12 - 8）');
+
+  const okSeeds = lintLib.lintCard(schema.normalizeCard({
+    title: 'seeds-ok', entities: [{ type: 'person', name: '凌玥' }],
+    seeds: [{ title: '伏笔1', weight: 0.9 }, { title: '伏笔2', weight: 0.55 }],
+  }));
+  ok(!okSeeds.issues.some((i) => i.code === 'seeds_over_thread_capacity'), '没超出容量时不报（含 0.55 低权 seeds）');
+
+  /* ---- 预埋伏笔吃掉运行时额度（D5 可见性，不改上限）----
+   * 6 条 seeds 在 8 条容量里剩 2 个位置：开局伏笔全都看得见，但本局能新挖的钩子
+   * 只剩 2 条。额度不是 bug，作者不该看不见这个交换。 */
+  const seedHeavy = lintLib.lintCard(schema.normalizeCard({
+    title: 'seeds-heavy', entities: [{ type: 'person', name: '凌玥' }],
+    seeds: Array.from({ length: 6 }, (_, i) => ({ title: `伏笔${i}`, weight: 0.8 })),
+  }));
+  const roomIssue = seedHeavy.issues.find((i) => i.code === 'seeds_eat_runtime_room');
+  ok(!!roomIssue, '预埋伏笔占掉大半额度时给出提示');
+  eq(roomIssue?.severity, 'minor', '额度提醒是 minor（不拦保存、不算容量超限）');
+  eq(roomIssue?.runtime_room, 2, '报告运行时还剩几条额度（8 - 6）');
+  ok(!seedHeavy.issues.some((i) => i.code === 'seeds_over_thread_capacity'),
+    '占额度 ≠ 超容量：6 条仍在 8 条以内，不报 major');
+
+  const seedLight = lintLib.lintCard(schema.normalizeCard({
+    title: 'seeds-light', entities: [{ type: 'person', name: '凌玥' }],
+    seeds: Array.from({ length: 3 }, (_, i) => ({ title: `伏笔${i}`, weight: 0.8 })),
+  }));
+  ok(!seedLight.issues.some((i) => i.code === 'seeds_eat_runtime_room'),
+    '剩 5 个额度时不提醒（阈值是剩 ≤2 条）');
+
+  /* ---- 线索行的「预置」标注（D5 可见性）----
+   * 种子与运行时钩子抢同一块渲染容量，但回收时机不同；混在一张清单里模型
+   * 看不出哪条由自己调度。只在同一行加一个词，不新增段、不新增通道。 */
+  const seedSheet = sheet.renderSceneSheet({
+    ledger: { time: '次日', place: '镇上' },
+    present: [],
+    threads: [
+      { title: '七年前的雨夜', status: 'open', weight: 0.95, planted_turn: 0, note: '' },
+      { title: '竹院外的脚步声', status: 'open', weight: 0.7, planted_turn: 26, note: '' },
+    ],
+    capTokens: 2400,
+  });
+  const thLines = seedSheet.text.split('\n').filter((l) => l.startsWith('· '));
+  eq(thLines, ['· 七年前的雨夜［主线·预置］', '· 竹院外的脚步声'],
+    '线索行：种子标「预置」、运行时新埋的不标；主线标只按权重');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

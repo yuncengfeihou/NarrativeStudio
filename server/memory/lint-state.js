@@ -12,7 +12,7 @@
  * 死亡角色仍记为「在场」这种问题，等校勘发现时，剧情已经演了好几轮。
  *
  * 五类检查（全部来自已有字段，不做语义推断）：
- *   - 死亡/离场的角色仍在 present
+ *   - 死亡/离场的角色仍在 present（**玩家角色除外**：他就是镜头本身）
  *   - 同一角色出现在两个地点
  *   - 随身物品的持有者不在场
  *   - 单值谓词在同一时刻有多个有效对象
@@ -30,10 +30,13 @@ const str = (v) => (typeof v === 'string' ? v : v == null ? '' : String(v)).trim
  * @param {Array}  args.assertions   当前有效的断言
  * @param {Array}  args.scenes       已封场的场次记录（按 turn_from 正序）
  * @param {number} args.turnNo       当前轮次
+ * @param {string} args.playerName   玩家角色名：**永不因 life_state 被移出在场**（见下）
+ * @param {string} args.playerId     玩家角色 id（同上）
  * @returns {{fixes:Array, warnings:Array, ledger:object, present:Array}}
  */
 export function lintState({
   ledger = {}, present = [], assertions = [], scenes = [], turnNo = 0,
+  playerName = '', playerId = '',
 } = {}) {
   const fixes = [];
   const warnings = [];
@@ -47,8 +50,21 @@ export function lintState({
   // 主判：world_state 投影过来的 life_state（受控词 alive/injured/dead/gone，史官每拍写）。
   // 兜底：旧数据或模型漏写 life_state 时的 status 自由文本关键词——名单冻结，不再扩充
   // （AGENTS §1.2：不堆叠识别器）。结构化值优先，避免关键词误伤正常台词。
+  // **玩家角色不适用这条**：他是「镜头本身」（pickPresent 里造的最小条目也带 is_player:true），
+  // 主角若真离场，戏就结束了，不是「这一场不在镜头里」。曾经这里一视同仁，
+  // 于是史官把主角写成 gone 的那一拍起，场记单每拍在末尾印「已故／离场：伍卿」，
+  // 而正文仍是他的第一人称——模型同时收到「你已离场」和「你在做事」。
+  // 主角那条 `life_state:'gone'` 本身也是无意义的：`absentees` 只挑 type==='person'，
+  // 没有任何消费方读 player.life_state（AGENTS §5.3：没有消费方的预留路径会变成假的）。
+  const pName = str(playerName);
+  const pId = str(playerId);
+  const isPlayerCard = (c) => !!c.is_player
+    || (!!pId && (c.id === pId || c.name === pId))
+    || (!!pName && (c.name === pName || c.id === pName));
+
   const goneIds = new Set();
   for (const c of nextCast) {
+    if (isPlayerCard(c)) continue;
     const charState = characters[c.name] || characters[c.id] || {};
     const life = str(c.life_state) || str(charState.life_state);
     const status = str(c.status) || str(charState.condition) || str(charState.status);

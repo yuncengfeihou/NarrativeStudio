@@ -155,6 +155,15 @@ scenes / world_state` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork�
 `relation_events` / `thread_events`。fork 时复制 `turn_no <= fork_turn` 的事件，再按
 「每个键最后一条事件」重建当前表；分叉点之后才建立/更新/回收的关系与线索不会进入新分支。
 
+**线索（`threads`）有 WIP 上限，且与渲染容量共读一个常量**（AGENTS §5.3）：
+`scene-sheet.js` 的 `THREAD_RENDER_MAX`（= 场记单线索段的渲染条数）**同时是账本上限**。
+史官新埋（`plant` 且此前不存在的标题）时两条确定性拒绝：`weight < THREAD_MIN_WEIGHT`
+或 `open 条数 >= THREAD_RENDER_MAX`。被拒项不静默丢——合并成一条
+`patches(kind='thread_rejected', status='rejected', payload:{total, wip_limit, items[]})`，
+`payload.items[].reason ∈ 'low_weight' | 'wip_full'`。`resolve` 永远允许（它只会减少条数）。
+阈值**不作用于卡内 `seeds`**：`anchors`/`seeds` 播种走 `upsertThread` 直写，作者标 0.55 也算数。
+`getThreads(limit: -1)` 表示不设上限（校勘靶池用它）。
+
 **异步写入守卫**：旁路 Agent 在落库前用 `branchSnapshot()/isBranchCurrent()` 核对
 `branch_id + 回合水位`。`forkSessionSafe()` 在会话锁内 fork，`/rollback`、`/rewrite` 必须走它。
 
@@ -183,6 +192,16 @@ patches(session_id, branch_id, agent, kind, payload_json, evidence, status, seve
 
 **写入 `assertions` / `voices` / `patches` 必须显式给 `branch_id`**（缺省抛错，不再静默兜底 `main`）。
 
+**`getVoiceMap()` 的上限是「每人 perWho 条」，不是「全局前 N 行」**（D23）：
+旧实现 `getVoices(limit: 400)` 再在内存里按人切，那 400 是**跨所有人的全局窗口**，
+长跑会顶穿——实测每拍新增 4.88 行，第 82 拍填满 400 行，之后窗口只保留「最近 82 拍里
+说过话的人」，久没开口的角色（谢沐 t7、陆可 t31）整段掉出声线表、口吻锚点永久消失，
+而 `layers_truncated` 里连 voices 这个键都没有。现在用 `ROW_NUMBER() OVER (PARTITION BY who
+ORDER BY pinned DESC, turn_no DESC, id DESC)` 在 SQL 里按人分区取前 N 条，与总行数无关。
+**判据**：`getVoices` 的 `limit` 只服务于「面板列表」这类按时间排的全量视图，
+任何「按角色取最近 N 条」的读都必须走 `getVoiceMap`；把 `limit: 400` 这类全局窗口
+塞进装配路径 → 违律。
+
 **world_state 是运行期世界变化的唯一写入口**：`entity_kind` 为实体类型（`person` / `place` / `institution` / `item` / `faction` / `concept` / `custom`）或 `player | world`，
 `op` 为 `set | add | remove | introduce | delta`，路径白名单在 `server/world/state-paths.js`。
 身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas, fates)` 把
@@ -193,10 +212,14 @@ patches(session_id, branch_id, agent, kind, payload_json, evidence, status, seve
 （当前仅 `player.money`）允许 `op='delta'`——模型只声明「这一拍变了多少」，加减由代码做，
 模型不再自己算余额。路径是不是数值**由白名单决定，不由模型吐出的字面量类型决定**；`NUMBER_PATH_SET`
 与 `LIST_PATH_SET` 不相交。非数字值、空串、`null` 一律整条拒绝（`Number('') === 0` 会把
-「没写金额」误记成「余额归零」）。`delta` 的结果为负时**不 clamp 成 0**，整条拒绝并记进
-`EffectiveWorld.rejected_deltas`（`{path, op, delta_id, turn, value, prev, next, reason}`，
-reason ∈ `not_a_number | negative`）；该字段只供装配/编排层读，**不进提示词、不占预算**，
-由 `orchestrator` 在本轮写完后重新投影采样，落成 `patches(kind='rejected_delta', status='failed')`。
+「没写金额」误记成「余额归零」），reason=`not_a_number`。
+**结果为负时照常写入**（D11）：推一条 `EffectiveWorld.overdrafts`
+（`{path, op, delta_id, turn, value, prev, next}`，只供装配/编排层读、不进提示词、不占预算），
+由 `orchestrator` 落成 `patches(kind='overdrawn', status='applied')` 审计；
+场记单渲染成「银钱 欠 N」。**曾经的「负数整条拒绝」是错的**：`prev=0` 时任何负数必被拒、
+被拒又不改基准 → 余额永久卡 0，而模型看不见余额也看不见被拒 → 50 拍里正文与账本公开矛盾 19 拍，
+唯一解开的一次是史官偶然用了 `op='set'`。红线 10 反对的是**静默**失真（clamp 成 0），
+不是「负」——把负数渲染出来是让事实可见，所以 `rejected_delta` 现在只剩 `not_a_number` 一种 reason。
 玩家银钱经 `renderSceneSheet({playerNow})` 的「主角此刻｜银钱 N」每拍可见。
 
 **实体定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有事实实体运行期不可写
@@ -205,6 +228,10 @@ reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summa
 与 `voice / psyche / knowledge / agenda / relations` 的列表路径；`life_state` 只接受
 `LIFE_STATES` 里的四个值，代码据此判定死亡/离场（自由文本只作 `status` 展示）。
 新条目第一次 `introduce` 时可以一次写清定义。
+**玩家（kind=`player`）没有 `life_state`**（D14）：主角不会「这一场不在镜头里」，
+他离场整场戏就结束了；这条路径没有任何消费方（`absentees` 只挑 `type==='person'`），
+放行只会让 `card.player.life_state` 永久停在某个值。史官对玩家写它会因白名单拒绝
+并记 `patches(kind='skipped_targets')`。人物（person）的 `life_state` 不受影响。
 
 **断言语义**：只有**单值谓词**（位于 / 是 / 曾经是）在「同主同谓、对象不同、有效期重叠」时
 把旧断言 `status='invalidated'` 并记 `valid_to`，**不删除**；多值谓词（知道 / 拥有 / 想要…）
@@ -259,6 +286,10 @@ lintCard(card)
 // 结构检查：断链/别名冲突/包含环/孤立实体/单值声明冲突；
 // 容量检查（major）：index_overflow —— renderWorldTree(card, 1200) 后仍放不下的实体（不含 muted 事实），
 //                    extra:{ids, dropped}；只是提示，不拦保存。
+//                    seeds_over_thread_capacity —— seeds 条数 > THREAD_RENDER_MAX，多出来的开局看不见。
+// 容量提醒（minor）：seeds_eat_runtime_room —— seeds 条数没超容量，但占掉了额度：
+//                    THREAD_RENDER_MAX - seeds.length <= 2 时提示，extra:{seeds, runtime_room}。
+//                    说明本局运行时最多还能新挖几条；不改上限，只是让作者看见这个交换。
 // 内容检查（info）：person_incomplete（缺 appearance/summary/rhythm）、person_hollow（wants+hides 全空）、
 //                  fact_incomplete（缺 summary/facets）
 // 阻断项（blocker）：parent_cycle、duplicate_id、future_leak（有 source.canon_cutoff 时 past 事件章号 ≥ cutoff；来源不可解析则不猜）
@@ -267,7 +298,12 @@ lintCard(card)
 ## Scene Sheet 接口（纯函数）
 
 ```js
-import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet } from './world/scene-sheet.js';
+import { renderWorldIndex, renderWorldTree, selectCodex, renderSceneSheet,
+         THREAD_RENDER_MAX, THREAD_MIN_WEIGHT } from './world/scene-sheet.js';
+
+// THREAD_RENDER_MAX  = 8  —— 场记单「线索」段最多渲染几条；**同时是线索账本的 WIP 上限**。
+//   两处必须共读这一个数：上限大于渲染容量等于「埋了但看不见」（AGENTS §5.3）。
+// THREAD_MIN_WEIGHT  = 0.6 —— 运行时新埋线索的最低权重；低于它不落库（卡内 seeds 豁免）。
 
 renderWorldIndex(card, capTokens, { skipIds })     // 人物段 + 设定集段；超配额降级为只留名字
 renderWorldTree(card, capTokens, { skipIds })      // 有 parent_id 时按包含关系折叠；没有时退回 renderWorldIndex
@@ -275,9 +311,14 @@ renderTimelinePast(card, capTokens)                // 前史（canon='past'）�
 selectCodex(card, { presentIds, mentionedIds, threadTags, pinnedIds, currentPlaceId, skipIds })
   // 只在事实实体里选（人物由在场判定带出）；-> [{entry, score, why[]}]
   // 实体连接 60 / 主题标签 30 / 钉选 100 / 当前地点 20；muted 条目不进入候选（静音 ≠ 删除）
-renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices, echoes,
+renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voices,
                    facts, knowledgeMatrix, omens, rumors, worldRuntime, playerNow, directive,
-                   absentees, capTokens })
+                   absentees, capTokens, relationLimit })
+  // 回声（echoes）段已删除（D18）：它是「原声：」行的逐字复制（76 拍 278/278 条 100% 重复），
+  //   轮次信息已由 renderCastLine 的「原声：第N轮…」承担。不要再把回声段加回来。
+composeSheetText(headText, sections)               // 用同一份 head + 选中的段重拼场记单正文（D26-B）
+  // 唯一用处：给旁路 Agent 一个「同一张单子少一段」的版本。必须复用 head/sections 重拼，
+  //   不能在旁路再渲染一份——那样字数和取舍都会变，A/B 对比不成立。
   // codex = T0 全量事实条目，codexBrief = T1 一句；人物走 present 的 renderCastLine
   // absentees = [{name, state:'dead'|'gone', note}] —— 已故/离场者，渲染成「已故／离场：…」一行
   // rumors = [{who, what, visibility:'rumor'|'public'}] —— 世界呼吸切场推演出的幕外流言，
@@ -285,9 +326,31 @@ renderSceneSheet({ ledger, present, relations, threads, codex, codexBrief, voice
   // 预算：need 段（when/world/player/cast）先占，可选段后占。
   //   cast 段内部按 完整 → 紧凑(renderCastCompact) → 极简(renderCastMinimal) 降级，
   //   档位不足时截断极简文本；**cast 永不整段丢弃**（人群场不能没有在场锚点）。
-  // -> {text, meta}  meta:{ present, codex, codex_brief, echoes, facts, rumors, kept[], dropped[],
-  //                          codex_rendered, codex_brief_rendered, cast_mode:'full'|'compact'|'minimal',
-  //                          absentees:[{name,state}], tokens }
+  // 线索段：只渲染 status==='open' 的前 THREAD_RENDER_MAX 条（weight>=0.8 打「［主线］」；
+//   planted_turn===0 的卡内 seeds 另打「预置」，合成「［主线·预置］」或「［预置］」）。
+//   标注只加在行尾，不新增段、不占新预算——它区分「作者预埋」与「本局挖出」，
+//   两者抢同一块渲染容量但回收时机不同（D5 可见性）。
+  //   渲染条数与账本 WIP 上限共读一个常量，不要在此处写死数字。
+  // 事实段**不在这里切片**（D9）：条数由装配层的 facts_many_limit（按 scene 配额推导）决定，
+  //   本函数只负责「整条退让」——装不下就整段降级/丢弃，记进 meta.kept/dropped。
+  //   历史上这里有一个 `.slice(0, 24)`，它与装配层的 manyLimit=10 互相遮蔽：
+  //   只改装配层会被它砍回 24，只改它则永远碰不到（总数本来就 ≤24）。不要再补回来。
+  // 关系段同理（D17）：本函数不再写死 `.slice(0, 8)`，条数由 relationLimit 决定
+  //   （装配层 = max(8, floor(scene 配额 × 15% ÷ 34.5))）；排序先「两端都在场」再按调用方
+  //   传入的 |sentiment| 顺序（稳定排序，组内顺序不变）。历史上只渲染 8 条、排序键不含
+  //   「谁在场」，42 条过场关系只有 11 条曾露过面，而关系段只占场景层配额的 1.6%。
+  // 银钱为负渲染成「银钱 欠 N」（D11），不是「银钱 -N」也不是省略。
+  // -> {text, meta, head, sections}  meta:{ present, codex, codex_brief, facts,
+  //                          facts_rendered, relations_rendered, rumors,
+  //                          kept[], dropped[], codex_rendered, codex_brief_rendered,
+  //                          cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}], tokens }
+  // facts_rendered = 事实段**实际渲染**的行数（= 装配层 facts_many_limit 与预算共同作用的结果），
+  //   装配层用它填 meta.facts；reads 的 facts 是候选数，别混。
+  // head / sections（D26-B）= 拼出 text 的两块原料。旁路 Agent 要用「少一段」的版本时，
+  //   拿这两个字段交给 composeSheetText 重拼，不要自己再调一次本函数。
+  // voice_speakers / voice_lines / voice_present_covered（D23）= 声线表里有几条可用台词、
+  //   覆盖了几个在场者。`voices` 由 getVoiceMap 按人分区取 perWho 条（不是全局窗口），
+  //   渲染端再 slice(0, 2)；所以「在场者里有几个根本没有声线锚点」是这里能回答的唯一问题。
 lookupCodex(card, queries, { limit })              // 模型主动检索：遍历全部实体（含 person）
 renderCodexHit(entry)                              // 单条渲染；person 额外渲染身份/口吻/性格/知识边界
 ```
@@ -356,24 +419,66 @@ loadCraftConfigRaw()       // JSON 坏掉时返回 {__corrupt:true}，不抛错
 ## Context Engine 接口
 
 ```js
-import { assembleContext, buildSystemLayer, buildContract, selectFacts, renderKnowledgeMatrix }
+import { assembleContext, buildSystemLayer, buildContract, selectFacts, renderKnowledgeMatrix,
+         overlapWindowFrom, recallVisibleFrom,
+         BRANCH_SHEET_TRIMS, BRANCH_CORE_KEYS, resolveBranchSheetTrim, selectBranchSections }
   from './memory/context-engine.js';
+
+// 原文窗口起点（装配层与检索层共读一个函数，不许各写一份规则）：
+//   overlapWindowFrom(sceneCoveredTo, turnNo, overlapTurns) -> recent_from
+//   recallVisibleFrom(...) 同签名同实现，语义是「检索不该搜上下文已经看得见的那几拍」。
+//   起点 = max(1, min(scene_to + 1, turnNo − overlap))：晚于 scene_to+1 是洞（违律），
+//   早于它是有意的重叠。写成 max 会随场长把当前场原文从中间切掉。
+//
+// 走向版场记单的裁剪档位（D26，会话级开关，默认不变）：
+//   resolveBranchSheetTrim(settings) -> 'default' | 'core_only'
+//     读 settings.branch_sheet_trim；缺省/非法一律回 'default'（写错一个词不改文风）。
+//   selectBranchSections(sections, trim) -> sections[]
+//     'default'   = 去掉 codexBrief（与旧实现逐字节等价）
+//     'core_only' = 只留 when/world/player/cast/relations/threads/pressure/directive
+//     两者都只是对同一份 sections 做 filter，**不重新渲染**——重渲染连字数取舍都会变，
+//     A/B 就不再是「只差被删的段」。
+//   落点：返回值的 branchSheet 与 meta.scene_sheet.branch_sheet.trim / dropped_sections。
+//   这是实验开关，不是新注入通道：送模那份场记单逐字节不变。
 
 const ctx = await assembleContext({ session, world, turnNo, playerText, images,
                                     branchChoice, isOpening, directive, retrieval,
                                     previousMessages });
-// retrieval        = { text, queries, entries } | null   // 模型主动检索的辞书全文（当拍）
+// retrieval        = { text, queries, codex_queries, history_queries,
+//                      entries, history_hits, tokens:{codex,history},
+//                      history_self_echo, exclude_from } | null
+// branchSheet = 给走向 Agent 的场记单：与送模那份逐字节相同，但按会话档位裁段（D26）。
+//   settings.branch_sheet_trim = 'default'（缺省）只去 codexBrief；'core_only' 再去
+//   facts / knowledge / codex（方案 A 实验臂）。没有场记单时为空串。
+//   meta.scene_sheet.branch_sheet 记 {trim, dropped_sections, tokens, full_tokens}。
+//                   // 模型主动取证：辞书全文 + 历史原文片段（两者都在当拍蒸发，不落库）
+//                   // exclude_from = runRetrieval 传下来的检索下界（D4 修法 ①）：
+//                   //   最近这场原文已经在 recent 层看得见，再搜一遍只会「自问自答」。
+//                   // history_self_echo = 那些正好是玩家本拍原话子串的 history 查询词，
+//                   //   空查询 / 自问自答占比是 D4 的效果判据（见 meta.retrieval）。
 // buildContract(session, world, card?, { craft }) — craft 缺省时按 session.settings 现算；
 //   作者 `prompt.style_guide` 存在时不渲染预设文风（优先级：卡 > 预设 > 默认）。
 // previousMessages = 上一轮真实发出的 messages | null     // 仅用于计算前缀复用率，不影响装配内容
 // -> { messages,
 //      budget:{system,archive,summary,recent,scene,retrieval,current,total},   // 本轮**实际渲染**体积；summary 恒为 0（层已移除）
-//      state, ledger, anchor, recentTurns, echoes,
+//      state, ledger, anchor, recentTurns, branchSheet,
 //      craft,   // 本轮工艺配置（resolveCraft 的结果；走向 Agent 与正文共读 pacing，保证同尺度）
 //      meta:{present, mentioned, theme_tags, codex, codex_candidates,
 //            codex_rendered, codex_dropped, codex_brief_candidates,
 //            codex_brief_rendered, graph:{entities,edges},
 //            facts, facts_candidates, facts_single, facts_many_rendered, facts_many_dropped,
+//            facts_many_limit,   // 多值谓词的渲染上限 = max(10, floor(scene 配额 × 25% ÷ 12.4))
+//                   // 每拍实测：一条事实约 12.4 tok；这个数**由预算推导**，不是常量（D9）。
+//                   // 曾同时存在 manyLimit=10 与渲染端 slice(0,24) 两道写死的闸，
+//                   // 51 拍实测可见率 100% → 16.8%（216 条候选 → 渲染 27 条），
+//                   // 而场景层配额只用了 26%。两道闸互相遮蔽，只改一道看不出变化。
+//                   // 现在只剩「预算」一道：renderSceneSheet 不再 slice，facts 是可选段，
+//                   // 装不下按整条退让（meta.scene_sheet 记 kept/dropped_sections）。
+//                   // 判据：facts_many_rendered 应随 scene 配额走；若它恒等于 10 或 24，就是回退了。
+//            relations_limit, relations_rendered,
+//                   // 关系段的渲染上限 = max(8, floor(scene 配额 × 15% ÷ 34.5))（D17）。
+//                   // 关系段只占场景层配额的 ~5%，所以上限远大于 8（200K 窗口下是 97）。
+//                   // 判据：relations_limit 若恒等于 8，就是回退成「写死条数」；旧会话没有这个字段。
 //            state_fixes, state_warnings,
 //            fates:{total, unlocked, omens},
 //            timeline_past, timeline_future_held,
@@ -381,15 +486,36 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //                           index:{total, rendered, muted, dropped, dropped_names[<=20],
 //                                  tokens, cap, mode:'tree'|'flat'},   // 世界索引覆盖率（事后统计，不参与注入）
 //                           craft:{preset, style, dialogue, tokens, dropped[], capped}},  // 工艺块落位与降级
-//            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}], rumors},
+//            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}], rumors,
+//                         branch_sheet:{trim, dropped_sections, tokens, full_tokens}},  // 走向版裁剪（D26）
 //            dropped_sections, branch,
 //            coverage:{summary_to /* = 场次覆盖边界，保留旧名 */, recent_from, recent_to, turns,
+//                      overlap_turns /* 与场次索引重叠的拍数，D1 */, overlap_limit,
 //                      scene_count, scene_to, scene_index_rendered,
 //                      scene_index_dropped, scene_index_degraded},
 //            cache:{prefix_shared_tokens, prefix_shared_rate, first_divergence, system_hash,
 //                   drift:{verdict,index,char_offset,left_excerpt,right_excerpt,shared_messages,
 //                          prev_count,next_count}},
-//            summary: null, retrieval, degraded, soft_max, hard_max,
+//            summary: null, degraded, soft_max, hard_max,
+//            retrieval:{   // 资料员这一拍做了什么；**没出文本也留痕**（否则「没触发 / 触发了没查 /
+//                          // 查了没命中」三种状态全被抹成 null，比例失去分母）
+//              rendered, queries, entries, tokens,
+//              codex_queries, history_queries, codex_tokens, history_tokens,
+//              history_hits:[{turn_no,kind,query}], history_self_echo:[...], exclude_from},
+
+//            layers_truncated:{   // 截断可见化（D3）：degraded 看不到的那一类丢失
+//              assertions:{rendered, loaded, window, total, sql_window_full},
+//              relations:{rendered, loaded, window, render_limit, total, sql_window_full},
+//              threads:{loaded, window, open_total, render_max, open_over_capacity}},
+//                   // loaded = 进入进程的行数，total = 库里真实行数（与读取同 atTurn 口径）；
+//                   // sql_window_full = 已顶到 SQL LIMIT，再长也不会被渲染。
+//                   // threads 的两道限额都不是 40：SQL 读 40 无关紧要（D5 的 WIP 上限 8 在写入端
+//                   // 就拦住了），真正会「看不到」的是场记单只渲染前 render_max 条（= THREAD_RENDER_MAX）。
+//                   // 另注意：assertions 在窗口内还有**第二道、也是真正的**丢弃——selectFacts 的
+//                   //   多值条数上限（facts_many_limit）。那一道已改为按预算推导（D9），
+//                   //   facts / facts_candidates / facts_many_rendered / facts_many_dropped
+//                   //   才是「实际给了模型几条事实」，比 300 那道窗早一个数量级。
+//                   //   加新的可见率判据时看这几个字段，不要只看 loaded/window。
 //            plan:{window, output_reserve, safety, hard_max, soft_max, auto_soft,
 //                  layers:{system,archive,archiveDetail,recent,scene,retrieval,current}, shares:{...}},
 //            recall:{total, visible, rate, by_type:{<type>:{visible,total}}},
@@ -472,8 +598,13 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 
 ### 记忆覆盖不变量
 
-- **场次边界 + 1 必须等于原文窗口第一轮**：`coverage.recent_from === coverage.scene_to + 1`
-  （没有更早回合时 `recent_from` 为 null）。原文窗口不做字符串裁剪。
+- **场次边界与原文窗口不能有洞，但允许有意的重叠**：
+  `coverage.recent_from + coverage.overlap_turns === coverage.scene_to + 1`
+  （没有更早回合时 `recent_from` 为 null）。`overlap_turns <= coverage.overlap_limit`
+  （= `RECENT_OVERLAP_TURNS`，默认 2）。封场那一刻不再把上一两拍原文清零——这是
+  D1 封场尾巴，代价是原文与场次索引最多重叠 2 拍（约 soft 的 2%），换来
+  「切场后仍看得见上一拍怎么说话」。起点取 `min(scene_to + 1, turnNo − overlap)`：
+  **晚于 `scene_to + 1` 才是洞**，早于它只是有意的重叠。原文窗口不做字符串裁剪。
 - **场次只追加、不互相改写**：每场只从自己的完整原文生成（`closeScene()`）。
 - **强制封场**：`SCENE_EVERY` 轮或 `SCENE_MAX_TOKENS` token 触发。只靠「地点变化」会让
   同一地点的长剧情一场都不关，场次索引根本建不起来。
@@ -504,7 +635,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   retrieval 4% / current 6%）；`recent`（40%）只是强制封场的规划上限，**不裁原文**。
 - system 层先为契约/宪章/主角/常驻作者笔记预留预算；世界索引与前史只吃剩余空间，
   超了先砍索引、再丢最旧的前史行，绝不从尾部截断主角或作者笔记。
-- 场记单的可选段落按整条取舍（辞书/回声少一条，不切半句）；`directive` 排在可选设定之前，
+- 场记单的可选段落按整条取舍（辞书/事实/关系少一条，不切半句）；`directive` 排在可选设定之前，
   并且逐轮 directive 同时进入尾注，避免被场记单预算丢掉。
 - 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
   最近原文提到但不在场的角色只进辞书邻域/关系提示，不占完整人物卡位。
@@ -537,9 +668,12 @@ trimToolHistory(messages, baseLen, budgetTokens) -> removed
 
 // 史官（每轮后）
 runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, declaredTargets, signal, guard })
-// -> { applied:{assertions, assertions_invalidated, states, changes, relations, threads, voices, ledger, skipped},
+// -> { applied:{assertions, assertions_invalidated, states, changes, relations, threads,
+//              threads_rejected, voices, ledger, skipped},
 //      scene_change:{changed, when, place, place_id, weather, tension, present[]},
 //      uncertain, usage, stale?, parse_failed?, retried? }
+// uncertain 只解析、不落库也不外发（D6）：它是史官的减压阀（允许「正文没明说，我不猜」），
+//   没有消费方。不要再把它写进 patches，也不要经 SSE memory 事件推给前端。
 // scene_change.present 是「这一拍镜头里的人物」的唯一依据；place 能对上辞书 place 时自动补 place_id。
 // guard: () => boolean；false = 调用期间分支/回合已变，整批丢弃并记 patches(status='stale')。
 // declaredTargets: 目标声明集合（buildDeclaredTargets() 产出）；越界提案拒写并记
@@ -549,11 +683,24 @@ runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, opti
 //   不落脏数据、也不静默当空提案。
 buildDeclaredTargets({ card, present, codex, ledgerCharacters, playerName }) -> string[]
 // codex = 本拍设定集候选（事实实体）；card 里的人与事实都进声明集合，越界写入拒收
-applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerName, declaredTargets })   // 纯函数，可单测
+// `player` 与 `world` 永远在集合里：两者都**不是卡里的实体**，而是投影目标
+//   （`player/x` → `world.player.x`；`world/status` → `world.runtime.status` →
+//    场记单的「局势」行 + 定稿收进常驻笔记）。D25：曾经只放行 `player`，
+//   于是史官每一次世界局势变更都被这道校验静默拦掉——全库 `world_state` 里
+//   `entity_kind='world'` 的写入 **0 行**，而消费方一直在。新增任何投影目标时
+//   必须同步加进这里，并补一条「写入真的落库 + 投影后消费方读得到」的端到端断言。
+applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerName, narrative, declaredTargets })   // 纯函数，可单测
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
 parseArchivistUpdateStrict(content) // -> {ok, error, update}；只有顶层 JSON 对象才算成功（供重试/留痕）
 sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
-sanitizeChange(raw, { aliasIndex, playerName }) / mergeLedger(old, delta, {aliasIndex})
+sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, delta, {aliasIndex})
+// narrative（D13）：introduce 时若新名字的前缀（≥2 字、且不等于正经别名）出现在本拍正文里，
+//   就把它 absorbed 成别名（返回值多一个 aliases_from_narrative），让后文的简称能对上实体。
+//   只收**前缀**，不做「首 2 + 末 1」组合——那是 §1.2 禁止的识别器堆叠；
+//   中段省略的简称（蛇纹纸 ← 蛇纹圆印纸）抓不到，由 patches(kind='skipped_targets') 兜住可见化。
+//   非 introduce 分支还有一条兜底：resolveEntity 查不到时用 linkEntities，
+//   唯一命中才归一 kind/entityId（多命中保持原样，不猜）。
+// isDeclaredTarget 同样接受「实体链接能解析到已声明实体」的写法，否则简称会被目标声明挡掉。
 // buildEffectiveWorld(cardSnapshot, deltas) 在 server/world/effective.js，纯函数
 
 // 定稿：把当前世界线固化成新的世界卡（显式作者操作）
@@ -565,13 +712,41 @@ closeScene({ session, world, turnNo, reason, guard })    // 切场归档；stale
 // -> {scene_id, turn_from, turn_to, importance, when_label, place, place_id, cast,
 //     question, outcome, key_detail, causal, threads, hooks, life_changes, usage}
 // life_changes: [{who, life_state}]，由提示词的受控字段上报，closeScene 内部转交
-// applyLifeChanges() 落库；它只在「史官没写成 dead/gone」时补写，并留
+// applyLifeChanges() 落库；它只在「史官没写成 dead」时补写，并留
 // patches(kind='life_state_inferred') 审计。理由：lint-state 只认 life_state 这个受控值，
 // 而「手垂在床沿，指节不再蜷着」不含任何关键词，关键词兜底永远打不中。
+// **gone 不是终态**（D10）：场记读的是整场原文，它看到这人这场在说话就该能改回来；
+// guard 只挡 dead（死人复活必须模型显式写），gone → alive/injured 放行。
+// 而 dead 才是真终态——两者语义不同，别再合成一个判断。
 applyLifeChanges({ sessionId, branchId, turnNo, world, outcome, lifeChanges, sceneId })
 // -> [{who, life_state, from}]  纯写入辅助，供 closeScene 与测试复用
+// gone 的回程通道（D10-A）：每拍装配前跑，把「玩家这一拍点名了的 gone 角色」写回 alive。
+reviveNamedGone({ sessionId, branchId, turnNo, world, card, playerText, ledger })
+// -> [{who, from:'gone', to:'alive'}]；落 setCharState + addWorldState + patches(kind='life_state_revived')
+// 只认 playerText（旁白顺带提及不算，宁缺勿滥：误判回来在剧作上可接受，误判回不来是硬伤）；
+// 只处理 gone，dead 必须模型自己写。必须在 assembleContext 之前调用，
+//   否则这一拍的场记单还是「已故／离场」。不产生 SSE 事件，审计走 patches。
 detectSceneChange(session, update, turnNo)                // 地点/时间/在场者变了就切
 runContinuity({ session, world, turnNo, signal, guard })  // -> {issues, healthy, applied, stale?}
+// 单次 chat + responseFormat json_object，不调工具（工具是资料员 runLibrarian 的）。
+// 修法提案的落地逻辑抽成纯函数（D12）：
+applyContinuityFixes(sessionId, { branchId, turnNo, issues, threads, aliasIndex, playerName })
+// -> applied 条数；三种 fix.action：invalidate_assertion / set_state / resolve_thread。
+// invalidate_assertion 的 target 先 trim 再剥掉可选的一个 `#` 前缀（提示词把断言渲染成
+//   `#<id>`，模型照抄带井号——历史实现在这里是 `/^\d+$/`，于是 40 拍里每一条自动修复都落空、
+//   报告却记成「等人裁决」）。只放宽一个 `#`，不接受其它前缀：这不是模糊匹配。
+// set_state 的 target 必须是 `who::field`（D15）。模型常把断言 id 填进 set_state 表达
+//   「这条断言过时了」，那种情况按 invalidate_assertion 执行，并写
+//   fix_result:{state:'applied', interpreted_as:'invalidate_assertion'} 留痕。
+//   旧的 `[subject,'condition']` 兜底已删除：它把地点写进伤情字段、还会给「伍卿的积蓄」
+//   这种非人物 subject 造出假人物（投影时 applyDelta 找不到实体就走 emptyPersonEntry）。
+//   非人物 subject（reason='not_a_person'）与受控表外字段（reason='unknown_field'）
+//   一律拒写并留痕。aliasIndex 必须是 buildAliasIndex() 产出的数组（resolveEntity 用 .find）。
+// merge_alias 不是可用 action（D29）：没有实现分支，合并别名必须人确认。提示词里已从
+//   action 枚举删掉；模型仍可能写出来，那种情况记 reason='not_implemented'，与「形态填错」区分。
+// 未执行的提案写进 patch payload 的 fix_result:{action,target,state:'unmatched'[,reason]}，
+//   让「提案了但没执行」在报告里可见，而不是静默挂在 open。
+// tests 必须覆盖它——抽成纯函数就是为了这个（抽之前 runContinuity 零测试，才让上面那条活了 40 拍）。
 runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}
 // 工具：search_events / search_assertions / get_character_state / get_threads / get_scene /
 //       get_relations(who) / search_claims(subject,predicate)
@@ -608,18 +783,39 @@ lintState({ ledger, present, assertions, scenes, turnNo })
 // 能确定性修的（死亡角色仍在场）就地修；修不了的作为 warnings 带到台面上。
 // 在副本上操作，不改调用方对象。
 
-// 辞书检索预检（server/agents/retrieval.js）
+// 资料员预检（server/agents/retrieval.js）：辞书全文 + 历史原文，共用一次模型调用
 shouldPrecheckRetrieval({ mode, codexCount, minCodex, playerText, branchChoice, card })
-// auto：大卡 + 玩家文本点名了某个 codex 才跑；on/off 强制开关。
-runRetrieval({ card, playerText, ledger, lastNarrative, signal })
-// -> {text, queries, entries:[{id,name,why}], usage} | null
-// parseRetrievalQueries(content) -> string[]（宽容解析，失败返回空数组）
+// auto：两条通道任一命中才跑——
+//   辞书通道 `codexCount >= minCodex && 玩家文本/走向点名了某个 codex 条目`；
+//   历史通道 `玩家文本/走向提到了已登场的人（linked.person 非空）`，**不看卡大小**。
+// 理由：记忆一致性与卡多大无关；只认 linked.fact 会让小卡一局都不触发资料员。
+// on/off 强制开关（off 压过一切）。
+runRetrieval({ card, playerText, ledger, lastNarrative, signal,
+               sessionId, branchId, forkTurn, atTurn, excludeFrom })
+// -> {text, queries, codex_queries, history_queries, entries:[{id,name,why}],
+//     history_hits:[{turn_no,kind,query}], history_self_echo:[...], exclude_from,
+//     tokens:{codex,history}, usage} | null
+// 传了 sessionId 才启用历史通道（内部调 recallHistory，limit 3/条）。
+// excludeFrom（D4 修法 ①）= 检索下界：最近这场原文已经在 recent 层看得见，
+//   再搜一遍只会「自问自答」。调用方用 context-engine 的 recallVisibleFrom() 算，
+//   **不许在这里另写一份**（两处规则必须共读一个函数，否则装配层改了下界不跟）。
+// history_self_echo = 那些正好是玩家本拍原话子串的 history 查询词。
+//   判据：50 轮实测有 75% 的 history 查询是本拍原话子串（空转），下界落地后应接近 0；
+//   它和「空查询占比」一起报在 meta.retrieval，两个都要看。
+// 分账：两条都有结果时历史 45% / 辞书 55%，只有一条时拿满 retrieval 层；
+// 拼接顺序**辞书在前、历史在后**（越靠后离当前输入越近），整体再按层预算兜底截断。
+// lastNarrative 是「上一拍结尾」，提示词里一直有这一节，调用方必须传（orchestrator 已传）。
+// parseRetrievalRequest(content) -> {codex:string[], history:string[]}
+//   宽容解析：兼容旧形状 {queries:[...]}（当 codex 用），失败返回两个空数组。
+// parseRetrievalQueries(content) -> string[]（= parseRetrievalRequest().codex，保留旧名）
 
 // 历史检索（server/memory/recall-history.js；与 codex_lookup 同构的第五个分段工具）
-// recallHistory({ sessionId, branchId, forkTurn, atTurn, query, limit, kinds, maxTokens })
+// recallHistory({ sessionId, branchId, forkTurn, atTurn, excludeFrom, query, limit, kinds, maxTokens })
 // -> { text, hits:[{turn_no, kind, snippet, token_count}],
-//      meta:{query, hits, limit, tokens, engine:'fts5'|'like'|'none'} }
+//      meta:{query, hits, limit, tokens, engine:'fts5'|'like'|'none', excluded} }
 // 只读：按 branch_id 可见链（含继承的父分支，兄弟分支不可见）+ atTurn 过滤 turns 原文；
+// excludeFrom 是下界（含）：≥ 它的回合不检索。上层用 context-engine 的
+// recallVisibleFrom() 算「上下文里已经看得见哪几拍」，避免把当前场原文再搜一遍回来。
 // ≥3 个 Unicode 字符走 FTS5 trigram（turns_fts 外部内容表，触发器与 turns 同步，
 // 启动时按行数差 rebuild 自愈），少于 3 字走 LIKE 兜底（两字人名很常见）。
 // 结果只进 retrieval 子层、当拍蒸发；不写库、不进 turns、不做自动召回/embedding
@@ -629,10 +825,11 @@ runRetrieval({ card, playerText, ledger, lastNarrative, signal })
 // renderRecallResults(query, hits, {maxTokens}) -> string（纯函数，单测用）
 
 // 回合原文检索（server/memory/store.js）
-searchTurns(sessionId, query, { branchId, forkTurn, atTurn, limit, kinds })
+searchTurns(sessionId, query, { branchId, forkTurn, atTurn, excludeFrom, limit, kinds })
 // -> [{turn_no, kind, snippet, token_count}]，按时间从近到远；分支过滤规则同 getTurnsForBranch
 searchTurnsDetailed(sessionId, query, {…同上}) -> { hits:[…], engine:'fts5'|'like'|'none' }
 // engine 供 recall_history 的 meta 自报「这次到底走了哪条检索路」，不参与排序。
+// excludeFrom：上界改成 min(atTurn, excludeFrom − 1)，即「不搜最近的段」。
 
 // 分支守卫（server/memory/branch-guard.js）
 branchSnapshot(sessionId, branchId?) -> {sessionId, branchId, maxTurnNo, maxTurnId} | null
@@ -774,11 +971,14 @@ POST   /api/worlds/:id/sessions           body:{anchor_id?, settings?}
                                           // 其余会话参数（context_max_tokens 等）不跨局继承。
 
 GET    /api/sessions?world_id=
-POST   /api/sessions                      body:{world_id?, anchor_id?}
+POST   /api/sessions                      body:{world_id?, anchor_id?, settings?}
+                                          // settings 原样并入会话设置（工艺三轴会被归一）。
+                                          // D26 实验开关：branch_sheet_trim:'default'|'core_only'
 GET    /api/sessions/:id                  -> {session, card, world, turns, state, playerView, usage, memoryStats}
 PATCH  /api/sessions/:id                  body:{scene_directive?, title?, settings?}
                                           // settings 合并写入；narration_mode:'single'|'segmented'；
                                           // status_bar:'on'|'off'（场景信息条，默认 on）
+                                          // branch_sheet_trim:'default'|'core_only'（D26 走向版裁剪）
                                           // 工艺三轴只校验已给的键，不把未涉及的轴写死。
 DELETE /api/sessions/:id
 GET    /api/sessions/:id/turns            ?from=&to=&limit=
@@ -811,7 +1011,8 @@ GET    /api/sessions/:id/patches          ?status=&kind=&limit=
 // total = 同一过滤条件下的总数；counts = 按 kind 分组计数（不受 limit 影响）。
 // open_total / open_counts 是 status='open' 的同一组数：总览卡的「待处理」必须用它，
 // 从这一页列表本地过滤会漏（实测报 22，实际 133）。
-// 它们存在的理由：`uncertain` 每拍 3–5 条，混在一起时列表被它占满，
+// 它们存在的理由：不同 kind 的产出速率差两个数量级（史官每拍都写 `skipped_targets`
+// 这类流水、校勘每 10 拍才写几次矛盾），混在一起时列表被高频类占满，
 // 面板无法区分「没有矛盾」和「矛盾被截断在 100 条之外」。
 POST   /api/sessions/:id/patches/:id/resolve  body:{status:'applied'|'dismissed'}
 GET    /api/sessions/:id/notes
