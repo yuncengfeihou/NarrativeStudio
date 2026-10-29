@@ -166,14 +166,41 @@ export async function openMemoryPanel(sessionId, opts = {}) {
 
     /* ---------------- 分支 ---------------- */
     body.appendChild(el('h4', {}, '分支'));
-    body.appendChild(el('p.muted', {}, '回滚不是删历史，是从分叉点开一条新线。旧线标为 已废弃，随时可以回去看。'));
+    body.appendChild(el('p.muted', {}, '回滚不是删历史，是从分叉点开一条新线。每条线都能切回去继续写。'));
     const branchList = el('div.mem-branches');
+    const isCurrent = (b) => (b.is_current != null ? b.is_current : b.branch_id === data.branch);
     for (const b of branches) {
-      branchList.appendChild(el('div', { class: 'mem-branch' + (b.branch_id === data.branch ? ' is-current' : '') },
-        el('span.mem-branch-id', {}, b.branch_id + (b.branch_id === data.branch ? ' · 当前' : '')),
-        el('span.mem-branch-meta', {}, `第 ${b.fork_turn} 轮分叉｜${b.status}`),
+      const cur = isCurrent(b);
+      const row = el('div', { class: 'mem-branch' + (cur ? ' is-current' : '') },
+        el('span.mem-branch-id', {}, b.branch_id + (cur ? ' · 当前' : '')),
+        el('span.mem-branch-meta', {},
+          `第 ${b.fork_turn} 轮分叉｜${b.turn_count != null ? `${b.turn_count} 轮` : b.status}`),
         b.note ? el('span.mem-branch-note', {}, b.note) : null,
-      ));
+      );
+      if (!cur) {
+        row.appendChild(el('button.mem-branch-go', {
+          type: 'button',
+          title: '切到这条线继续写（不新建分支）',
+          onclick: async (e) => {
+            e.stopPropagation();
+            const ok = await confirmDialog({
+              title: `切到 ${b.branch_id}`,
+              message: `这一局会从 ${b.branch_id} 继续写。当前那条线标为已废弃，但不删，随时能再切回来。`,
+              confirmText: '切过去',
+            });
+            if (!ok) return;
+            try {
+              await api.checkoutBranch(sessionId, b.branch_id);
+              await refresh();
+              opts.onUpdate?.();
+              toast(`已切到 ${b.branch_id}`, { type: 'success' });
+            } catch (err) {
+              toast(err.message, { type: 'error' });
+            }
+          },
+        }, '切到这条线'));
+      }
+      branchList.appendChild(row);
     }
     body.appendChild(branchList);
 

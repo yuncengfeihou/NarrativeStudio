@@ -621,6 +621,14 @@ export default {
               toast('分段演绎不可用，已回退单发', { type: 'warn' });
             }
             break;
+          case 'narration_retry':
+            // 上游抖动自动整拍重发：不打断输入、不弹 toast 抢注意力，
+            // 只在进度行说明「正在重试」。服务器已经把这一拍的残稿清掉了。
+            if (pending?.isConnected) {
+              const label = pending.querySelector('span:last-child');
+              if (label) label.textContent = `上游中断，重试中 ${evt.attempt}/${evt.max}…`;
+            }
+            break;
           case 'narrative_done':
             if (live && evt.content) live.text = evt.content;
             if (evt.content) {

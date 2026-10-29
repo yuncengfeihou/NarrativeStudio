@@ -11,12 +11,12 @@ import {
 } from '../model-registry.js';
 import { currentPlan } from '../memory/context-plan.js';
 import {
-  auditSession, canonizeSession, createSessionWithSettings, forkSessionSafe, getMemoryStats,
-  getSessionSnapshot, recallSession, runTurn,
+  auditSession, canonizeSession, checkoutBranchSafe, createSessionWithSettings, forkSessionSafe,
+  getMemoryStats, getSessionSnapshot, recallSession, runTurn,
 } from '../agents/orchestrator.js';
 import {
-  addAssertion, addNote, deleteNote, deleteSession, deleteVoice, getAssertions,
-  getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
+  addAssertion, addNote, countVisibleTurns, deleteNote, deleteSession, deleteVoice, getAssertions,
+  getBranch, getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
   getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
   countPatches, patchKindCounts, countVoices,
   retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
@@ -387,7 +387,36 @@ sessionsRouter.post('/sessions/:id/rollback', async (req, res) => {
 sessionsRouter.get('/sessions/:id/branches', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  res.json({ branches: listBranches(session.id), current: session.branch_id || 'main' });
+  const current = session.branch_id || 'main';
+  const branches = listBranches(session.id).map((b) => ({
+    ...b,
+    // 每条线各能看见多少拍：fork 之后各线长度不同，只有一条 turn_count 是错的。
+    turn_count: countVisibleTurns(session.id, b.branch_id),
+    is_current: b.branch_id === current,
+  }));
+  res.json({ branches, current, turn_count: countVisibleTurns(session.id, current) });
+});
+
+/**
+ * 切回一条已有的世界线（不新建分支）。
+ *
+ * 界面一直写着「旧线随时可以回去看」，在此之前没有任何入口真的切回去——
+ * `setSessionBranch` 只被 `forkSession` 调过。这是那条文案的实现（D33）。
+ */
+sessionsRouter.post('/sessions/:id/checkout', async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const branchId = String(req.body?.branch_id || '').trim();
+  if (!branchId) return res.status(400).json({ error: { message: 'branch_id is required' } });
+  if (!getBranch(session.id, branchId)) {
+    return res.status(404).json({ error: { message: `branch not found: ${branchId}` } });
+  }
+  try {
+    const result = await checkoutBranchSafe({ sessionId: session.id, branchId });
+    res.json({ ...result, memoryStats: getMemoryStats(session.id) });
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
 
 /** 把当前世界线定稿为一张新世界卡（显式操作，不改动旧会话）。 */

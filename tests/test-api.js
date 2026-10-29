@@ -318,6 +318,38 @@ console.log('\n=== 回滚 = 开新分支 ===');
   const main = br.data.branches.find((b) => b.branch_id === 'main');
   ok(main.status === 'abandoned', '旧分支标为 abandoned（历史没删）');
   ok(br.data.current === r.data.branch_id, '当前分支已切换');
+  ok(br.data.branches.every((b) => typeof b.turn_count === 'number'), '每条线返回自己的可见回合数');
+  ok(br.data.branches.find((b) => b.branch_id === r.data.branch_id)?.is_current === true, '当前线有 is_current 标记');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D33：切回旧线（checkout） ===');
+{
+  const before = await req('GET', `/api/sessions/${SESSION_ID}`);
+  const cur = before.data.branch || before.data.session?.branch_id;
+
+  const noBody = await req('POST', `/api/sessions/${SESSION_ID}/checkout`, {});
+  ok(noBody.status === 400, '缺 branch_id 返回 400');
+
+  const bad = await req('POST', `/api/sessions/${SESSION_ID}/checkout`, { branch_id: 'no-such-branch' });
+  ok(bad.status === 404, '不存在的分支 404');
+
+  const back = await req('POST', `/api/sessions/${SESSION_ID}/checkout`, { branch_id: 'main' });
+  ok(back.status === 200, '切回 main 成功');
+  ok(back.data.branch_id === 'main' && back.data.switched === true, '返回切换后的分支');
+  ok(back.data.from === cur, '记录从哪条线切过来');
+
+  const after = await req('GET', `/api/sessions/${SESSION_ID}`);
+  ok(after.data.session?.branch_id === 'main', '会话当前线已更新');
+  ok(after.data.memoryStats?.branch === 'main', '记忆统计按当前线算');
+  ok(after.data.memoryStats?.turn_count === back.data.turn_count, '回合数跟着线走，不是旧线的缓存值');
+
+  const br2 = await req('GET', `/api/sessions/${SESSION_ID}/branches`);
+  ok(br2.data.current === 'main', '分支列表的 current 同步');
+  ok(br2.data.branches.find((b) => b.branch_id === 'main')?.status === 'active', '切回来的线重新标 active');
+
+  const same = await req('POST', `/api/sessions/${SESSION_ID}/checkout`, { branch_id: 'main' });
+  ok(same.data.switched === false, '切到当前线是空操作');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */

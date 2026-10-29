@@ -902,6 +902,20 @@
 .mem-branch.is-current { outline: 1px solid var(--ok); }
 .mem-branch-id { font-weight: 600; color: var(--ink); }
 .mem-branch-meta, .mem-branch-note { color: var(--ink-4); }
+/* 切到这条线：跨两列放在最后，不挤占 id/meta 的栅格。 */
+.mem-branch-go {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin-top: 6px;
+  padding: 3px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  background: var(--paper);
+  color: var(--ink-2);
+  font-size: 11px;
+  cursor: pointer;
+}
+.mem-branch-go:hover { border-color: var(--ok); color: var(--ink); }
 
 .mem-scene {
   display: grid;

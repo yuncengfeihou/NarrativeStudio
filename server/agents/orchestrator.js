@@ -24,7 +24,8 @@ import { buildPlayerView } from '../memory/player-view.js';
 import { recallHistory } from '../memory/recall-history.js';
 import { recallVisibleFrom } from '../memory/context-engine.js';
 import {
-  accumulateUsage, addPatch, addTurnPair, copyBranchState, createBranch, createSession,
+  accumulateUsage, addPatch, addTurnPair, checkoutBranch, copyBranchState, countVisibleTurns,
+  createBranch, createSession,
   getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession, latestScene,
   getState, getThreads, getTurnsForBranch, getWorld, getWorldState, listBranches, saveWorld,
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
@@ -41,6 +42,16 @@ const lastAssembly = new Map();
 const lastMessages = new Map();
 // 最近一次校勘结果
 const lastContinuity = new Map();
+
+/**
+ * 上游抖动时的整拍重发次数上限。
+ *
+ * 与 `llm.js` 的 `withRetry` 不是一回事：那一层重试的是**一次 HTTP 请求**（连上之前），
+ * 这一层重试的是**一整拍演绎**（连上了、流到一半断了、或者上游 5xx）。
+ * 流式输出一旦开始就不可能在原连接上续上，只能在清屏后从同一份上下文重新采样。
+ * 3 次（共 4 次尝试）是经验值：长跑实测连续 2 次抖动出现过，连续 4 次没见过。
+ */
+const NARRATION_RETRY_MAX = 3;
 
 function withSessionLock(sessionId, fn) {
   const prev = sessionLocks.get(sessionId) || Promise.resolve();
@@ -240,6 +251,38 @@ async function runTurnInner({
     onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
     signal,
   });
+  // 整拍重发要重置的缓存：装配诊断 + 上一拍消息基线。失败/重发时都退回进入这一拍之前的值。
+  const restoreCaches = () => {
+    lastAssembly.set(sessionId, prevAssemblyCache);
+    lastMessages.set(sessionId, prevMessagesCache);
+  };
+  const runNarration = async () => {
+    if (narrationMode !== 'segmented') return runSingleNarrator();
+    try {
+      return await runNarratorSegmented({
+        session, world: effectiveWorld, context, turnNo,
+        options: narratorOptions,
+        onEvent: emit,
+        signal,
+        // 模型主动发起的历史检索：只读已发生回合，按当前分支可见性过滤，不写库。
+        recall: ({ query, limit }) => recallHistory({
+          sessionId, branchId: session.branch_id || 'main', atTurn: turnNo, query, limit,
+        }),
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) throw err;
+      // 上游抖动要整拍重发，不能先降级成单发——那是两次不同的调用，
+      // 会让「重发几次才成功」的统计失去意义，也会把分段模式悄悄关掉（D33）。
+      if (err?.retryable) throw err;
+      // 上游不支持 tools、或循环内出错：清掉已上屏的草稿，回退到单发。
+      emit({ type: 'narrative_reset', reason: 'segmented_fallback' });
+      emit({ type: 'narration_fallback', mode: 'segmented', reason: err?.message || String(err) });
+      console.warn(`[orchestrator] 分段演绎失败，回退单发：${err?.message || err}`);
+      const single = await runSingleNarrator();
+      single.narration = { mode: 'single', fallback: 'segmented', rounds: 1, tools: 0, sealed: true };
+      return single;
+    }
+  };
 
   // 记下这一轮真正发给模型的 messages，供下一轮计算前缀复用率（缓存归因）。
   // 必须在 narrator 跑之前抓，因为 guidance 会被插进尾部。
@@ -251,78 +294,82 @@ async function runTurnInner({
   } catch { /* 归因失败不影响回合 */ }
 
   let narrator;
-  try {
-    if (narrationMode === 'segmented') {
-      try {
-        narrator = await runNarratorSegmented({
-          session, world: effectiveWorld, context, turnNo,
-          options: narratorOptions,
-          onEvent: emit,
-          signal,
-          // 模型主动发起的历史检索：只读已发生回合，按当前分支可见性过滤，不写库。
-          recall: ({ query, limit }) => recallHistory({
-            sessionId, branchId: session.branch_id || 'main', atTurn: turnNo, query, limit,
-          }),
-        });
-      } catch (err) {
-        if (err?.name === 'AbortError' || signal?.aborted) throw err;
-        // 上游不支持 tools、或循环内出错：清掉已上屏的草稿，回退到单发。
-        emit({ type: 'narrative_reset', reason: 'segmented_fallback' });
-        emit({ type: 'narration_fallback', mode: 'segmented', reason: err?.message || String(err) });
-        console.warn(`[orchestrator] 分段演绎失败，回退单发：${err?.message || err}`);
-        narrator = await runSingleNarrator();
-        narrator.narration = { mode: 'single', fallback: 'segmented', rounds: 1, tools: 0, sealed: true };
-      }
-    } else {
-      narrator = await runSingleNarrator();
-    }
-  } catch (err) {
-    // 整拍回滚：一行都没落库，所以「上一拍」缓存也要退回去（D31）。
-    lastAssembly.set(sessionId, prevAssemblyCache);
-    lastMessages.set(sessionId, prevMessagesCache);
-    if (err?.name === 'AbortError' || signal?.aborted) {
-      emit({ type: 'error', message: '已取消', turn_no: turnNo, aborted: true });
-      throw err;
-    }
-    // 走到这里说明正文没产出 → 这一拍一行都没落库（D31：player 行延后到正文产出后同事务写）。
-    // 带上 not_persisted，前端才好把玩家那句话还回输入框，而不是让人重打一遍。
-    emit({
-      type: 'error',
-      message: `剧情演绎失败: ${err.message}`,
-      turn_no: turnNo,
-      not_persisted: true,
-      retryable: true,
-    });
-    throw err;
-  }
-
-  // 上游偶发只产出 reasoning、content 为空 → 关闭推理重试一次
-  if (!String(narrator.content || '').trim() && !signal?.aborted) {
-    emit({ type: 'narrative_reset', reason: 'empty_content' });
-    console.warn(`[orchestrator] 第 ${turnNo} 轮正文为空，重试一次（关闭推理）`);
+  for (let attempt = 1; ; attempt++) {
     try {
-      narrator = await runNarrator({
-        session, world: effectiveWorld, context, turnNo,
-        options: {
-          ...options,
-          reasoningEffort: 'low',
-          maxTokens: Math.max(resolveAgent('narrator').maxTokens, 8000),
-          guidance: [
-            options.narrator?.guidance,
-            '上一轮只输出了思考而没有任何正文。这次请直接输出剧情正文，不要输出思考过程。',
-          ].filter(Boolean).join('\n'),
-        },
-        onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
-        signal,
-      });
-      narrator.narration = {
-        mode: 'single',
-        fallback: narrationMode === 'segmented' ? 'segmented_empty' : 'empty_content',
-        rounds: 1, tools: 0, sealed: true,
-      };
+      narrator = await runNarration();
+      // 空正文：上游偶发只产出 reasoning、content 为空 → 关闭推理重试一次。
+      // 与「整拍重发」分开：这里重试的是**同一份上下文**换个采样姿势，
+      // 不涉及清屏（本来就没内容上屏）。
+      if (!String(narrator.content || '').trim() && !signal?.aborted) {
+        emit({ type: 'narrative_reset', reason: 'empty_content' });
+        console.warn(`[orchestrator] 第 ${turnNo} 轮正文为空，重试一次（关闭推理）`);
+        try {
+          narrator = await runNarrator({
+            session, world: effectiveWorld, context, turnNo,
+            options: {
+              ...options,
+              reasoningEffort: 'low',
+              maxTokens: Math.max(resolveAgent('narrator').maxTokens, 8000),
+              guidance: [
+                options.narrator?.guidance,
+                '上一轮只输出了思考而没有任何正文。这次请直接输出剧情正文，不要输出思考过程。',
+              ].filter(Boolean).join('\n'),
+            },
+            onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
+            signal,
+          });
+          narrator.narration = {
+            mode: 'single',
+            fallback: narrationMode === 'segmented' ? 'segmented_empty' : 'empty_content',
+            rounds: 1, tools: 0, sealed: true,
+          };
+        } catch (err) {
+          if (err?.name === 'AbortError' || signal?.aborted) throw err;
+          console.warn(`[orchestrator] 第 ${turnNo} 轮重试失败：${err.message}`);
+        }
+      }
+      if (attempt > 1) {
+        narrator.narration = { ...(narrator.narration || {}), transient_retries: attempt - 1 };
+      }
+      break;
     } catch (err) {
-      if (err?.name === 'AbortError' || signal?.aborted) throw err;
-      console.warn(`[orchestrator] 第 ${turnNo} 轮重试失败：${err.message}`);
+      if (err?.name === 'AbortError' || signal?.aborted) {
+        restoreCaches();
+        emit({ type: 'error', message: '已取消', turn_no: turnNo, aborted: true });
+        throw err;
+      }
+      // 上游抖动（断连 / 流中途断 / 5xx / 超时）不是这一拍的内容问题：
+      // 清掉已经上屏的残稿、退避后整拍重发，而不是把错误甩给人去重打一遍（D33）。
+      // 判据只看 `retryable`（llm.js 已经把网络层错误归一成这个标记）；
+      // 请求本身有问题（4xx / 参数错）重发多少次都一样，必须立刻失败。
+      const transient = !!err?.retryable;
+      if (transient && attempt <= NARRATION_RETRY_MAX) {
+        console.warn(
+          `[orchestrator] 第 ${turnNo} 轮上游抖动（${err.message}），`
+          + `第 ${attempt}/${NARRATION_RETRY_MAX} 次整拍重发`,
+        );
+        emit({
+          type: 'narrative_reset',
+          reason: 'transient',
+          message: `上游中断，正在重试（${attempt}/${NARRATION_RETRY_MAX}）`,
+        });
+        emit({ type: 'narration_retry', turn_no: turnNo, attempt, max: NARRATION_RETRY_MAX, reason: err.message });
+        await new Promise((r) => setTimeout(r, Math.min(800 * 2 ** (attempt - 1), 4000)));
+        continue;
+      }
+      // 整拍回滚：一行都没落库，所以「上一拍」缓存也要退回去（D31）。
+      restoreCaches();
+      // 走到这里说明正文没产出 → 这一拍一行都没落库（D31：player 行延后到正文产出后同事务写）。
+      // 带上 not_persisted，前端才好把玩家那句话还回输入框，而不是让人重打一遍。
+      emit({
+        type: 'error',
+        message: `剧情演绎失败: ${err.message}`,
+        turn_no: turnNo,
+        not_persisted: true,
+        retryable: true,
+        transient_retries: attempt - 1,
+      });
+      throw err;
     }
   }
 
@@ -337,8 +384,7 @@ async function runTurnInner({
   // 让前端把玩家那句话留在输入框里重发——比静默吞掉一次行动好。
   if (!String(narrative).trim()) {
     // 整拍回滚（D31）：没落库，装配/消息缓存也不能前进到这一拍。
-    lastAssembly.set(sessionId, prevAssemblyCache);
-    lastMessages.set(sessionId, prevMessagesCache);
+    restoreCaches();
     const detail = `上游连续两次只输出思考、没有正文（finish_reason=${narrator.finishReason || '?'}，`
       + `completion_tokens=${narratorUsage?.completion_tokens ?? '?'}）`;
     emit({
@@ -782,6 +828,16 @@ export function createSessionWithSettings({ title, settings, worldId = null, anc
 }
 
 /**
+ * 在会话锁内切到另一条已有世界线。
+ *
+ * 与 `forkSessionSafe` 同理：回滚/重写/切分支都要串行，否则旁路 Agent 会把
+ * 结果写进刚被切换掉的那条线。
+ */
+export async function checkoutBranchSafe(opts) {
+  return withSessionLock(opts.sessionId, () => checkoutBranch(opts.sessionId, opts.branchId));
+}
+
+/**
  * 回滚到第 N 轮：不是删历史，是从这里开一条新分支。
  * 旧分支标 abandoned，共享 canon 到分叉点为止。
  */
@@ -795,6 +851,9 @@ export function forkSession({ sessionId, toTurn, note = '' }) {
   copyBranchState(sessionId, { fromBranch: oldBranch, toBranch: newBranch, forkTurn: toTurn });
   setBranchStatus(sessionId, oldBranch, 'abandoned');
   setSessionBranch(sessionId, newBranch);
+  // turn_count 是缓存，换了线必须按新线重算（D33）：分叉到第 8 轮之后，
+  // 界面还显示旧线的 90 轮，读起来像「历史没删所以新线也有 90 轮」。
+  touchSession(sessionId, countVisibleTurns(sessionId, newBranch));
   return { branch_id: newBranch, fork_turn: toTurn, abandoned: oldBranch };
 }
 
@@ -835,7 +894,10 @@ export function getMemoryStats(sessionId) {
   if (!session) return null;
   const world = session.world_id ? getWorld(session.world_id) : null;
   const branchId = session.branch_id || 'main';
-  const turnCount = session.turn_count || getMaxTurnNo(sessionId);
+  // 回合数是**派生值**：切/开分支之后 sessions.turn_count 这个缓存可能还停在旧线上。
+  // 缓存比实际大时以实际为准；缓存为空（旧会话）时也回落到派生值（D33）。
+  const derivedTurns = countVisibleTurns(sessionId, branchId);
+  const turnCount = session.turn_count ? Math.min(session.turn_count, derivedTurns) : derivedTurns;
 
   const scenes = getScenes(sessionId, { branchId, limit: 100 });
   const threads = getThreads(sessionId, { branchId, limit: 200 });
@@ -854,7 +916,11 @@ export function getMemoryStats(sessionId) {
   return {
     turn_count: turnCount,
     branch: branchId,
-    branches: branches.map((b) => ({ branch_id: b.branch_id, fork_turn: b.fork_turn, status: b.status, note: b.note })),
+    branches: branches.map((b) => ({
+      branch_id: b.branch_id, fork_turn: b.fork_turn, status: b.status, note: b.note,
+      turn_count: countVisibleTurns(sessionId, b.branch_id),
+      is_current: b.branch_id === branchId,
+    })),
     scenes: scenes.map((s) => ({
       scene_id: s.scene_id, turn_from: s.turn_from, turn_to: s.turn_to,
       when_label: s.when_label, place: s.place, question: s.question, outcome: s.outcome,

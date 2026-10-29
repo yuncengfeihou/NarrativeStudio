@@ -192,7 +192,21 @@ export async function* chatStream(opts) {
 
   try {
     while (true) {
-      const { done, value } = await reader.read();
+      let chunk;
+      try {
+        chunk = await reader.read();
+      } catch (err) {
+        if (effective.signal?.aborted) throw err;
+        // 流读到一半被掐断：已经吐出去的增量收不回来，只能整条重来。
+        // 标成 retryable，由调用方（orchestrator）清屏后重发整拍（D33）。
+        const { transient, code } = failureOf(err);
+        if (!transient) throw err;
+        throw new LlmError(
+          `上游流中断（${code || err?.message || 'unknown'}）`,
+          { code: code || 'STREAM_BROKEN', retryable: true },
+        );
+      }
+      const { done, value } = chunk;
       if (done) break;
       buffer += decoder.decode(value, { stream: true });
       let idx;
@@ -283,18 +297,72 @@ async function fetchStream(url, body, signal, target) {
   return fetchOnce(url, body, signal, target);
 }
 
+/**
+ * 网络层错误归一。
+ *
+ * `fetch` 在不同失败模式下抛出来的东西完全不能重试判定：
+ *   - Node 内置 fetch 的 `TypeError: fetch failed`（cause 里才是真正的 code）
+ *   - undici 的 `terminated`（socket 被上游半途掐断，**流已经开始也可能发生**）
+ *   - `ECONNRESET` 等裸 code
+ * 这些都是「这一拍没成」，不是「这一拍的内容有问题」。不归一的话它们落不进
+ * `withRetry` 的白名单，一次都不重试，长跑里表现为整拍失败（D33）。
+ */
+const TRANSIENT_CODES = new Set([
+  'ECONNRESET', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN', 'EPIPE',
+  'UND_ERR_CONNECT_TIMEOUT', 'UND_ERR_SOCKET', 'UND_ERR_HEADERS_TIMEOUT',
+  'UND_ERR_BODY_TIMEOUT', 'UND_ERR_CLOSED', 'ERR_STREAM_PREMATURE_CLOSE',
+]);
+const TRANSIENT_NAMES = new Set(['TimeoutError']);
+
+/** 从 fetch / undici 的错误树上找出真正的失败原因（挂在 cause 里，可能嵌套一层）。 */
+function failureOf(err) {
+  let cur = err;
+  for (let depth = 0; cur && depth < 4; depth++) {
+    const code = String(cur.code || cur.errno || '').toUpperCase();
+    const name = String(cur.name || '');
+    const msg = String(cur.message || '');
+    if (TRANSIENT_CODES.has(code) || code.startsWith('UND_ERR_') || TRANSIENT_NAMES.has(name)) {
+      return { transient: true, code: code || name };
+    }
+    // `terminated` 是 undici 的 socket 关闭消息，本体没有 code。
+    if (msg === 'terminated' || msg === 'other side closed' || /socket hang up/i.test(msg)) {
+      return { transient: true, code: code || 'TERMINATED' };
+    }
+    if (code === 'ABORT_ERR' || name === 'AbortError' || name === 'TimeoutError') {
+      return { transient: true, code: code || name };
+    }
+    cur = cur.cause;
+  }
+  return { transient: false, code: '' };
+}
+
+/**
+ * 调用上游；把「网络层抖动」统一包成 retryable 的 LlmError。
+ * 用户主动取消（外部 signal）必须原样抛出，不能被当成可重试。
+ */
 async function fetchOnce(url, body, signal, target) {
   const timeout = AbortSignal.timeout(target?.timeoutMs || config.upstream.timeoutMs);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-  return fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${target?.apiKey || config.upstream.apiKey}`,
-    },
-    body: JSON.stringify(body),
-    signal: combined,
-  });
+  try {
+    return await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${target?.apiKey || config.upstream.apiKey}`,
+      },
+      body: JSON.stringify(body),
+      signal: combined,
+    });
+  } catch (err) {
+    // 调用方主动取消：保持 AbortError，withRetry 会直接抛。
+    if (signal?.aborted) throw err;
+    const { transient, code } = failureOf(err);
+    if (!transient) throw err;
+    throw new LlmError(
+      `上游连接中断（${code || err?.message || 'unknown'}）`,
+      { code: code || 'TRANSIENT', retryable: true },
+    );
+  }
 }
 
 async function safeText(res) {

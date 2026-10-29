@@ -1,7 +1,7 @@
-# 长轮次记忆：讨论清单（D1–D32 已落地；D26 方案 A 已做完同剧本双局长跑，维持会话级开关；D32 修了 gone 的回程通道）
+# 长轮次记忆：讨论清单（D1–D33 已落地；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回）
 
 > 用途：把「几十轮就有这么多问题、几百轮怎么办」这个讨论拆成可逐条拍板的决策项。
-> **状态（2026-10-29）**：**D1–D32 已全部落地**。D1–D8 经 50 轮真实会话验证；
+> **状态（2026-10-30）**：**D1–D33 已全部落地**。D1–D8 经 50 轮真实会话验证；
 > D9–D15 是那 50 轮与第二轮验证长跑现场发现的缺陷（D10/D11/D12/D15 是真实 bug，
 > 不是设计取舍），已按推荐方案全部实现并测通。**D19–D22 都是报告判据自身的缺陷**
 > （D19 分类名错、D20 层级错、D21 对象错、D22 曾被怀疑缺信号）——它们不改变运行时行为，
@@ -1029,7 +1029,7 @@ importance 分级（major:normal:minor = 1:1:1）
 
 ---
 
-## 4. 建议的顺序（D1–D32 已全部落地并已跑完验证）
+## 4. 建议的顺序（D1–D33 已全部落地并已跑完验证）
 
 ```
 第 0 步（已做完）：
@@ -1081,6 +1081,9 @@ importance 分级（major:normal:minor = 1:1:1）
         D29 校勘 set_state 的 target 形态：提示词没写分隔符，模型自创三种写法 → 7 条全落空
         D30 报告判 FAIL 的「同消息改写」是报告口径 bug（孤儿回合让 drift 基线错位）
         D31 三处「错了也不会说」的通道改行为：孤儿回合/空正文整拍回滚 + 校勘死提案判 failed
+        D32 life_state 两套存储：changes 补写 character_states，gone 的回程通道才看得见
+        D33 上游抖动自动整拍重发（NARRATION_RETRY_MAX=3）+ checkoutBranch 切回旧线
+            + 回合数改派生值 countVisibleTurns
 
 已取消：D2（千拍预算）——按你的 50 轮目标不需要
 ```
@@ -1094,7 +1097,7 @@ D3 那种「改取数逻辑」才需要数据支撑。
 
 ## 5. 拍板结果
 
-**D1–D32 全部已定并已落地，没有待拍板项**（D5 遗留的 seeds 槽位于 m10518 拍板为「不改上限 8、只改可见性」并已落地；D26 方案 A 已做完同剧本双局长跑、维持会话级开关；D1–D8 经 50 轮真实会话验证；D9–D13 于 m03366 按推荐方案落地；D14/D15/D17 在验证长跑现场发现并当拍落地；D16 是 D1 修法自带的回归，逐拍读 coverage 时发现；D19 是**报告自己的断点分类口径错了**，用三局前后对照验出来的；D20 是同一形状的第二次发作——时间推进按场次级采样，量不到场内推进）。
+**D1–D33 全部已定并已落地，没有待拍板项**（D5 遗留的 seeds 槽位于 m10518 拍板为「不改上限 8、只改可见性」并已落地；D26 方案 A 已做完同剧本双局长跑、维持会话级开关；D1–D8 经 50 轮真实会话验证；D9–D13 于 m03366 按推荐方案落地；D14/D15/D17 在验证长跑现场发现并当拍落地；D16 是 D1 修法自带的回归，逐拍读 coverage 时发现；D19 是**报告自己的断点分类口径错了**，用三局前后对照验出来的；D20 是同一形状的第二次发作——时间推进按场次级采样，量不到场内推进）。
 
 | 决策 | 结论 | 出处 |
 |---|---|---|
@@ -1131,8 +1134,9 @@ D3 那种「改取数逻辑」才需要数据支撑。
 | D30 报告 drift 基线错位 | **已落地**：`classifyBreak()` 新增第 ⓿ 类 `gap`——`drift.prev_count` 与报告基线的 `assembly.messages.length` 不等即「少一拍」，`EXPLAINED_KINDS` 加入 `gap`；报告新增 `real_break_gap`/`gap_turns` 与明细行 | 双局 B/A 的 `cache_prefix_reuse` 都判 FAIL，理由是「同消息改写 1 轮」；查下去是**孤儿回合让 drift 基线跨了一拍**（drift 用 orchestrator 内存基线、报告用 DB 装配清单），修口径后四局「真改写」全为 0 |
 | D31 三处死通道 | **孤儿回合与空正文整拍回滚**（`addTurnPair` 事务；正文没产出就一行不写） + 校勘三类落空记 `failed` 终态并带 `reason`；`open` 只留「等人裁决」 | m11285 |
 | D32 `life_state` 两套存储 | **已落地**：`changes` 里的 `life_state` 同时补写 `character_states`（按 `aliasIndex` 反查人物名、同拍 `states` 写过就跳过）；报告判据改读两表并集并单列「两套存储分裂」 | 第三次长跑凌玥经 `changes` 被标 `gone`，而回程通道读 `character_states`、永远看不见它：她 27 拍正文里 **19 拍不在 present**，玩家 t24/32/40/45 四次点名一次都没唤回，报告 `VERDICT` 却是 FAIL 0 —— **判据读错表＝给缺陷发合格证** |
+| D33 上游抖动与旧线回切 | **已落地**：`llm.js` 的 `failureOf()` 沿 `err.cause` 归一 `fetch failed`/`terminated` 为可重试；`orchestrator` 新增 `NARRATION_RETRY_MAX=3` 整拍重发（还原 `lastAssembly`/`lastMessages` 基线、emit `narration_retry`）；`store.checkoutBranch()` + `POST /api/sessions/:id/checkout` 切回已有世界线；`countVisibleTurns()` 让回合数成派生值 | 用户原话「中断就重新生成，数据重新更新」「每轮的数据要像 git 历史一样可以回滚」。前者的根因是 `withRetry` 白名单只认老式 socket 错误码（Node fetch 把真 code 埋在 `cause` 里），一次都不重试；后者是文案写着「旧线随时可以回去看」而 `setSessionBranch()` 只被 fork 调过——**界面承诺没有对应路径** |
 
-**三十二条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
+**三十三条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
 
 > **D5 遗留已拍板（2026-10-29，m10518）**：「不改上限 8，只改可见性」——种子在场记单行尾标
 > ［预置］、`lintCard` 以 `seeds_eat_runtime_room`（minor）提醒占额度，详见 §3 D5 末尾。
@@ -3547,6 +3551,92 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 都要问「它的写者是不是覆盖了所有入口」。
 
 
+### D33【已落地】上游抖一下整拍就废，而「随时能回去看」的旧线其实回不去
+
+#### 现象
+
+长跑里出现过约 6 次「这一拍没有任何正文」，分成两种：
+
+- `terminated` / `fetch failed`：上游连接在中途断掉，整拍失败。
+- `lifecycle` 式的空正文：只回了 reasoning、没有 content。
+
+第一种在 D31 之后不再留脏数据（整拍回滚，一行都不落），但**代价是这一拍白跑**——
+用户原话是「中断就重新生成，数据重新更新」，而代码里一次都不会重发。
+第二种 D28 起的关推理重试只覆盖「模型空回」，不覆盖「连接断」。
+
+另一半是分支面板自己说的话没有实现。记忆面板的分支段写着
+「旧线标为已废弃，随时可以回去看」，但全仓只有 `forkSession()` 调过 `setSessionBranch()`，
+**没有任何入口能切回一条已有分支**。所谓「回去看」只存在于文案里。
+
+#### 机制：为什么两层重试都没接上
+
+| 层 | 位置 | 原来管什么 | 漏了什么 |
+|---|---|---|---|
+| HTTP 请求 | `llm.js` `withRetry` | 白名单 `ECONNRESET/ETIMEDOUT/…` + `status 5xx` | Node fetch 抛的是 `TypeError: fetch failed`，真 code 在 `err.cause` 里；undici 断流抛 `terminated`（无 code）→ **两者都不在白名单，一次都不重试** |
+| 整拍演绎 | `orchestrator.js` | 只有空正文的关推理重试 | 没有连接级重发；失败即整拍放弃 |
+
+白名单是一条**只认自己想象中错误码**的通道：写的时候按 `ECONNRESET` 这类老式 socket 错误
+枚举，而 Node 22 的内置 fetch 把原因埋在 `cause` 链里。名单本身没错，错在它假设了错误的形状。
+
+#### 落地
+
+**A. 错误归一（`server/llm.js`）**
+
+- 新增 `failureOf(err)`：沿 `err.cause` 遍历最多 4 层，命中 `TRANSIENT_CODES`
+  （`ECONNRESET / ETIMEDOUT / EPIPE / UND_ERR_SOCKET / UND_ERR_HEADERS_TIMEOUT /
+  UND_ERR_BODY_TIMEOUT / UND_ERR_CLOSED / ERR_STREAM_PREMATURE_CLOSE` 等）或
+  `terminated` / `other side closed` / `socket hang up` 即判为可重试，返回归一后的 code。
+- `fetchOnce` 与 `chatStream` 的 `reader.read()` 都包 try/catch：
+  `signal?.aborted` 原样抛（用户取消不是抖动）；可重试的就转成
+  `LlmError{retryable:true}`，让 `withRetry` 认得出。
+
+**B. 整拍重发（`server/agents/orchestrator.js`）**
+
+- 新增 `NARRATION_RETRY_MAX = 3`，演绎部分改成重试循环。
+- 只有 `err.retryable` 才重发；分段模式**直接 rethrow**，不先降级成单发——
+  否则「重发几次才成功」的统计会被降级信号污染，也会把用户的 segmented 模式悄悄关掉。
+- 每次重发 emit `{type:'narration_retry', turn_no, attempt, max, reason}`，
+  前端只改进度行文案（`上游中断，重试中 2/3…`），不弹 toast、不动输入框。
+- 重发前**还原 `lastAssembly` / `lastMessages` 两处内存快照**：这两份缓存是下一拍缓存漂移
+  探针的基线，失败拍的基线必须回退，否则下一拍一定被记成「断点」（这是 D30 那个 gap 的同一根因）。
+- 退避 `min(800 × 2^(n-1), 4000)` ms。
+
+**C. 切回旧线（`store.checkoutBranch` + `POST /api/sessions/:id/checkout`）**
+
+- `checkoutBranch(sessionId, branchId)`：当前线标 `abandoned`、目标线标 `active`、
+  `sessions.branch_id` 跟换，返回 `{branch_id, switched, from, turn_count}`。**删任何行。**
+- 路由走 `checkoutBranchSafe()`（会话锁内），不会和正在跑的回合交错；
+  切到自己返回 `switched:false`，未知分支 404。
+- 记忆面板每条非当前线多一个「切到这条线」按钮，二次确认后刷新。
+
+**D. 回合数改成派生值（`store.countVisibleTurns`）**
+
+- `sessions.turn_count` 是缓存。fork/checkout 之后它停在旧线的数字上，
+  界面会显示「90 轮」而实际只看得见 8 轮。
+- 新增 `countVisibleTurns(sessionId, branchId)`（按祖先链 + `fork_turn` 去重计数），
+  `forkSession` / `checkoutBranch` / `getMemoryStats` 全部改用（缓存比实际大时取实际）。
+- `/branches` 每条线返回自己的 `turn_count` 与 `is_current`。
+
+#### 可复现判据
+
+- `store.checkoutBranch()` 切到 main → `sessions.branch_id===main`、旧线 `abandoned`、
+  `turn_count` 等于 main 的可见拍数；再切回去还能继续写（`turn_no` 用全局 `getMaxTurnNo()+1`，
+  **不能沿用分叉点编号**，`turns` 的 `UNIQUE(session_id, turn_no, kind)` 会覆盖旧线那一行）。
+- 上游断连时 emit 顺序必须是 `narration_reset/…` → `narration_retry` → 最终 `narrative_done`，
+  且失败拍的 `turns` 行数为 0。
+- 测试：`test-memory.js` 的「D33：切回旧线（checkout）与回合数是派生值」15 条；
+  `test-api.js` 的「D33：切回旧线（checkout）」11 条。
+
+#### 教训
+
+**「错误码白名单」和「按措辞识别的注入器」是同一类东西：都假设了对方用自己想象的方式失败/说话。**
+正确做法不是补名单（那永远补不完，Node 换个运行时还要再补），而是读事实——
+沿 `cause` 链找出真正发生了什么，再判断它是不是暂时的。
+
+以及：**界面上每一句承诺都要有一条路径指向它。**
+「旧线随时可以回去看」这句话在文案里挂了很久，而 `setSessionBranch()` 只被 fork 调过一次。
+文案不会报错，所以它能一直错下去。
+
 ## 6. 变更记录
 
 | 日期 | 变更 |
@@ -3594,3 +3684,4 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 | 2026-10-29 | **D30（本轮收尾自查）：报告判 FAIL 的「同消息改写」是报告自己的口径 bug**。孤儿回合让 drift 的基线跨了一拍（drift 用 orchestrator 的内存基线、报告用 DB 里的装配清单），11 条对位 14 条 → 掉进兜底类 `rewrite`。`classifyBreak()` 加第 ⓿ 类 `gap` 并纳入 `EXPLAINED_KINDS`，报告新增 `real_break_gap`/`gap_turns`。修口径后 B 局 `cache_prefix_reuse` FAIL→PASS（VERDICT 24/7/1）、A 局 23/7/2，**四局「真改写」全为 0**。 |
 | 2026-10-29 | D31 | 三处「错了也不会说」的通道改行为：孤儿回合与空正文整拍回滚、校勘死提案判 failed | 新增 e2e 22 条 + test-memory 20 条；全量绿 |
 | 2026-10-29 | D32 | `changes` 里的 `life_state` 补写 `character_states`；报告判据改读两表并集 | test-memory 新增 7 条（443 passed）；全量 6 套件绿；真库回放第三次长跑，`life_state_consistency` 从误判 PASS 变为如实 FAIL 并注明是修复前存量 |
+| 2026-10-30 | D33 落地：上游连接中断自动整拍重发（`failureOf()` 归一 `fetch failed`/`terminated`，`NARRATION_RETRY_MAX=3`，新增 `narration_retry` 事件）＋ `checkoutBranch()` 切回已有世界线（`POST /api/sessions/:id/checkout`）＋ 回合数改派生值 `countVisibleTurns()` |

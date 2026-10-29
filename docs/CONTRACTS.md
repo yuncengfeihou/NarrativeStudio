@@ -153,6 +153,12 @@ narrator 行），却作为一条没有回应的 user 消息留在库里，只�
 scenes / world_state` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork：把分叉点仍有效的
 状态复制到新分支，新分支不会读到旧线在分叉点之后写下的任何内容。
 
+**记录都是可回滚的（D33）**：`forkSession()` 从任意一轮开新线，`checkoutBranch()` 切回任意
+一条已有线继续写。两者都不删行——旧线标 `abandoned`、切回去时重新标 `active`，回合、场次、
+断言、账本全都留在原处。**可见回合数是派生值** `countVisibleTurns(sessionId, branchId)`
+（按祖先链 + `fork_turn` 算），`sessions.turn_count` 只是缓存：换线后必须用派生值覆盖它，
+否则界面上会显示旧线的回合数，而实际能看见的只有分叉点之前的几轮。
+
 复制时会把 `valid_to` **裁到 `fork_turn`**：旧线在分叉点之后才发生的失效，在新线上从未发生。
 不裁的话，新分支往回走一步就多出一批「未来才会失效」的状态，`atTurn` 查询会返回空集——
 比没有记忆更糟，因为它自相矛盾。
@@ -916,9 +922,18 @@ runTurn({ sessionId, playerText, images, branchChoice, generateBranches,
 createSessionWithSettings({ title, settings, worldId, anchorId })   // 用锚点快照初始化账本
 forkSession({ sessionId, toTurn, note })                            // 回滚 = 开新分支（同步，内部/测试）
 forkSessionSafe({ sessionId, toTurn, note })                        // 路由必须走：会话锁内 fork
+checkoutBranch({ sessionId, branchId })                             // 切回已有世界线（不新建分支）
+checkoutBranchSafe({ sessionId, branchId })                         // 路由必须走：会话锁内切
 getSessionSnapshot(sessionId) / getMemoryStats(sessionId)   // snapshot 含 playerView（展示层投影）
 recallSession({ sessionId, question }) / auditSession({ sessionId })
 ```
+
+**重试分两层，别混（D33）**：`llm.js` 的 `withRetry` 重试**一次 HTTP 请求**；`orchestrator`
+的 `NARRATION_RETRY_MAX`（默认 3）重试**一整拍演绎**。流式输出一旦开始，原连接续不上，
+只能整拍重来——所以「上游中断」必须在演绎层兜，靠 `llm.js` 那一层不够。
+"`terminated` / `fetch failed`" 这类 Node fetch 错误原先不在 `withRetry` 的白名单里
+（真 code 藏在 `err.cause`），一次都不重试；现在 `llm.js` 用 `failureOf(err)` 遍历 `cause`
+（最多 4 层）归一成 `retryable:true` 的 `LlmError`，两层才都能接上。
 
 ### SSE 事件协议
 
@@ -946,7 +961,12 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 {type:'continuity', report}              // 校勘
 {type:'branches', branches, scene_summary, stale?}
 {type:'done', turn_no, branch, narration_mode, usage, session_usage, memory}
-{type:'error', message, aborted?, not_persisted?, retryable?, empty_narration?}
+{type:'narration_retry', turn_no, attempt, max, reason}
+// 上游连接中断（fetch failed / terminated / 读流断开）时自动重发这一拍演绎。
+// attempt/max 是「第几次 / 最多几次」（NARRATION_RETRY_MAX，默认 3）；reason 是归一后的原因。
+// 重发期间这一拍**一行都没落库**，前端只更新进度行文案，不要弹 toast、不要清空输入框。
+// 重试用尽或成功都会继续正常事件流；失败时走 {type:'error', …retryable:true}。
+{type:'error', message, aborted?, not_persisted?, retryable?, empty_narration?, transient_retries?}
 // not_persisted：这一拍**一行都没落库**（上游连接断了 / 正文为空），前端可以把玩家那句话
 //   原样放回输入框重发。D31 起一回合的 player + narrator 两行是原子写入（addTurnPair），
 //   正文没产出就整拍回滚——不再有「player 行在、narrator 缺」的孤儿回合。
@@ -954,7 +974,8 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 //   空串落库的后果是三重的：字数统计被拉低、重复率分母虚高、一条空 assistant 消息
 //   进下一拍 recent 层；下游账本（world_state/状态/断言/关系/原声）全 0 行，
 //   等于玩家说了句话没人应答。
-// aborted：用户取消。三种都不会留下半拍。
+// transient_retries：这一拍在放弃前已经自动重发过几次（D33）。>0 说明上游真的抖过。
+// aborted：用户取消。四种都不会留下半拍。
 {type:'ping'}
 ```
 
@@ -1016,7 +1037,14 @@ POST   /api/sessions/:id/opening          -> SSE
 POST   /api/sessions/:id/branches         -> {branches, scene_summary}
 POST   /api/sessions/:id/rewrite          -> SSE（自动开新分支）
 POST   /api/sessions/:id/rollback         body:{turn_no}   -> 新分支
-GET    /api/sessions/:id/branches
+GET    /api/sessions/:id/branches         -> {branches, current, turn_count}
+       // 每条线带自己的 turn_count（按祖先链算的可见回合数）与 is_current。
+       // 不能拿 sessions.turn_count 顶：那是缓存，换线后停在旧线的数字上。
+POST   /api/sessions/:id/checkout         body:{branch_id} -> {branch_id, switched, from, turn_count, memoryStats}
+       // 切回一条**已有**世界线（不新建分支），这就是「历史随时可以回去继续写」。
+       // 当前线标 abandoned、目标线标 active，sessions.branch_id 跟着换；一条行都不删。
+       // 切到自己返回 switched:false 且不改任何状态；未知分支 404。
+       // 走 checkoutBranchSafe()＝在会话锁内切，不会和正在跑的回合交错。
 POST   /api/sessions/:id/canonize         body:{title?, anchor_label?, opening_seed?} -> 新世界卡
 
 GET    /api/sessions/:id/memory           -> 完整统计

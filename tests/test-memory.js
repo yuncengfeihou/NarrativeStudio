@@ -1422,6 +1422,64 @@ console.log('\n=== 分支：分叉复制世界状态 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D33：切回旧线（checkout）与回合数是派生值 ===');
+{
+  const sid = `s-checkout-${Date.now()}`;
+  store.createSession({ id: sid, title: 'checkout' });
+  store.createBranch(sid, { branchId: 'main' });
+  for (let n = 1; n <= 10; n++) {
+    store.addTurn(sid, { turn_no: n, kind: 'player', content: `P${n}`, branch_id: 'main' });
+    store.addTurn(sid, { turn_no: n, kind: 'narrator', content: `N${n}`, branch_id: 'main' });
+  }
+  store.touchSession(sid, 10);
+
+  // 回到第 4 轮：新线只看得见 1..4，但 sessions.turn_count 这个缓存还停在 10。
+  const f = orch.forkSession({ sessionId: sid, toTurn: 4, note: '回滚' });
+  eq(store.countVisibleTurns(sid, f.branch_id), 4, '新线可见回合数按祖先链算，不是旧线的 10');
+  eq(store.getSession(sid).turn_count, 4, 'fork 之后 turn_count 缓存被重算（否则界面显示 10 轮）');
+
+  // 继续在回滚线往下写。回合编号必须继续用全局 `getMaxTurnNo()+1`——
+  // turns 有 UNIQUE(session_id, turn_no, kind)，沿用分叉点的编号会覆盖旧线那一行。
+  const nextNo = store.getMaxTurnNo(sid) + 1;
+  eq(nextNo, 11, '新线的下一拍从全局最大编号 +1 开始，不是回到分叉点');
+  store.addTurn(sid, { turn_no: nextNo, kind: 'player', content: 'P11b', branch_id: f.branch_id });
+  store.addTurn(sid, { turn_no: nextNo, kind: 'narrator', content: 'N11b', branch_id: f.branch_id });
+  store.touchSession(sid, store.countVisibleTurns(sid, f.branch_id));
+  eq(store.countVisibleTurns(sid, f.branch_id), 5, 'B 线：继承的 1..4 + 自己写的第 11 轮 = 5 拍');
+
+  // 主库 branches 与 turn_count：每条线各自算
+  const bLines = store.listBranches(sid);
+  eq(bLines.length, 2, 'main + 回滚线共两条');
+  eq(store.countVisibleTurns(sid, 'main'), 10, 'main 仍是 10 轮（历史没删）');
+
+  // 切回 main：这就是界面文案「旧线随时可以回去看」的实现
+  const back = store.checkoutBranch(sid, 'main');
+  eq(back.switched, true, 'checkout 真的切换了当前线');
+  eq(back.branch_id, 'main', '当前线回到 main');
+  eq(store.getSession(sid).branch_id, 'main', 'sessions.branch_id 已更新');
+  eq(store.getSession(sid).turn_count, 10, 'turn_count 跟着线走，不是留在旧线的 5');
+  eq(store.getBranch(sid, 'main').status, 'active', '切回来的线重新标 active');
+  eq(store.getBranch(sid, f.branch_id).status, 'abandoned', '被顶下去的那条线标 abandoned（不删）');
+
+  // 再切回去，还能继续写：turn_no 不连续是允许的（分支继承本来就这样）
+  const again = store.checkoutBranch(sid, f.branch_id);
+  eq(again.switched, true, '可以再切回刚才那条线');
+  eq(store.getSession(sid).turn_count, 5, '再次切换后 turn_count 同步到这条线');
+  const next2 = store.getMaxTurnNo(sid) + 1;
+  store.addTurn(sid, { turn_no: next2, kind: 'player', content: 'P12b', branch_id: f.branch_id });
+  store.addTurn(sid, { turn_no: next2, kind: 'narrator', content: 'N12b', branch_id: f.branch_id });
+  eq(store.countVisibleTurns(sid, f.branch_id), 6, '切回来的线可以继续往下写');
+
+  // 切到自己：不动任何状态
+  const same = store.checkoutBranch(sid, f.branch_id);
+  eq(same.switched, false, '切到当前线是空操作');
+  // 不存在的线：抛错而不是静默成功
+  let threw = false;
+  try { store.checkoutBranch(sid, 'no-such-branch'); } catch { threw = true; }
+  ok(threw, '切到不存在的分支会抛错');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 分支：嵌套分叉不读废弃兄弟分支 ===');
 {
   const sid = `s-nested-${Date.now()}`;

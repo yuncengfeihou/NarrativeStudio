@@ -425,6 +425,12 @@ export const api = {
   getBranches(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/branches`, { signal });
   },
+  /** POST /api/sessions/:id/checkout body:{branch_id} -> 切到另一条已有世界线（不新建分支） */
+  checkoutBranch(id, branchId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/checkout`, {
+      method: 'POST', body: { branch_id: branchId }, signal,
+    });
+  },
   /** POST /api/sessions/:id/audit -> 立即跑一次一致性检查 */
   audit(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/audit`, { method: 'POST', signal });

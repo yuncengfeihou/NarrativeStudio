@@ -1139,6 +1139,48 @@ export function listBranches(sessionId) {
   return getDb().prepare(`SELECT * FROM branches WHERE session_id=? ORDER BY id ASC`).all(sessionId);
 }
 
+/**
+ * 当前分支可见的回合数（按 turn_no 去重，含祖先继承部分）。
+ *
+ * `sessions.turn_count` 是**缓存**，`touchSession()` 每写一拍就刷新一次；
+ * 但 fork / checkout 之后当前线换了一条，缓存还停在旧线的数字上——
+ * 界面于是显示「90 轮」，实际这条线只能看见 8 轮。派生值必须能重算。
+ */
+export function countVisibleTurns(sessionId, branchId) {
+  const branch = getBranch(sessionId, branchId);
+  const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
+  const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { kinds: ['player', 'narrator'] });
+  return new Set(rows.map((r) => r.turn_no)).size;
+}
+
+/**
+ * 把会话切到另一条已在的世界线（不新建分支）。
+ *
+ * 与 `forkSession()` 的区别：fork 是「从第 N 轮开一条新线」，checkout 是
+ * 「在已有的线之间切换」。界面上写着「旧线随时可以回去看」，在此之前
+ * 只有 `forkSession` 会调 `setSessionBranch`，没有任何入口真的切回去过。
+ *
+ * 切回一条 `abandoned` 的线时把它重新标成 `active`：它又变成当前线了，
+ * 再叫「已废弃」会让人以为这条线不能继续写。被顶下去的那条线标 `abandoned`。
+ */
+export function checkoutBranch(sessionId, branchId) {
+  const target = getBranch(sessionId, branchId);
+  if (!target) throw new Error(`branch not found: ${branchId}`);
+  const current = getSession(sessionId);
+  const currentId = current?.branch_id || 'main';
+  if (currentId === branchId) {
+    return { branch_id: branchId, switched: false, from: currentId };
+  }
+  // 先把当前线让出去再激活目标线，避免两条线同时是 active。
+  if (currentId) setBranchStatus(sessionId, currentId, 'abandoned');
+  setBranchStatus(sessionId, branchId, 'active');
+  setSessionBranch(sessionId, branchId);
+  // turn_count 是缓存：换了线就必须按新线重算，否则界面上显示的是旧线的轮数。
+  const visible = countVisibleTurns(sessionId, branchId);
+  touchSession(sessionId, visible);
+  return { branch_id: branchId, switched: true, from: currentId, turn_count: visible };
+}
+
 export function setBranchStatus(sessionId, branchId, status) {
   getDb().prepare(`UPDATE branches SET status=? WHERE session_id=? AND branch_id=?`).run(status, sessionId, branchId);
 }
