@@ -152,7 +152,9 @@ const stateFixScore = stateFix === null ? null : piecewise(stateFix, [[0, 100], 
 const memory = blend([
   { key: '断言可见率', weight: 2.0, score: factScore, raw: factKeep === null ? null : Math.round(factKeep * 1000) / 10, unit: '%', note: '渲染/装载：D9 之后应当接近 100%' },
   { key: '生死状态被用到', weight: 1.0, score: lifeScore, raw: lifeUsed, unit: '种取值', note: '三种取值都在用 = 这套机制是活的' },
-  { key: 'D32 双表一致', weight: 2.0, score: lifeCheckScore, raw: lifeCheck?.status, unit: '', note: 'life_state 投影与记忆表是否分裂' },
+  // 这条读的是报告里合并后的判定：D32 的两表分裂与 D34 的「同名条目吞掉人物」都会落在这里，
+  // 所以叫「离场角色不得再上场」而不是「D32 双表一致」——判据只有一个，成因有两种。
+  { key: '离场角色不得再上场', weight: 2.0, score: lifeCheckScore, raw: lifeCheck?.status, unit: '', note: 'D32 两表分裂 / D34 同名条目吞掉人物，都会让已离场的人继续在场' },
   { key: '孤儿回合', weight: 1.5, score: orphanScore, raw: orphanChk?.status, unit: '', note: '玩家行动落库但正文没产出' },
   { key: '空正文落库', weight: 1.5, score: emptyScore, raw: emptyChk?.status, unit: '', note: 'D31 之后应当为 0' },
   { key: '校勘 major 挂 open', weight: 1.2, score: contScore, raw: contOpen, unit: '条', note: '报出来却没人处理的不一致' },
@@ -314,7 +316,9 @@ if (missing.length) console.log(`\n未取到数据（已从加权平均里剔除
 
 console.log(`\n──── 原始指标速览 ────`);
 console.log(`正文      ${len.total} 字 / ${len.n} 拍｜均 ${Math.round(len.mean)}｜p50 ${len.p50}｜min ${len.min}｜max ${len.max}`);
-console.log(`重复      局部 5-gram 均 ${(repMean ?? 0).toFixed(1)}% / p90 ${(repP90 ?? 0).toFixed(1)}%｜3-gram p90 ${(gram3P90 ?? 0).toFixed(1)}%`);
+// 比率在报告里是 0–1，这里要 ×100 再打印：否则 7.6% 会显示成「0.1%」，与上面明细行自相矛盾。
+const pct1 = (x) => (x === null || x === undefined ? '—' : (Math.round(x * 1000) / 10).toFixed(1));
+console.log(`重复      局部 5-gram 均 ${pct1(repMean)}% / p90 ${pct1(repP90)}%｜3-gram p90 ${pct1(gram3P90)}%`);
 console.log(`记忆      断言 ${r.memory.assertions?.map((a) => `${a.status}=${a.n}`).join(' ')}｜线索 ${r.memory.threads?.map((t) => `${t.status}=${t.n}`).join(' ')}｜场次 ${r.scale.scenes?.count}`);
 console.log(`一致性    校勘 ${cont?.total} 条（major ${cont?.major}｜挂 open ${cont?.major_open}）｜目标拦下 ${r.memory.skipped_targets?.items}｜孤儿 ${orphanChk?.detail?.slice(0, 30) ?? '—'}`);
 console.log(`上下文    斜率 ${Math.round(slope ?? 0)} tok/轮｜峰值 ${peak}｜索引 ${(indexFull ?? 0) * 100 | 0}% 轮完整｜覆盖 ${mentionHit ?? '—'}/310`);
