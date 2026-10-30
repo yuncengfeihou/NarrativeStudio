@@ -1765,6 +1765,65 @@ console.log('\n=== gone 的回程通道（D10）===');
   });
   eq(aliasRevive.length, 1, '用别名点名也回程');
   eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'alive', '别名回程生效');
+
+  // ---- 当拍回程：第二路 —— 史官这一拍把他写成在场 ----
+  // 为什么需要第二路：玩家点名只覆盖「玩家主动提到他」。110 拍局里宫男 t75 被标 gone
+  // （走到门外等回话），t91–t94 正文里他一直在门外说话、史官每拍给他写 location/mood/goal，
+  // 但没人点名他 → life_state 卡在 gone，机制和正文各说各话。
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 40 });
+  const onstage = pipe.reviveOnstageGone({
+    sessionId: sid, branchId: 'main', turnNo: 41,
+    aliasIndex: schema.buildAliasIndex(card),
+    entries: [{ who: '凌玥', field: 'location', life_state: '' }],
+  });
+  eq(onstage.length, 1, '史官写了在场态 → 代码写回 alive（不靠玩家点名）');
+  eq(onstage[0].via, 'location', '记下触发的字段');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'alive', '在场态回程生效');
+  ok(store.listPatches(sid, { branchId: 'main', limit: 200 })
+    .some((p) => p.kind === 'life_state_revived' && p.payload?.reason === 'onstage_state'),
+  '第二路留了 reason=onstage_state 的审计（可与玩家点名区分）');
+
+  // 账本 present 也算在场证据（它没有对应的人物状态字段）。
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 42 });
+  eq(pipe.reviveOnstageGone({
+    sessionId: sid, branchId: 'main', turnNo: 43,
+    aliasIndex: schema.buildAliasIndex(card),
+    entries: [{ who: '凌玥', field: 'present', life_state: '' }],
+  }).length, 1, '账本 present 也算在场证据');
+
+  // dead 仍是终态：在场态不能把死人写活。
+  eq(pipe.reviveOnstageGone({
+    sessionId: sid, branchId: 'main', turnNo: 44,
+    aliasIndex: schema.buildAliasIndex(card),
+    entries: [{ who: '谢沐', field: 'location', life_state: '' }],
+  }).length, 0, 'dead 的人被写成在场也不复活（与 gone 区别对待）');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['谢沐'].life_state, 'dead', '谢沐仍是 dead');
+
+  // 同一拍模型自己声明了 life_state，以模型的判断为准，不在这里翻案。
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 45 });
+  eq(pipe.reviveOnstageGone({
+    sessionId: sid, branchId: 'main', turnNo: 46,
+    aliasIndex: schema.buildAliasIndex(card),
+    entries: [
+      { who: '凌玥', field: 'life_state', life_state: 'gone' },
+      { who: '凌玥', field: 'location', life_state: '' },
+    ],
+  }).length, 0, '同一拍自己声明 life_state 的不翻案（模型判断优先）');
+  eq(store.getCharStateMap(sid, { branchId: 'main' })['凌玥'].life_state, 'gone', '仍按模型声明保持 gone');
+
+  // 不在场类字段（例如 knowledge）不触发回程，避免把「谁学到什么」误当成在场。
+  store.setCharState(sid, { branchId: 'main', who: '凌玥', field: 'life_state', value: 'gone', turn: 47 });
+  eq(pipe.reviveOnstageGone({
+    sessionId: sid, branchId: 'main', turnNo: 48,
+    aliasIndex: schema.buildAliasIndex(card),
+    entries: [{ who: '凌玥', field: 'knowledge.knows', life_state: '' }],
+  }).length, 0, '非在场类字段不触发回程');
+  // 本就是 alive 的人不产生任何写入（这条通道只处理 gone）。
+  eq(pipe.reviveOnstageGone({
+    sessionId: sid, branchId: 'main', turnNo: 49,
+    aliasIndex: schema.buildAliasIndex(card),
+    entries: [{ who: '谢沐', field: 'present', life_state: '' }],
+  }).length, 0, '非 gone 的人不产生写入');
 }
 
 {

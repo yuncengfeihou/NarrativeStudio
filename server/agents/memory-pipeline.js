@@ -16,9 +16,9 @@ import { currentPlan } from '../memory/context-plan.js';
 import { buildAliasIndex, linkEntities, normalizeCard, PERSON_TYPE, resolveEntity } from '../world/schema.js';
 import { pathsFor } from '../world/state-paths.js';
 import {
-  addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getRelations, getScenes,
-  getState, getThreads, getTurnsForBranch, invalidateAssertion, latestScene, listPatches,
-  searchAssertions, searchTurns, setCharState, upsertThread,
+  addPatch, addScene, addWorldState, getAssertions, getBranch, getCharStateMap, getCharStates,
+  getRelations, getScenes, getState, getThreads, getTurnsForBranch, invalidateAssertion, latestScene,
+  listPatches, searchAssertions, searchTurns, setCharState, upsertThread,
 } from '../memory/store.js';
 import {
   continuitySystemPrompt, continuityUserPrompt, librarianSystemPrompt, librarianUserPrompt,
@@ -97,6 +97,72 @@ export function reviveNamedGone({
       evidence: text.slice(0, 120),
     });
     applied.push({ who, from: 'gone', to: 'alive' });
+  }
+  return applied;
+}
+
+/** 在场类字段：谁身上被写了这些，谁这一拍就在镜头里。 */
+const ONSTAGE_FIELDS = new Set(['location', 'condition', 'mood', 'goal', 'status']);
+
+/**
+ * `gone` 的回程通道第二路（D10 延伸）：**史官这一拍把这个人写成在场**了。
+ *
+ * 为什么需要第二路：玩家点名只覆盖「玩家主动提到他」。实测 110 拍局里宫男 t75 被标
+ * `gone`（他走到门外等回话），t91–t94 正文里他一直在门外扬声说话、史官每拍都在给他写
+ * `location/mood/goal`，但没人「点名」他，于是 `life_state` 卡在 `gone`——机制和正文
+ * 各说各话。判据只能靠玩家原话时，这一整类「自己回到镜头里」的回程永远接不上。
+ *
+ * 信号来自结构化写入，不是文本匹配：`states` / `changes` 里的在场类字段、账本 `present`
+ * 名单，都是史官读完整段正文后声明的「谁在这一拍动了」。三类字段有一个成立就说明
+ * 他回到了镜头里——和 D10 一样，这不是新的注入通道，只是同一事实的第二个见证人。
+ *
+ * 边界：
+ * - 只处理 `gone`；`dead` 绝不复活（死人回来必须模型显式写）。
+ * - 只认**本拍之前**就已经是 `gone` 的：同一拍里模型既写 `gone` 又写 `location` 时，
+ *   以模型这一拍的 `life_state` 声明为准，不在这里翻案。
+ * - 只处理本拍真实写入的条目（空列表直接返回），不做全表扫描。
+ *
+ * @returns {Array} 实际写回的条目（供测试与报告）
+ */
+export function reviveOnstageGone({
+  sessionId, branchId, turnNo, aliasIndex = [], entries = [],
+}) {
+  if (!entries.length) return [];
+  const prevTurn = Math.max(0, Number(turnNo) - 1);
+  const prev = getCharStateMap(sessionId, { branchId, atTurn: prevTurn });
+  // 同一拍模型自己声明了 alive/dead/gone 的人一律不翻案：以模型这一拍的判断为准。
+  const selfDeclared = new Set(
+    entries.filter((e) => str(e?.life_state)).map((e) => str(e.who)).filter(Boolean),
+  );
+  const revived = new Map();
+  for (const e of entries) {
+    const who = str(e?.who);
+    const field = str(e?.field);
+    if (!who) continue;
+    // `present` 是账本的在场名单；其余是在场类状态字段。
+    if (field !== 'present' && !ONSTAGE_FIELDS.has(field)) continue;
+    if (revived.has(who)) continue;
+    if (selfDeclared.has(who)) continue;
+    if (str(prev?.[who]?.life_state) !== 'gone') continue;
+    revived.set(who, field);
+  }
+  const applied = [];
+  for (const [who, via] of revived) {
+    const resolved = resolveEntity(who, aliasIndex);
+    const entityId = resolved.id || who;
+    setCharState(sessionId, { branchId, who, field: 'life_state', value: 'alive', turn: turnNo });
+    addWorldState(sessionId, {
+      branch_id: branchId, entity_kind: 'person', entity_id: entityId,
+      path: 'life_state', op: 'set', value: 'alive', turn: turnNo,
+      source: 'archivist', evidence: `史官这一拍把 ${who} 写成在场（${via}）`,
+    });
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'life_state_revived', turn_no: turnNo,
+      status: 'applied', severity: 'info',
+      payload: { who, from: 'gone', to: 'alive', reason: 'onstage_state', via },
+      evidence: `${who} → ${via}`,
+    });
+    applied.push({ who, from: 'gone', to: 'alive', via });
   }
   return applied;
 }

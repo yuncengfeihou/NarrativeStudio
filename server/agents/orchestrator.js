@@ -15,7 +15,7 @@
 import { randomUUID } from 'node:crypto';
 import { config } from '../config.js';
 import { estimateTokens } from '../tokens.js';
-import { isPerson, normalizeCard } from '../world/schema.js';
+import { isPerson, normalizeCard, buildAliasIndex } from '../world/schema.js';
 import { buildEffectiveWorld } from '../world/effective.js';
 import { isNumberPath } from '../world/state-paths.js';
 import { resolveAgent } from '../model-registry.js';
@@ -526,6 +526,25 @@ async function runTurnInner({
             evidence: `${r.entity_kind}/${r.entity_type} ${r.entity_id || ''} ${r.path} ${r.op}`.trim(),
           });
         }
+      }
+    }
+
+    // 4.5) `gone` 的回程第二路（D10 延伸）：史官这一拍把某人写成在场了。
+    // 玩家点名只覆盖「玩家主动提到他」；「他自己回到镜头里」这一类（站在门外接话、
+    // 史官每拍给他写 location/mood/goal）永远等不到点名，`life_state` 就卡在 gone——
+    // 机制和正文各说各话。判据全部来自结构化写入（states/changes 的在场类字段、
+    // 账本 present），不做文本匹配，也不新增注入通道：写回在**下一拍**装配前生效。
+    if (!archRun.skipped && arch?.applied?.onstage?.length) {
+      try {
+        const { reviveOnstageGone } = await import('./memory-pipeline.js');
+        const revived = reviveOnstageGone({
+          sessionId, branchId, turnNo,
+          aliasIndex: buildAliasIndex(normalizeCard(effectiveWorld?.card || world?.card || {})),
+          entries: arch.applied.onstage,
+        });
+        if (revived.length) arch.applied.life_state_revived = revived;
+      } catch (err) {
+        console.warn(`[orchestrator] gone 回程（在场态）失败：${err?.message || err}`);
       }
     }
 

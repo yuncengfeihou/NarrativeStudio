@@ -773,6 +773,9 @@ export function applyArchivistUpdate({
   const applied = {
     assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
     relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
+    // 这一拍真实写进去的「谁在场」证据（含 life_state 本身），供回程通道判断
+    // 「他是不是自己回到镜头里了」。只做事后审计/回程用，不进任何提示词。
+    onstage: [],
   };
   // 目标声明：只允许更新已登场/已声明的实体。未提供 declaredTargets 时不启用（内部/测试兼容）。
   const declaredSet = declaredSetOf(declaredTargets, aliasIndex);
@@ -850,6 +853,9 @@ export function applyArchivistUpdate({
   }
   for (const s of stateItems) {
     setCharState(sessionId, { branchId, who: s.who, field: s.field, value: s.value, turn: turnNo });
+    // 回程证据（D10 延伸）：这一拍写进人物状态表的每一条，都是「谁在镜头里」的结构化声明。
+    // `life_state` 也记下来——同一拍模型自己声明了生死时不翻案，靠这条判断。
+    applied.onstage.push({ who: s.who, field: s.field, life_state: s.field === 'life_state' ? s.value : '' });
     const ref = resolveEntity(s.who, aliasIndex);
     const isPlayer = !ref.type && playerName && s.who === playerName;
     addWorldState(sessionId, {
@@ -986,6 +992,11 @@ export function applyArchivistUpdate({
       branch_id: branchId, agent: 'archivist', kind: 'world_change', turn_no: turnNo,
       status: 'applied', payload: c, evidence: str(obj(raw).evidence).slice(0, 120),
     });
+    // 同一条回程证据：`changes` 与 `states` 是两个入口，写的都是「谁在镜头里」。
+    applied.onstage.push({
+      who: c.entity_id, field: c.path,
+      life_state: c.path === 'life_state' && c.op === 'set' ? c.value : '',
+    });
     applied.changes++;
     if (declaredSet && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
   }
@@ -1013,6 +1024,13 @@ export function applyArchivistUpdate({
   };
   const next = mergeLedger(old?.state || {}, mergedDelta, { aliasIndex });
   next.turn_no = turnNo;
+  // 账本 `present` 同样是「谁在镜头里」的结构化声明（史官读完整段正文后才敢这么写）。
+  // 与人物状态表分开记：它没有对应字段，不能走 states 那条路径。
+  if (scene.present?.length) {
+    for (const who of next.present || []) {
+      applied.onstage.push({ who, field: 'present', life_state: '' });
+    }
+  }
   setState(sessionId, turnNo, next, branchId);
   applied.ledger = true;
 

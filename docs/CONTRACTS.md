@@ -728,6 +728,9 @@ applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerNa
 //   玩家四次点名一次都没唤回）。同拍若 `update.states` 已写过同一条则跳过，避免同拍两行。
 //   其它字段（condition/mood/...）仍只走 world_state，不制造第二份真相。
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
+// applyArchivistUpdate 的返回值除各计数外，还有 `applied.onstage: [{who, field, life_state}]`：
+//   本拍**真实写进去**的「谁在镜头里」证据（states / changes / 账本 present）。
+//   只供 gone 回程第二路（reviveOnstageGone）与审计用，不进提示词、不占预算、不落库。
 parseArchivistUpdateStrict(content) // -> {ok, error, update}；只有顶层 JSON 对象才算成功（供重试/留痕）
 sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
 sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, delta, {aliasIndex})
@@ -770,6 +773,16 @@ reviveNamedGone({ sessionId, branchId, turnNo, world, card, playerText, ledger }
 // 只认 playerText（旁白顺带提及不算，宁缺勿滥：误判回来在剧作上可接受，误判回不来是硬伤）；
 // 只处理 gone，dead 必须模型自己写。必须在 assembleContext 之前调用，
 //   否则这一拍的场记单还是「已故／离场」。不产生 SSE 事件，审计走 patches。
+// gone 回程第二路（D10 延伸）：史官这一拍把某人写成在场 → 写回 alive。
+// 第一路（playerText 点名）漏掉的正是「玩家没点名、他自己回到镜头里」这一类：
+// 110 拍实测 11 个 gone 的人里 9 个之后又被写了 location/mood/goal，只有 2 个被点过名。
+// 信号全部来自结构化写入，不做文本匹配：states/changes 的 location/condition/mood/
+// goal/status，以及账本 present。同一拍模型自己声明了 life_state 的不翻案（模型优先）；
+// 只处理本拍之前就已是 gone 的人；dead 绝不复活。在史官落库之后、下一拍装配之前生效。
+reviveOnstageGone({ sessionId, branchId, turnNo, aliasIndex, entries })
+// -> [{who, from:'gone', to:'alive', via}]；落 setCharState + addWorldState +
+//    patches(kind='life_state_revived', payload.reason='onstage_state', payload.via=<字段>)
+// entries 由 applyArchivistUpdate 返回的 applied.onstage 提供（本拍真实写入的 who/field/life_state）。
 detectSceneChange(session, update, turnNo)                // 地点/时间/在场者变了就切
 runContinuity({ session, world, turnNo, signal, guard })  // -> {issues, healthy, applied, stale?}
 // 单次 chat + responseFormat json_object，不调工具（工具是资料员 runLibrarian 的）。

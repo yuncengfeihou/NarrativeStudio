@@ -1536,6 +1536,18 @@ try {
   // 实测三局 16 条泄漏里 9 条是纯名字提及（对白/心里想）、7 条史官同时写了在场态。
   // 旧口径把两类都判 WARN，于是「凌玥 t25 玩家点名要见她、正文她在药店门口说话、
   // 史官写了她的 location/condition/mood，present 里却没有她」这种真缺陷被降成 WARN。
+  // 「谁在哪一拍被回程过」。必须在下面判据之前算好：回程之后的在场不算「离场仍上场」，
+  // 否则同一条 gone 会被判两次（机制已经把人请回来了，报告还在扣分）。
+  const revivedAt = new Map();
+  for (const p of all(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'life_state_revived' order by turn_no asc, id asc",
+    { sid: sessionId }
+  ) || []) {
+    const who = safeJson(p.payload_json)?.who;
+    if (!who) continue;
+    if (!revivedAt.has(who)) revivedAt.set(who, []);
+    revivedAt.get(who).push(Number(p.turn_no));
+  }
   const lifeLeaks = [];
   for (const lr of lifeRows) {
     const who = lr.who;
@@ -1547,7 +1559,14 @@ try {
     const live = asmRows.filter((r) => Number(r.turn_no) > from && stillDeadAt(lr, Number(r.turn_no)));
     const later = live.filter((r) => String(r.content || '').includes(who)).map((r) => Number(r.turn_no));
     if (!later.length) continue;
-    const inPresent = later.filter((tn) => (presentByTurn.get(tn) || []).includes(who));
+    // 回程之后就不算「离场仍上场」了：`reviveOnstageGone` / `reviveNamedGone` 会把
+    // 同一条 gone 行的 valid_to 封在回程那一拍，绝大多数情况 `stillDeadAt` 已经挡掉；
+    // 这里再按回程补丁显式挡一次，防止「回程只写了 world_state、没封 character_states」时
+    // 报告把「机制已经把人请回来了」重新算成缺陷（同一事实不能被判两次）。
+    const revives = revivedAt.get(String(who)) || [];
+    const inPresent = later
+      .filter((tn) => (presentByTurn.get(tn) || []).includes(who))
+      .filter((tn) => !revives.some((rt) => rt <= tn));
     // D10：区分「正文自己提了一嘴」与「玩家主动点名要去找这个人」。
     // 玩家点名是最强信号——他明确要求这一拍和这个人互动，代码仍把她从在场里剔除，
     // 那就是**机制没跟上正文**，不是「正文没跟上机制」。判据方向反了等于给错误发合格证。
@@ -1832,12 +1851,18 @@ try {
   });
   // D10（修复后）：玩家点名让 gone 的人回到场记单，每次回程留一条 life_state_revived。
   // 它非 0 说明回程通道真的被用过——而不是「规则写好了但永远不触发」。
+  // `reason` 区分两条通道：`named_by_player`（玩家点名）与 `onstage_state`
+  // （史官这一拍把他写成在场：location/mood/goal/condition/status 或账本 present）。
+  // 后者是 D10 延伸：玩家不点名、他自己回到镜头里，这一类此前永远等不到回程。
   const revivedRows = (all(
     "select turn_no, payload_json from patches where session_id = :sid and kind = 'life_state_revived' order by turn_no asc, id asc",
     { sid: sessionId }
   ) || []).map((p) => {
     const pl = safeJson(p.payload_json);
-    return { turn_no: Number(p.turn_no), who: pl.who ?? null, from: pl.from ?? null, to: pl.to ?? null, reason: pl.reason ?? null };
+    return {
+      turn_no: Number(p.turn_no), who: pl.who ?? null, from: pl.from ?? null, to: pl.to ?? null,
+      reason: pl.reason ?? null, via: pl.via ?? null,
+    };
   });
   // D11：被拒的数值增量。钱是唯一的数值账本，拒绝之后余额卡死、正文与账本公开打架。
   // 这个探针必须存在，否则「银钱」在报告里永远是健康的。

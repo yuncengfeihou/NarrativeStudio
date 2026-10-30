@@ -1111,7 +1111,7 @@ D3 那种「改取数逻辑」才需要数据支撑。
 | D7 报告口径 | 直接改（评测工具正确性；第 2 条已确认早前修好） | — |
 | D8 `summary` 渲染 | **不做**（事实前提有误：`identity.*` 本就渲染；加 summary 会把人群场推下档） | m00160 |
 | D9 断言可见率 | **A1**：`manyLimit` 按预算推导（`scene×25%÷12.4`）+ 删 `slice(0,24)`；A2（同主同谓合并）待新数据再定 | m03366 |
-| D10 `gone` 无回程 | **A+C**：玩家点名即回程（`reviveNamedGone`）+ 场记 guard 只挡 `dead` + 提示词说清 gone 可逆 + 报告判据改为「机制没跟上正文」判 FAIL | m03366 |
+| D10 `gone` 无回程 | **A+A2+C**：玩家点名即回程（`reviveNamedGone`）+ 场记 guard 只挡 `dead` + 提示词说清 gone 可逆 + 报告判据改为「机制没跟上正文」判 FAIL | m03366 |
 | D11 银钱锁死 | **A+D**：允许负余额、渲染「欠 X」、`overdrawn` 审计；`rejected_delta` 必须归零 | m03366 |
 | D12 校勘修复失效 | 抽出可测的 `applyContinuityFixes()` + 接受 `#` 前缀 + 未执行留 `fix_result` | m03366 |
 | D13 简称进不了索引 | **A1+C**：introduce 收正文前缀、`sanitizeChange`/`isDeclaredTarget` 用 `linkEntities` 兜底；不做组合式识别器 | m03366 |
@@ -1411,6 +1411,7 @@ t33: linked.person=[凌玥,陆可] → pickPresent 候选=[凌玥,陆可] → li
 | 通道 | 位置 | 行为 |
 |---|---|---|
 | A（当拍） | `server/agents/memory-pipeline.js` 的 `reviveNamedGone()`，由 `orchestrator.js` 在装配**之前**调用 | 玩家这一拍点名了某个 `gone` 的人 → 写回 `alive` + `addWorldState` + `patches(kind='life_state_revived')` 审计。只认 `playerText`，不认旁白提及 |
+| A2（当拍·第二路，D10 延伸） | `server/agents/memory-pipeline.js` 的 `reviveOnstageGone()`，由 `orchestrator.js` 在史官落库之后、下一拍装配之前调用 | **史官这一拍把他写成在场** → 写回 `alive` + `addWorldState` + `patches(kind='life_state_revived', payload.reason='onstage_state')`。信号来自结构化写入（`states`/`changes` 的 `location`/`condition`/`mood`/`goal`/`status`，以及账本 `present`），不做文本匹配 |
 | C（封场兜底） | `applyLifeChanges()` 的 guard | 从 `if (prevLife === 'dead' || prevLife === 'gone') continue;` 改为**只挡 `dead`**——场记读整场原文、看到她在说话，它的话就该算 |
 | 语义 | `server/prompts/archivist.js` 的 `## states` 段 | 补一句「gone 是『这一次走开了』，不是『从此不再出现』；离场的人重新回到正文里，同样要写回 alive 或 injured」 |
 | 报告判据改向 | `_work/longrun-report.mjs` | `lifeReviveMissing`（不在 present 但**玩家点名过**）判 **FAIL**；只有「旁白顺带提及、玩家没点名」才 WARN |
@@ -1419,11 +1420,24 @@ t33: linked.person=[凌玥,陆可] → pickPresent 候选=[凌玥,陆可] → li
 按提及回程会把所有离场者全部拉回在场，等于没有离场。玩家点名是唯一无歧义的「这一拍我要跟他互动」信号。
 误判方向也可接受：玩家提一嘴 → 她回到场记单，最坏是多渲染一段口吻锚点，不会写坏任何账本。
 
+**为什么后来又加了第二路（A2，2026-10-30）**：A 只认玩家点名，漏掉的是「玩家没点名、
+他自己回到镜头里」这一整类。110 拍实测：11 个被标过 `gone` 的人里，**9 个**之后又被史官写了
+`location`/`mood`/`goal`（在门外接话、被抬回床上、跟在队伍里），但只有 2 个人被玩家点过名。
+典型是宫男：t75 走到门外等回话被标 `gone`，t91–t94 正文里他一直在门外扬声说话、史官每拍给他写
+`location`/`mood`，`life_state` 却一直是 `gone`——场记单印「已故／离场」，正文照演，机制和正文各说各话。
+
+第二路的判据全部来自**结构化写入**，不是又一层文本匹配：史官读完整段正文后声明「谁这一拍写了
+位置/状态/心境/目标」，这就是「谁在镜头里」的第二见证人（与 D32 场记见证同源）。三条边界：
+①只处理本拍**之前**就已是 `gone` 的，同一拍模型自己声明 `life_state` 的一律不翻案（模型优先）；
+②`dead` 绝不复活；③只认在场类字段，`knowledge`/`psyche` 这类不触发（不然「谁学到什么」会被读成在场）。
+
 **为什么 dead 不适用 A**：死人回来是剧作级事件（诈死、复活、幻觉），必须由模型显式写。
 代码替它决定「她回来了」会把真死亡写活，那比保持 gone 更坏。
 
 **验证判据**：新长跑里，`gone` 之后玩家点名的那一拍，`present` 应包含该角色、场记单不再印「已故／离场」；
 `patches(kind='life_state_revived')` 有记录；报告的 `dead_gone_reentry` 应 PASS（不再有「玩家点名但不在场」）。
+第二路落地后还要看 `patches(kind='life_state_revived')` 的 `payload.reason` 分布：
+`onstage_state` 应当占多数（它覆盖的是常态回程），`named_by_player` 是少数。
 
 ---
 
@@ -3787,3 +3801,4 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 | 2026-10-29 | D32 | `changes` 里的 `life_state` 补写 `character_states`；报告判据改读两表并集 | test-memory 新增 7 条（443 passed）；全量 6 套件绿；真库回放第三次长跑，`life_state_consistency` 从误判 PASS 变为如实 FAIL 并注明是修复前存量 |
 | 2026-10-30 | D33 落地：上游连接中断自动整拍重发（`failureOf()` 归一 `fetch failed`/`terminated`，`NARRATION_RETRY_MAX=3`，新增 `narration_retry` 事件）＋ `checkoutBranch()` 切回已有世界线（`POST /api/sessions/:id/checkout`）＋ 回合数改派生值 `countVisibleTurns()` |
 | 2026-10-30 | **D34 落地**：卡内 `concept` 条目与运行期同名 `introduce` 人物撞 id/name → 投影 `type` 停在 `concept` → 人物运行态（`life_state`/`mood`/`goal`/`location`）被 `pathsFor()` 静默丢弃。修法三步：白名单按实体真实类型取、`promoteToPerson()` 把同名条目在投影里升级成人物、`dropped_deltas` 让被挡的写入留痕（`patches(kind='dropped_delta')`）。真库回放 110 拍局：8 条丢弃归零、宫男 life/mood/location 全部落地；test-memory 新增 29 条（489 passed），全量 5 套件绿。同时把 D32 的报告判据与 `_work/d32-check.mjs` 的 id/name 归一修好（第一版报出 4 行假分裂，真分裂 0） |
+| 2026-10-30 | **D10 回程第二路（A2）落地**：新增 `reviveOnstageGone()`——史官这一拍把某人写成在场（`location`/`condition`/`mood`/`goal`/`status` 或账本 `present`）就写回 `alive`，`patches(kind='life_state_revived', reason='onstage_state', via=<字段>)`。`applyArchivistUpdate()` 返回值新增 `applied.onstage`（本拍真实写入的 who/field/life_state，只供回程与审计，不进提示词）。为什么加：110 拍实测 11 个 `gone` 的人里 9 个之后又被写成在场，但只有 2 个被玩家点过名——第一路只认玩家点名，覆盖不到「他自己回到镜头里」。报告侧同步：回程之后的在场不再算「离场仍上场」（同一事实不判两次）。测试：test-memory 新增 11 条断言（在场态回程 / present 触发 / dead 不复活 / 同拍自声明不翻案 / 非在场类字段不触发），500 passed；全量 6 套件全绿。 |
