@@ -917,6 +917,21 @@ runRetrieval({ card, playerText, ledger, lastNarrative, signal,
 //   宽容解析：兼容旧形状 {queries:[...]}（当 codex 用），失败返回两个空数组。
 // parseRetrievalQueries(content) -> string[]（= parseRetrievalRequest().codex，保留旧名）
 
+// 定点改稿的确定性部分（server/agents/rewrite.js；S1，2026-10-30）
+parseRewriteTarget(raw) -> {ok:true, target:{start,end,expect}|null} | {ok:false, error}
+// null/undefined = 没给（整拍重演）。start/end 必须是整数且 0<=start<end；expect 非空且长度
+// 等于 end-start（它是对原文的快照）；片段上限 MAX_TARGET_CHARS=4000（超了说明用户要的是整段重写）。
+checkRewriteTarget({content, target}) -> {ok:true} | {ok:false, code:'text_mismatch'}
+// 快照不符一律 text_mismatch：路由翻成 409 让用户重选，**不猜、不降级成整拍重演**。
+composeRewriteGuidance({guidance, target}) -> string
+// 拼进 narrator 既有的 guidance 通道（【本轮改稿要求】user 消息），不新增注入点；
+// target 那半句只写「只重写这一段，其余内容保持原样」+【待改片段】。
+assessRewrite({before, after, target}) -> {out_of_range, changed:{from,old_end,new_end},
+                                           outside:{before,after}}
+// 公共前后缀之差的确定性 diff（旧/新两套尾端坐标）。一字未改（前后缀吃满）不算越界；
+// 没给 target 永远 false。越界只报不拦：路由落 patches(kind='rewrite_out_of_range')
+// 并在 SSE 末尾补 {type:'rewrite_check'}，不自动回滚、不重试。
+
 // 历史检索（server/memory/recall-history.js；与 codex_lookup 同构的第五个分段工具）
 // recallHistory({ sessionId, branchId, forkTurn, atTurn, excludeFrom, query, limit, kinds, maxTokens })
 // -> { text, hits:[{turn_no, kind, snippet, token_count}],
@@ -1064,6 +1079,12 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 {type:'world_tick', events}              // 幕后推演
 {type:'continuity', report}              // 校勘
 {type:'branches', branches, scene_summary, stale?}
+{type:'rewrite_check', turn_no, out_of_range, changed, outside}
+// 只在 /rewrite 带 target（定点改稿）时出现，在 done 之后：这是**确定性 diff 的结论**，不是模型输出。
+// changed = {from, old_end, new_end}：公共前后缀之差（旧文本被换掉的 [from,old_end)、新文本换上的
+// [from,new_end)）。outside = {before, after}：落在 target 之外、被一起改掉的字符数。
+// out_of_range 为真时同时落 patches(kind='rewrite_out_of_range', status='open', severity='info')，
+// 报告据此数「模型重演整拍时外溢了多少」。**只报不拦**：不自动回滚、不重试——留哪一稿是人决定的。
 {type:'done', turn_no, branch, narration_mode, usage, session_usage, memory}
 {type:'narration_retry', turn_no, attempt, max, reason}
 // 上游连接中断（fetch failed / terminated / 读流断开）时自动重发这一拍演绎。
@@ -1140,6 +1161,17 @@ POST   /api/sessions/:id/turn             -> SSE  body:{playerText, images, bran
 POST   /api/sessions/:id/opening          -> SSE
 POST   /api/sessions/:id/branches         -> {branches, scene_summary}
 POST   /api/sessions/:id/rewrite          -> SSE（自动开新分支）
+       body:{turn_no, guidance?, generateBranches?, target?}
+       // target 缺省 = 整拍重演（旧行为）。带 target 是**定点改稿**：{start, end, expect}
+       // 圈出要改的片段——字符偏移（对第 turn_no 拍的 narrator 正文）+ 原文快照。
+       // 服务端逐字核对快照，不符返回 **409 {error:{message,code:'text_mismatch'}}**（让用户重选，
+       // 不猜他指的是哪一段）。target 形状不对 / 片段超过 MAX_TARGET_CHARS(4000) / 区间长度与
+       // expect 不符 → 400；这些校验都在开 SSE 之前，返回 JSON 而不是流。
+       // 定位**不进模型**：服务端把片段拼进 narrator 既有的 guidance 通道
+       // （`server/agents/rewrite.js` 的 composeRewriteGuidance），不新增注入点。
+       // 改完做确定性 diff，越界只报不拦：SSE 末尾补 {type:'rewrite_check'}（见 SSE 协议）+
+       // patches(kind='rewrite_out_of_range')。改中间某拍仍然是「从这一拍之前开新分支」，
+       // 后面的拍留在旧线（红线 6）；「上一拍修订」= 对最后一拍调同一个接口。
 POST   /api/sessions/:id/rollback         body:{turn_no}   -> 新分支
 GET    /api/sessions/:id/branches         -> {branches, current, turn_count}
        // 每条线带自己的 turn_count（按祖先链算的可见回合数）与 is_current。

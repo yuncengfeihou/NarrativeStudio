@@ -112,8 +112,8 @@ schema：
     reveal / facets.sensory；facets.rules / facets.consequences / aliases / tags / links
   - 事实实体的 summary / detail / facets.history 是作者定义，运行期不可写；
     新条目用 introduce 一次写清。
-  - player: situation / capability / inner_voice / wants / afraid；
-    status / condition / mood / location / goal / life_state；
+  - player: situation / capability / inner_voice / wants / afraid（**不带 psyche. 前缀**，
+    主角是 player 不是 person）；status / condition / mood / location / goal；
     knowledge.knows / knowledge.does_not_know；
     money（银钱，唯一的数值字段）
   - world: status（城邦/阵营/天下的整体局势，例如「全城戒严」）

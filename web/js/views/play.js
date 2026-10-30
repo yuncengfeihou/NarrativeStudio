@@ -686,6 +686,15 @@ export default {
             window.dispatchEvent(new CustomEvent('sessions:changed'));
             break;
           }
+          case 'rewrite_check': {
+            // 定点改稿的结论：模型重演的是整拍正文，字面重排天然会外溢。
+            // 越界只提示（事实），不自动回滚——要不要留这一稿由人来决定。
+            if (evt.out_of_range) {
+              const n = (evt.outside?.before || 0) + (evt.outside?.after || 0);
+              toast(`改稿动到了圈定范围之外（约 ${n} 字），可再改一次或接受`, { type: 'info' });
+            }
+            break;
+          }
           case 'error': {
             dropPostPending();
             const fail = new Error(evt.message || '生成失败');

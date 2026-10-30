@@ -562,7 +562,7 @@ async function runTurnInner({
     emit({ type: 'memory', stats: { error: err.message }, degraded: true });
   }
 
-  // 5) 切场：场记归档 + 世界呼吸（都不阻断回合）
+  // 5) 切场：场记归档（不阻断回合）
   // 场次记录取代了原来的「滚动摘要」：每场一行、只追加、永不互相改写。
   let sceneRecord = null;
   if (sceneChanged && !signal?.aborted) {
@@ -582,6 +582,18 @@ async function runTurnInner({
     } catch (err) {
       console.warn(`[orchestrator] 场记归档失败：${err?.message || err}`);
     }
+  }
+
+  // 5.5) 世界呼吸（后台推演不在场角色的行动）
+  //
+  // 触发 = 切场 或 每 WORLD_TICK_EVERY 轮。两者是**正交**的：切场是剪辑决定，
+  // 世界呼吸是时间流逝——只挂在切场上，一个 12 拍的长场里世界会完全静止。
+  // `worldTickEvery = 0` 表示只保留切场触发（与 SCENE_EVERY / CONTINUITY_EVERY
+  // 的「0 = 关掉」同构）。单一调用点 + 单一 effectId，切场与轮数节拍重合时不会跑两遍。
+  // runWorldTick 在没有幕外候选时不发模型调用，直接返回 `{ events: [] }`。
+  const tickEvery = config.context.worldTickEvery;
+  const tickDue = sceneChanged || (tickEvery > 0 && turnNo % tickEvery === 0);
+  if (tickDue && !signal?.aborted) {
     try {
       const tickEffect = {
         sessionId, branchId, turnNo, agent: 'world_tick',

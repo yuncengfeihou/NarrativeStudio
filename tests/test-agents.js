@@ -537,6 +537,190 @@ console.log('\n=== 5. 管线接线：runTurn 真的按节奏调到了这四个 A
   ok(kinds.has('offstage_event'), 'patches 里有幕后事件（kind=offstage_event）——报告靠它数呼吸产出');
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 6. 世界呼吸的轮数节拍：切场之外也会跑（WORLD_TICK_EVERY）===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // 世界呼吸的触发有两路：切场（叙事结构变了）与每 N 轮（时间在流逝）。两路正交——
+  // 只挂在切场上时，一个 12 拍的长场里世界完全静止。这块专门测**第二路**：
+  // 关掉强制封场（SCENE_EVERY=0）、把节拍拧到 1 轮一次，跑 3 拍。场记只会在第 1 拍
+  // （没有上一场）归档一次，但幕后推演必须每拍都有——否则就是「只挂切场」退回来了。
+  const { config } = await import('../server/config.js');
+  const prevEvery = config.context.worldTickEvery;
+  const prevSceneEvery = config.context.sceneEvery;
+  const handlers = {
+    'fake-narrator': () => ({ content: '他把玉佩收进袖中，灯影一晃。' }),
+    'fake-archivist': () => '{"scene_change":{"changed":false}}',
+    'fake-scene-keeper': () => JSON.stringify({
+      question: '他在等什么', outcome: '他把玉佩收了起来', key_detail: '玉佩贴身收着',
+      threads: [], hooks: [], life_changes: [],
+    }),
+    'fake-world-tick': () => JSON.stringify({
+      events: [{ who: ['凌玥'], what: '她独自在廊下站了很久', visibility: 'rumor', pressure: 0.5 }],
+    }),
+    'fake-continuity': () => '{"issues":[],"healthy":[]}',
+    'fake-retrieval': () => '{"codex":[],"history":[]}',
+  };
+  const ctx = newSession('呼吸节拍');
+  const events = [];
+  config.context.worldTickEvery = 1;
+  config.context.sceneEvery = 0;
+  try {
+    await using(handlers, async (fake) => {
+      // 玩家文本不提任何人名：凌玥保持幕外，幕外候选恒非空（否则 runWorldTick 直接返回）。
+      for (let i = 0; i < 3; i += 1) {
+        await orch.runTurn({
+          sessionId: ctx.session.id, playerText: '我把玉佩收进袖中。', generateBranches: false,
+          onEvent: (e) => events.push(e),
+        });
+      }
+      eq(fake.count('fake-world-tick'), 3, '节拍=1 时三拍都推演了世界呼吸');
+      eq(fake.count('fake-scene-keeper'), 1, '场记只在第 1 拍归档（强制封场已关、地点时间没变）');
+    });
+  } finally {
+    config.context.worldTickEvery = prevEvery;
+    config.context.sceneEvery = prevSceneEvery;
+  }
+  const offstage = store.listPatches(ctx.session.id, { branchId: 'main', limit: 300 })
+    .filter((p) => p.kind === 'offstage_event');
+  ok(offstage.length > 0, '幕后事件落库（kind=offstage_event）');
+  ok(
+    offstage.some((p) => String(p.evidence || '').includes('第 3 轮')),
+    '第 3 拍没有切场，也留下了幕后推演——证明轮数节拍真的接上了',
+  );
+  // 反证：节拍关掉时（0 = 只在切场），同长度的一局不会多出幕后推演。
+  eq(config.context.worldTickEvery, prevEvery, '测试结束后节拍复位');
+  eq(config.context.sceneEvery, prevSceneEvery, '测试结束后强制封场复位');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 7. 定点改稿的确定性部分（server/agents/rewrite.js）===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // 定位不进模型：区间与原文快照由前端给，服务端逐字核对；改完只做确定性 diff。
+  const RW = await import('../server/agents/rewrite.js');
+
+  // --- parseRewriteTarget：请求校验 ---
+  eq(RW.parseRewriteTarget(null).target, null, '不传 target = 整拍重演（旧行为不变）');
+  eq(RW.parseRewriteTarget(undefined).ok, true, 'undefined 也不报错');
+  ok(!RW.parseRewriteTarget('第3段').ok, '字符串 target 拒绝');
+  ok(!RW.parseRewriteTarget([1, 2]).ok, '数组 target 拒绝');
+  ok(!RW.parseRewriteTarget({ start: 5, end: 5, expect: '' }).ok, 'start === end 拒绝');
+  ok(!RW.parseRewriteTarget({ start: -1, end: 2, expect: 'abc' }).ok, '负 start 拒绝');
+  ok(!RW.parseRewriteTarget({ start: 0, end: 2, expect: '' }).ok, '空 expect 拒绝（没有快照就没法校验）');
+  ok(!RW.parseRewriteTarget({ start: 0, end: 5, expect: 'abc' }).ok, '区间长度与 expect 不符 → 拒绝');
+  ok(
+    !RW.parseRewriteTarget({ start: 0, end: RW.MAX_TARGET_CHARS + 1, expect: 'x'.repeat(RW.MAX_TARGET_CHARS + 1) }).ok,
+    '超长片段拒绝（超了就该走整段重写）',
+  );
+  const parsed = RW.parseRewriteTarget({ start: 2, end: 5, expect: '灯影一' });
+  eq(parsed.ok, true, '合法 target 通过');
+  eq(parsed.target, { start: 2, end: 5, expect: '灯影一' }, '合法 target 归一成纯字段');
+
+  // --- checkRewriteTarget：原文快照校验 ---
+  const text = '他推门进来，灯影一晃，屋里没人。';
+  eq(RW.checkRewriteTarget({ content: text, target: null }), { ok: true }, '没 target 时校验直接通过');
+  eq(RW.checkRewriteTarget({ content: text, target: { start: 6, end: 10, expect: '灯影一晃' } }), { ok: true }, '片段还在原位 → 通过');
+  eq(
+    RW.checkRewriteTarget({ content: text, target: { start: 6, end: 10, expect: '风灯一晃' } }).code,
+    'text_mismatch',
+    '片段内容变了 → text_mismatch（调用方翻成 409，让用户重选）',
+  );
+  eq(
+    RW.checkRewriteTarget({ content: '短', target: { start: 0, end: 9, expect: '一二三四五六七八九' } }).code,
+    'text_mismatch',
+    '区间越出正文长度 → text_mismatch（不抛异常）',
+  );
+
+  // --- composeRewriteGuidance：走既有 guidance 通道 ---
+  eq(RW.composeRewriteGuidance({}), '', '两者都没有 → 空串（不产生空 guidance）');
+  eq(RW.composeRewriteGuidance({ guidance: '更压抑一些' }), '更压抑一些', '只有作者要求 → 原样');
+  const onlyTarget = RW.composeRewriteGuidance({ target: { start: 0, end: 4, expect: '灯影一晃' } });
+  ok(onlyTarget.includes('【待改片段】灯影一晃'), '只有 target → 带上待改片段');
+  ok(onlyTarget.includes('保持原样'), '只有 target → 明说其余保持原样（这次和平时不一样的地方）');
+  const both = RW.composeRewriteGuidance({ guidance: '更压抑一些', target: { start: 0, end: 4, expect: '灯影一晃' } });
+  ok(both.startsWith('更压抑一些'), '同时给时作者要求在前');
+  ok(both.includes('【待改片段】'), '同时给时片段在后');
+
+  // --- assessRewrite：改完之后的越界判定 ---
+  const before = '他推门进来，灯影一晃，屋里没人。';
+  const targetFix = { start: 4, end: 10, expect: '进来，灯影' }; // 覆盖要改的那一小段
+  const unchanged = RW.assessRewrite({ before, after: before, target: targetFix });
+  eq(unchanged.out_of_range, false, '正文一字未改 → 不算越界（前后缀吃满时不能拿坐标比长度）');
+  eq(unchanged.outside, { before: 0, after: 0 }, '未改动时 outside 归零');
+
+  const exact = RW.assessRewrite({
+    before: '他推门进来，灯影一晃。',
+    after: '他推门进来，灯火一晃。',
+    target: { start: 6, end: 10, expect: '灯影一晃' },
+  });
+  eq(exact.out_of_range, false, '改动落在 target 内 → 不越界');
+  eq(exact.changed, { from: 7, old_end: 8, new_end: 8 }, 'diff 给出旧/新两套尾端坐标（「影」→「火」，前后缀各吃一段）');
+
+  const outsideAfter = RW.assessRewrite({
+    before: '他推门进来，灯影一晃，屋里没人。',
+    after: '他推门进来，灯影一晃，屋里空着。',
+    target: { start: 6, end: 10, expect: '灯影一晃' },
+  });
+  eq(outsideAfter.out_of_range, true, '改了 target 之后的内容 → 越界');
+  eq(outsideAfter.outside.before, 0, '越界只发生在后面');
+  ok(outsideAfter.outside.after > 0, '越界字符数 > 0，前端/报告要能说清改了多少');
+
+  const outsideBefore = RW.assessRewrite({
+    before: '他推门进来，灯影一晃。',
+    after: '他踹门进来，灯影一晃。',
+    target: { start: 6, end: 10, expect: '灯影一晃' },
+  });
+  eq(outsideBefore.out_of_range, true, '改了 target 之前的内容 → 越界');
+  ok(outsideBefore.outside.before > 0, '越界发生在前面');
+
+  const wholeRewrite = RW.assessRewrite({
+    before: '他推门进来，灯影一晃。',
+    after: '风雨掠过檐角，他站在门外。',
+    target: { start: 6, end: 10, expect: '灯影一晃' },
+  });
+  eq(wholeRewrite.out_of_range, true, '整拍重排 → 越界（模型重演整拍，字面重排天然外溢）');
+  eq(RW.assessRewrite({ before: '甲', after: '乙' }).out_of_range, false, '没给 target 时永远不判越界');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 8. 提示词白名单与 state-paths 同构 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // 长跑实测（t4/t5/t9）：史官三次写 `player/psyche.fears`、一次写 player 的 life_state——
+  // 提示词照抄了人物那行，而 pathsFor('player') 里没有这些路，于是每条都成了
+  // `rejected_change(path_not_allowed)`。提示词里列一条**代码必然拒绝**的路，
+  // 等于每拍制造一次可见噪声，还让 D35 的判据永远 WARN。两者必须同构。
+  const { archivistSystemPrompt } = await import('../server/prompts/archivist.js');
+  const { ENTITY_KINDS, pathsFor } = await import('../server/world/state-paths.js');
+  const prompt = archivistSystemPrompt();
+
+  const universe = new Set();
+  for (const kind of ENTITY_KINDS) for (const p of pathsFor(kind) || []) universe.add(p);
+
+  // 取「- <label>:」这条 bullet 到下一个同缩进 bullet 为止
+  const advertised = (label) => {
+    const at = prompt.indexOf(`- ${label}:`);
+    if (at < 0) return null;
+    const rest = prompt.slice(at);
+    const next = rest.indexOf('\n  - ', 1);
+    const text = next < 0 ? rest : rest.slice(0, next);
+    const tokens = text.match(/[a-z][a-z_]*(?:\.[a-z_]+)*/g) || [];
+    return [...new Set(tokens)].filter((t) => universe.has(t));
+  };
+
+  const playerPaths = advertised('player');
+  ok(Array.isArray(playerPaths) && playerPaths.length >= 8, '能解析出主角 changes 白名单', String(playerPaths?.length));
+  eq(playerPaths.filter((p) => !pathsFor('player').has(p)), [], '主角白名单只列 pathsFor(player) 里真有的路径（否则每拍一条 rejected_change）');
+  ok(playerPaths.includes('wants') && playerPaths.includes('afraid'), '主角动机字段是 wants / afraid');
+  ok(!playerPaths.includes('life_state'), '主角不列 life_state（PLAYER_SCALARS 没有它）');
+  ok(playerPaths.some((p) => p.startsWith('psyche.')) === false, '主角不列 psyche.*（照抄人物行必被拒）');
+
+  const personPaths = advertised('person');
+  ok(Array.isArray(personPaths) && personPaths.length >= 8, '能解析出人物 changes 白名单', String(personPaths?.length));
+  eq(personPaths.filter((p) => !pathsFor('person').has(p)), [], '人物白名单同理（含 life_state / psyche.*）');
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-agents: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

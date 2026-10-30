@@ -15,7 +15,7 @@ import {
   getMemoryStats, getSessionSnapshot, recallSession, runTurn,
 } from '../agents/orchestrator.js';
 import {
-  addAssertion, addNote, countVisibleTurns, deleteNote, deleteSession, deleteVoice, getAssertions,
+  addAssertion, addNote, addPatch, countVisibleTurns, deleteNote, deleteSession, deleteVoice, getAssertions,
   getBranch, getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
   getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
   countPatches, patchKindCounts, countVoices, getPatch,
@@ -23,6 +23,7 @@ import {
   updateTurnContent,
 } from '../memory/store.js';
 import { applyPatchAction } from '../memory/patch-apply.js';
+import { assessRewrite, checkRewriteTarget, composeRewriteGuidance, parseRewriteTarget } from '../agents/rewrite.js';
 import { recallHistory } from '../memory/recall-history.js';
 import { craftCatalog, normalizeCraftSettings } from '../world/craft.js';
 
@@ -329,6 +330,17 @@ sessionsRouter.post('/sessions/:id/branches', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/sessions/:id/rewrite
+ *
+ * 默认整拍重演（开新分支 + 用同样的玩家行动重新演绎）。传 `target` 时是**定点改稿**：
+ * `{start, end, expect}` 圈出要改的片段（字符偏移 + 原文快照）。定位由前端给、服务端逐字
+ * 核对——快照不符返回 409 让用户重选，不猜；改完只做确定性 diff，越界**只报不拦**
+ * （落 `patches(kind='rewrite_out_of_range')`，SSE 回 `rewrite_check`）。
+ *
+ * 注意：改中间某拍仍然是「从这一拍之前开新分支」，后面的拍留在旧线——这是分支的语义，
+ * 不是丢数据（红线 6）。「上一拍修订」= 对最后一拍用同一个接口。
+ */
 sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
@@ -336,12 +348,28 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
   if (!Number.isInteger(turnNo) || turnNo < 1) {
     return res.status(400).json({ error: { message: 'turn_no must be a positive integer' } });
   }
+  const parsedTarget = parseRewriteTarget(req.body?.target);
+  if (!parsedTarget.ok) return res.status(400).json({ error: { message: parsedTarget.error } });
+  const target = parsedTarget.target;
+
   const playerRow = getTurn(session.id, turnNo, 'player');
   const narratorRow = getTurn(session.id, turnNo, 'narrator');
   if (!playerRow && !narratorRow) return res.status(404).json({ error: { message: 'turn not found' } });
+  if (target) {
+    const check = checkRewriteTarget({ content: narratorRow?.content || '', target });
+    if (!check.ok) {
+      return res.status(409).json({
+        error: { message: '正文已变，请重新选择要改的段落', code: check.code },
+      });
+    }
+  }
 
   sseHead(res);
-  const send = (evt) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(evt)}\n\n`); };
+  let rewrittenTurnNo = turnNo;
+  const send = (evt) => {
+    if (evt?.type === 'done' && Number(evt.turn_no) > 0) rewrittenTurnNo = Number(evt.turn_no);
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  };
   const heartbeat = setInterval(() => send({ type: 'ping' }), 15000);
   const aborter = new AbortController();
   res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
@@ -350,7 +378,7 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
     // 重写 = 从这一轮开新分支，旧线保留为「如果当时那么写」
     const fork = await forkSessionSafe({ sessionId: session.id, toTurn: turnNo - 1, note: `重写第 ${turnNo} 轮` });
     send({ type: 'fork', branch: fork.branch_id, fork_turn: fork.fork_turn });
-    const guidance = String(req.body?.guidance || '').trim();
+    const guidance = composeRewriteGuidance({ guidance: req.body?.guidance, target });
     await runTurn({
       sessionId: session.id,
       playerText: playerRow?.content || '',
@@ -361,6 +389,29 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
       onEvent: send,
       signal: aborter.signal,
     });
+    if (target) {
+      const fresh = getTurn(session.id, rewrittenTurnNo, 'narrator');
+      const verdict = assessRewrite({ before: narratorRow?.content || '', after: fresh?.content || '', target });
+      if (verdict.out_of_range) {
+        addPatch(session.id, {
+          branch_id: fork.branch_id,
+          agent: 'rewrite',
+          kind: 'rewrite_out_of_range',
+          turn_no: rewrittenTurnNo,
+          status: 'open',
+          severity: 'info',
+          payload: { target, changed: verdict.changed, outside: verdict.outside },
+          evidence: `第 ${turnNo} 轮定点改稿改到了范围外`,
+        });
+      }
+      send({
+        type: 'rewrite_check',
+        turn_no: rewrittenTurnNo,
+        out_of_range: verdict.out_of_range,
+        changed: verdict.changed,
+        outside: verdict.outside,
+      });
+    }
   } catch (err) {
     send({ type: 'error', message: err.message || String(err) });
   } finally {

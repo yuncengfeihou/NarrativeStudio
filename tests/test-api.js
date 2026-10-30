@@ -383,6 +383,26 @@ console.log('\n=== 制卡素材 ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 定点改稿的参数校验（不调模型：校验在 SSE 之前） ===');
+{
+  const url = `/api/sessions/${SESSION_ID}/rewrite`;
+  // 定位全靠前端给的区间 + 原文快照，服务端只做确定性核对；任何形状不对都在开流之前 400。
+  const shape = await req('POST', url, { turn_no: 1, target: '第3段' });
+  ok(shape.status === 400 && !!shape.data.error?.message, 'target 不是对象 → 400');
+  const empty = await req('POST', url, { turn_no: 1, target: { start: 4, end: 4, expect: '' } });
+  ok(empty.status === 400, 'start === end → 400');
+  const mismatchLen = await req('POST', url, { turn_no: 1, target: { start: 0, end: 9, expect: '四个字' } });
+  ok(mismatchLen.status === 400, '区间长度与 expect 不符 → 400');
+  const badTurn = await req('POST', url, { turn_no: 0 });
+  ok(badTurn.status === 400, 'turn_no 非正整数 → 400');
+  // 回合不存在仍是 404（两种形态一致：带/不带 target 都不能进 SSE）
+  const noTurn = await req('POST', url, { turn_no: 99999, target: { start: 0, end: 2, expect: '一二' } });
+  ok(noTurn.status === 404, '回合不存在 → 404（带 target 也不开流）');
+  const noTurnPlain = await req('POST', url, { turn_no: 99999 });
+  ok(noTurnPlain.status === 404, '回合不存在 → 404（整拍重演的旧路径不变）');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 404 与错误 ===');
 {
   ok((await req('GET', '/api/worlds/nope')).status === 404, '未知世界卡 404');
