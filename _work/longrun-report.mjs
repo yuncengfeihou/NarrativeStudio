@@ -2033,8 +2033,18 @@ try {
       n: revivedRows.length,
       rows: revivedRows,
       who: [...new Set(revivedRows.map((r) => r.who).filter(Boolean))],
-      note: 'D10-A：玩家点名让 gone 的角色回到场记单，每次留一条回程审计。'
-        + '0 条 = 本局没有「离场又回来」的剧作结构（或回程通道没接上，见 dead_gone_reentry）。',
+      by_reason: revivedRows.reduce((m, r) => {
+        const k = r.reason || 'unknown';
+        m[k] = (m[k] || 0) + 1;
+        return m;
+      }, {}),
+      // 第二路的净贡献：只被 onstage_state 救下、没被玩家点名救过的人。
+      // 按 patch 数看会翻倍（同一个人同一拍两路同时触发），判据必须按人去重。
+      only_onstage: [...new Set(revivedRows.filter((r) => r.reason === 'onstage_state').map((r) => r.who)
+        .filter((w) => !new Set(revivedRows.filter((x) => x.reason === 'named_by_player').map((x) => x.who)).has(w)))],
+      note: 'D10-A/A2：player 点名（named_by_player）与史官写成在场（onstage_state）两路。'
+        + '0 条 = 本局没有「离场又回来」的剧作结构（或回程通道没接上，见 dead_gone_reentry）。'
+        + 'by_reason 是 patch 计数（同一拍两路都触发时会 +2），only_onstage 才是第二路救人的净增量。',
     },
     skipped_targets: {
       patches: skippedTargetRows.length,
@@ -2288,7 +2298,20 @@ try {
     console.log(`  余额转负     ${overdrawnRows.length} 笔｜最低 ${minBal ?? '?'}｜首次 t${overdrawnRows[0].turn_no}（渲染成「银钱 欠 X」，D11 的新正确形状）`);
   }
   if (revivedRows.length) {
-    console.log(`  gone 回程    ${revivedRows.length} 次｜${[...new Set(revivedRows.map((r) => `t${r.turn_no} ${r.who}`))].slice(0, 6).join('，')}`);
+    // 同一个人同一拍可能被两路同时救（玩家点名 + 史官写成在场），patch 计数会翻倍。
+    // 判据要按「人」去重：`onstage_state` 的净贡献 = 只靠它救下的人数，不是它的 patch 数。
+    const byReason = revivedRows.reduce((m, r) => {
+      const k = r.reason || 'unknown';
+      m[k] = (m[k] || 0) + 1;
+      return m;
+    }, {});
+    const reasons = Object.entries(byReason).map(([k, n]) => `${k}=${n}`).join(' · ');
+    const namedSet = new Set(revivedRows.filter((r) => r.reason === 'named_by_player').map((r) => r.who));
+    const onlyOnstage = [...new Set(revivedRows.filter((r) => r.reason === 'onstage_state')
+      .map((r) => r.who).filter((w) => !namedSet.has(w)))];
+    console.log(`  gone 回程    ${revivedRows.length} 次（${[...new Set(revivedRows.map((r) => r.who))].length} 人）｜${reasons}`
+      + `｜第二路净贡献 ${onlyOnstage.length}${onlyOnstage.length ? `（${onlyOnstage.join('、')}）` : ''}`
+      + `｜${[...new Set(revivedRows.map((r) => `t${r.turn_no} ${r.who}`))].slice(0, 6).join('，')}`);
   }
   console.log(`目标越界     ${skippedTargetItems.length} 条（${skippedTargetRows.length} 拍）` +
     (skippedTargetItems.length
