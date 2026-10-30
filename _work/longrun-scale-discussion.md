@@ -1,7 +1,7 @@
-# 长轮次记忆：讨论清单（D1–D33 已落地；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回）
+# 长轮次记忆：讨论清单（D1–D33 已落地、D34 已登记待修；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回）
 
 > 用途：把「几十轮就有这么多问题、几百轮怎么办」这个讨论拆成可逐条拍板的决策项。
-> **状态（2026-10-30）**：**D1–D33 已全部落地**。D1–D8 经 50 轮真实会话验证；
+> **状态（2026-10-30）**：**D1–D33 已全部落地、D34 已登记待修（等拍板）**。D1–D8 经 50 轮真实会话验证；
 > D9–D15 是那 50 轮与第二轮验证长跑现场发现的缺陷（D10/D11/D12/D15 是真实 bug，
 > 不是设计取舍），已按推荐方案全部实现并测通。**D19–D22 都是报告判据自身的缺陷**
 > （D19 分类名错、D20 层级错、D21 对象错、D22 曾被怀疑缺信号）——它们不改变运行时行为，
@@ -1029,7 +1029,7 @@ importance 分级（major:normal:minor = 1:1:1）
 
 ---
 
-## 4. 建议的顺序（D1–D33 已全部落地并已跑完验证）
+## 4. 建议的顺序（D1–D33 已全部落地并已跑完验证；D34 待拍板）
 
 ```
 第 0 步（已做完）：
@@ -1135,8 +1135,9 @@ D3 那种「改取数逻辑」才需要数据支撑。
 | D31 三处死通道 | **孤儿回合与空正文整拍回滚**（`addTurnPair` 事务；正文没产出就一行不写） + 校勘三类落空记 `failed` 终态并带 `reason`；`open` 只留「等人裁决」 | m11285 |
 | D32 `life_state` 两套存储 | **已落地**：`changes` 里的 `life_state` 同时补写 `character_states`（按 `aliasIndex` 反查人物名、同拍 `states` 写过就跳过）；报告判据改读两表并集并单列「两套存储分裂」 | 第三次长跑凌玥经 `changes` 被标 `gone`，而回程通道读 `character_states`、永远看不见它：她 27 拍正文里 **19 拍不在 present**，玩家 t24/32/40/45 四次点名一次都没唤回，报告 `VERDICT` 却是 FAIL 0 —— **判据读错表＝给缺陷发合格证** |
 | D33 上游抖动与旧线回切 | **已落地**：`llm.js` 的 `failureOf()` 沿 `err.cause` 归一 `fetch failed`/`terminated` 为可重试；`orchestrator` 新增 `NARRATION_RETRY_MAX=3` 整拍重发（还原 `lastAssembly`/`lastMessages` 基线、emit `narration_retry`）；`store.checkoutBranch()` + `POST /api/sessions/:id/checkout` 切回已有世界线；`countVisibleTurns()` 让回合数成派生值 | 用户原话「中断就重新生成，数据重新更新」「每轮的数据要像 git 历史一样可以回滚」。前者的根因是 `withRetry` 白名单只认老式 socket 错误码（Node fetch 把真 code 埋在 `cause` 里），一次都不重试；后者是文案写着「旧线随时可以回去看」而 `setSessionBranch()` 只被 fork 调过——**界面承诺没有对应路径** |
+| D34 同名条目吞掉人物 | **待修**：卡里是 `concept`、运行期用同名 `introduce` 引进「同一人」，投影按 id/name 先命中旧条目 → `type` 永远是 `concept` → 人物的 `life_state`/`mood`/`goal`/`location` 被 `pathsFor(concept)` 白名单**静默丢掉**（110 拍局实测丢 8 行，`宫男 gone@t75` 因此不进缺席名单，报告唯一 FAIL）。全库 82 局真正被丢 13 条，只有这一种形状触发。修法：投影按「实体当前类型」而非「模型声明的类型」取白名单 | m13050 |
 
-**三十三条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
+**三十四条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
 
 > **D5 遗留已拍板（2026-10-29，m10518）**：「不改上限 8，只改可见性」——种子在场记单行尾标
 > ［预置］、`lintCard` 以 `seeds_eat_runtime_room`（minor）提醒占额度，详见 §3 D5 末尾。
@@ -3650,6 +3651,52 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
   公式、权重与实测值。**五维不加权成总分**（剧情质量和成本没有可比量纲，合成一个数只会掩盖
   「分数好看但某一维塌了」）；**拿不到数据的项记 null 并从分母剔除，不按 0 算**——把
   「没量到」当「量到 0」是这个项目踩过最多的坑（D7/D30/D32 都是这个形状）。
+### D34【待修】卡里的「设定集条目」和运行期引入的「人物」同名时，人物的运行态被白名单静默丢掉
+
+**怎么发现的**：D32 的 110 拍验证局（`a3363ce8`）唯一一条 FAIL 是「离场/死亡角色不得再上场」，
+明细写着 `宫男(gone@t75→t92,94)`。逐拍核对后确认这不是 D32 的回归（两表零分裂），而是另一个缺陷。
+
+**机制**：卡内 `entities` 里有一个 `type='concept'` 的条目，名字就叫「宫男」
+（summary：「宫中侍宴男性，穿白裙装扮阴柔」——它描述的是一类人）。剧情里这个人真的登场了，
+史官按规矩用 `introduce` 引入一个 `type='person'` 的「宫男」，前后五次（t60/61/75/91/93）。
+但投影按 `id` 或 `name` 找已存在实体（`server/world/effective.js:250`），
+**先命中了卡里那个 concept 条目**，于是 `introduce` 的字段被写进 concept 条目，`type` 永远是 `concept`。
+之后的 `states`/`changes` 也跟着 `resolveEntity()` 把 kind 归成 `concept`，写出来的增量 `entity_kind='concept'`。
+`pathsFor('concept')` 没有 `life_state` / `mood` / `goal` / `location`（只有 `status/condition/access/open_to/owner_id/location_id/reveal/facets.*`），
+于是这些增量在投影阶段被**静默丢弃**——不报错、不进 `rejected_deltas`、报告里也看不出来。
+
+**实测（110 拍局）**：
+
+```
+宫男 全部 world_state 写入 16 行
+  introduce 5 行（t60/61/75/91/93，全部写进同一个 concept 条目，type 不变）
+  按 entity_kind 白名单被投影丢弃 8 行：
+    t75 concept life_state "gone"      ← 这一行丢了，所以「宫男已离场」在投影里不存在
+    t75 concept location/goal · t91 concept mood/location/goal · t93 concept mood/location
+投影 t94：{id:宫男, type:concept, role:东宫侍从, summary:…}  life_state=undefined
+→ lint-state 读不到 life_state → 没把人剔出 present → t92/t94 宫男仍在场 → 报告唯一 FAIL
+```
+
+**影响面（全库 82 局 11574 条增量里扫白名单）**：被静默丢弃的共 447 条，其中
+`introduce`（path 本来就是空串）是正常豁免，真正被丢的是 **13 条**：12 条本局的 `concept/宫男`，
+外加 4 条历史局的 `player/life_state`（D14 已禁止，是旧数据）。**只有「卡里是设定集条目、运行期又引进同名人物」这一种形状会触发**，
+本卡 310 个实体里只有 1 个（`宫男`）。
+
+**修法方向（未实施，需要拍板）**：投影里「这条路径能不能写」应当按**实体当前是什么**判定，
+而不是按「模型这一拍声明它是什么」判定——这与 §5.3 已有的口径同源（「路径是不是数值由白名单决定，
+不由模型吐出的字面量类型决定」）。两处最小改动：①`introduce` 声明 `person` 且命中的是既有非人物条目时，
+把该条目的 `type` 改成 `person`（id/name/aliases/summary 都保留，卡模板不动，只改会话投影）；
+②非 introduce 的增量先找实体、再用 `entity.type || delta.entity_kind` 取白名单。
+两种做法都要补一条负向断言：**不能靠改卡或加名字特判**（§1.2）。
+
+**为什么先记不修**：它只影响「同名条目 + 同名人物」这一种形状，且后果是「少一个人被剔出在场」
+而不是数据损坏；而 ①②两处都会改动投影的类型判定，属于机制层改动，按 §0 四问要单独一轮做，
+不该混在「验证 D32」这一轮里。
+
+**教训**：**「静默丢弃」和「拒绝写入」是两件事**。`sanitizeChange` 会 `return null`（可数、可看），
+而 `applyDelta` 里 `if (!allowed.has(path)) return;` 什么都不留——同一条写入到底是被拒了还是
+根本没到装配层，从数据上分辨不出来。凡是「按白名单过滤」的地方都要问一句：被滤掉的那部分谁看得见。
+
 ## 6. 变更记录
 
 | 日期 | 变更 |
@@ -3698,3 +3745,4 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 | 2026-10-29 | D31 | 三处「错了也不会说」的通道改行为：孤儿回合与空正文整拍回滚、校勘死提案判 failed | 新增 e2e 22 条 + test-memory 20 条；全量绿 |
 | 2026-10-29 | D32 | `changes` 里的 `life_state` 补写 `character_states`；报告判据改读两表并集 | test-memory 新增 7 条（443 passed）；全量 6 套件绿；真库回放第三次长跑，`life_state_consistency` 从误判 PASS 变为如实 FAIL 并注明是修复前存量 |
 | 2026-10-30 | D33 落地：上游连接中断自动整拍重发（`failureOf()` 归一 `fetch failed`/`terminated`，`NARRATION_RETRY_MAX=3`，新增 `narration_retry` 事件）＋ `checkoutBranch()` 切回已有世界线（`POST /api/sessions/:id/checkout`）＋ 回合数改派生值 `countVisibleTurns()` |
+| 2026-10-30 | D34 登记：卡内 `concept` 条目与运行期同名 `introduce` 人物撞 id/name → 投影 `type` 停在 `concept` → 人物运行态（`life_state`/`mood`/`goal`/`location`）被 `pathsFor()` 静默丢弃。110 拍验证局（`a3363ce8`，6.44h）实测丢 8 行，`宫男 gone@t75` 因此未被剔出 present，成为该局唯一 FAIL。同时把 D32 的报告判据与 `_work/d32-check.mjs` 的 id/name 归一修好（第一版报出 4 行假分裂，真分裂 0） |

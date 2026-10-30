@@ -41,6 +41,19 @@ const all = (sql, params = {}) => {
 const liveStates = new Set(['dead', 'gone']);
 const unq = (v) => String(v ?? '').replace(/^"|"$/g, '');
 
+/* 归一化：world_state 用实体 id 写（`liu-shen`），character_states 用人物名写（`刘婶`）。
+ * 两侧直接比 id 会把「同一件事的两种拼法」全报成分裂——第一版就踩了这个，
+ * 一局 110 拍报出 4 行假分裂，真分裂其实是 0。所以先把 id 映射回名字再比。 */
+const card = (() => {
+  const row = all('select card_snapshot_json c from sessions where id = :sid', { sid: sessionId })[0];
+  try { return JSON.parse(row?.c || '{}'); } catch { return {}; }
+})();
+const nameById = new Map();
+for (const e of card.entities || []) {
+  if (e?.id) nameById.set(String(e.id), String(e.name || e.id));
+}
+const canonWho = (who) => nameById.get(String(who)) || String(who);
+
 /* ① world_state 侧：投影写入的 life_state */
 const ws = all(`select who, value_json, valid_from, valid_to, source, branch_id, turn_no
                   from (select entity_id as who, value_json, valid_from, valid_to, source, branch_id,
@@ -48,14 +61,14 @@ const ws = all(`select who, value_json, valid_from, valid_to, source, branch_id,
                           from world_state
                          where session_id = :sid and path = 'life_state' and op = 'set')
                  order by valid_from`, { sid: sessionId })
-  .map((r) => ({ ...r, value: unq(r.value_json) }));
+  .map((r) => ({ ...r, raw_who: r.who, who: canonWho(r.who), value: unq(r.value_json) }));
 
 /* ② character_states 侧：记忆表镜像 */
 const cs = all(`select who, value, valid_from, valid_to
                   from character_states
                  where session_id = :sid and field = 'life_state'
                  order by valid_from`, { sid: sessionId })
-  .map((r) => ({ ...r, value: unq(r.value) }));
+  .map((r) => ({ ...r, who: canonWho(r.who), value: unq(r.value) }));
 
 const key = (r) => `${r.who}::${r.value}::${Number(r.valid_from)}`;
 const wsKeys = new Set(ws.map(key));
@@ -83,7 +96,7 @@ console.log(`character_states life_state   ${cs.length} 行（其中 dead/gone $
 
 console.log(`\n① 投影有、记忆表没有（D32 的病根，必须为 0）: ${onlyWorldState.length} 行`);
 for (const r of onlyWorldState) {
-  console.log(`   ✗ ${r.who} = ${r.value} @t${r.valid_from}（source=${r.source}）→ 回程通道看不见它`);
+  console.log(`   ✗ ${r.who}(${r.raw_who}) = ${r.value} @t${r.valid_from}（source=${r.source}）→ 回程通道看不见它`);
 }
 if (!onlyWorldState.length) console.log('   ✓ 全部对齐');
 

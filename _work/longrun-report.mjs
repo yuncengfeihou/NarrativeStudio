@@ -1467,32 +1467,40 @@ try {
   // gone 在报告里**根本不存在**：实测凌玥 t18 就是这样被标 gone 的，这一整条判据一条都没抓到，
   // 而 lint-state 读的是投影（world_state），据此把她剔出 present 整整 19 拍。
   // 所以取两边的并集；`only_in:'world_state'` 的行本身就是「两套存储分裂」的证据。
-  const lifeRowsCs = all(
+  //
+  // **两边的主键拼法不同，必须先归一**：`world_state` 用实体 id（`liu-shen`），
+  // `character_states` 用人物名（`刘婶`）。第一版直接拿 id 比 name，于是一局 110 拍
+  // 报出 4 行「分裂」，逐行核对后真分裂是 0——**那是工具自己造出来的 FAIL**
+  // （同一形状：D30 把自愈当缺陷、D32 给缺陷发合格证，这次是判据把「同一件事的两种
+  // 拼法」当成两件事）。判据要比较「是不是同一条事实」，不是「字符串是否相等」。
+  const lifeSnap = safeJson(session.card_snapshot_json) || {};
+  const lifeNameById = new Map();
+  for (const e of lifeSnap.entities || []) {
+    if (e?.id) lifeNameById.set(String(e.id), String(e.name || e.id));
+  }
+  const lifeWho = (w) => lifeNameById.get(String(w)) || String(w);
+  const lifeVal = (v) => String(v ?? '').replace(/^"|"$/g, '');
+  const lifeRowsCs = (all(
     'select who, value, valid_from, valid_to from character_states where session_id = :sid' +
       " and field = 'life_state' and value in ('dead','gone') order by valid_from",
     { sid: sessionId }
-  ) || [];
-  const lifeRowsWs = all(
+  ) || []).map((r) => ({ ...r, who: lifeWho(r.who), value: lifeVal(r.value) }));
+  const lifeRowsWs = (all(
     `select entity_id as who, value_json as value, valid_from, valid_to from world_state
       where session_id = :sid and path = 'life_state' and op = 'set'
         and value_json in ('"dead"', '"gone"') order by valid_from`,
     { sid: sessionId }
-  ) || [];
+  ) || []).map((r) => ({ ...r, raw_who: r.who, who: lifeWho(r.who), value: lifeVal(r.value) }));
   const lifeKey = (r) => `${r.who}::${r.value}::${Number(r.valid_from)}`;
   const lifeSeenCs = new Set(lifeRowsCs.map(lifeKey));
   const lifeRows = [
     ...lifeRowsCs,
     ...lifeRowsWs
-      .map((r) => ({
-        who: r.who,
-        value: String(r.value ?? '').replace(/^"|"$/g, ''),
-        valid_from: r.valid_from,
-        valid_to: r.valid_to,
-      }))
+      .map((r) => ({ who: r.who, value: r.value, valid_from: r.valid_from, valid_to: r.valid_to }))
       .filter((r) => !lifeSeenCs.has(lifeKey(r))),
   ];
   const lifeOnlyWorldState = lifeRowsWs
-    .map((r) => ({ who: r.who, value: String(r.value ?? '').replace(/^"|"$/g, ''), valid_from: r.valid_from }))
+    .map((r) => ({ who: r.who, raw_who: r.raw_who, value: r.value, valid_from: r.valid_from }))
     .filter((r) => !lifeSeenCs.has(lifeKey(r)));
   const presentByTurn = new Map();
   for (const r of asmRows) {
