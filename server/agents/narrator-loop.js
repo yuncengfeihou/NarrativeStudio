@@ -16,10 +16,12 @@
  */
 import { config } from '../config.js';
 import { chatStream } from '../llm.js';
+import { resolveAgent } from '../model-registry.js';
 import { estimateTokens } from '../tokens.js';
 import { lookupCodex, renderCodexHit } from '../world/scene-sheet.js';
 import { buildNarratorMessages } from './narrator.js';
 import { segmentedInstruction } from '../prompts/narrator.js';
+import { CRAFT_CHECKLIST } from '../world/craft.js';
 
 /**
  * 会话设置优先于进程默认值；只认 single / segmented，其他值按默认处理。
@@ -31,7 +33,7 @@ export function resolveNarrationMode(settings, defaultMode = config.narration.mo
   return defaultMode === 'segmented' ? 'segmented' : 'single';
 }
 
-/** 第一阶段只暴露四个工具；ask 属于 P1-3，等循环稳定后再加。 */
+/** 第一阶段暴露五个工具；ask 属于 P1-3，等循环稳定后再加。 */
 export const SEGMENTED_TOOLS = [
   {
     type: 'function',
@@ -80,6 +82,21 @@ export const SEGMENTED_TOOLS = [
         properties: {
           query: { type: 'string', description: '要查的辞书名称、别名或关键词。' },
           limit: { type: 'integer', description: '最多返回几条，1-3。', minimum: 1, maximum: 3 },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'recall_history',
+      description: '当玩家提到很久以前发生过的事、要复用旧伏笔，或你需要确认前文原话时，检索本局已经发生过的回合原文。只返回命中片段，按时间从近到远；普通推进不要每段都查。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '要检索的原文关键词：人名、地名、物件，或一句记得的原话。' },
+          limit: { type: 'integer', description: '最多返回几条，1-6。', minimum: 1, maximum: 6 },
         },
         required: ['query'],
       },
@@ -227,9 +244,11 @@ function abortError() {
 
 /**
  * 执行一个工具调用。只操作内存草稿与当拍检索，不写库。
+ * @param {function} [recall] 历史检索回调（生产由 orchestrator 注入 recallHistory；
+ *                            缺失时 recall_history 报错，不静默返回空结果）
  * @returns {{text:string, draft:string, changed?:boolean, appended?:string, sealed?:boolean, error?:boolean, label?:string}}
  */
-export function runSegmentedTool({ name, args, draft, card }) {
+export function runSegmentedTool({ name, args, draft, card, recall }) {
   const src = String(draft || '');
   switch (name) {
     case 'draft_append': {
@@ -281,6 +300,20 @@ export function runSegmentedTool({ name, args, draft, card }) {
         label: `查阅：${query}`,
       };
     }
+    case 'recall_history': {
+      const query = typeof args?.query === 'string' ? args.query.trim() : '';
+      if (!query) return { text: '错误：query 不能为空。', draft: src, error: true };
+      if (typeof recall !== 'function') {
+        return { text: '错误：本局未启用历史检索。', draft: src, error: true };
+      }
+      const limit = Math.max(1, Math.min(6, Number(args?.limit) || 4));
+      const out = recall({ query, limit });
+      return {
+        text: out?.text || '未检索到相关历史。',
+        draft: src,
+        label: `历史检索：${query}`,
+      };
+    }
     default:
       return { text: `错误：未知工具 ${name}。`, draft: src, error: true };
   }
@@ -297,15 +330,18 @@ export function runSegmentedTool({ name, args, draft, card }) {
  * @param {object} [args.options]     narrator 选项（model/temperature/maxTokens/reasoningEffort/guidance）
  * @param {function} [args.onEvent]   SSE 事件回调：draft_* / reasoning / tool_call
  * @param {AbortSignal} [args.signal]
+ * @param {function} [args.recall]     历史检索回调（recall_history 工具）；不传则该工具报错
  * @returns {Promise<{content, reasoning, usage, model, finishReason, narration}>}
  */
 export async function runNarratorSegmented({
-  session, world, context, turnNo, options = {}, onEvent = () => {}, signal,
+  session, world, context, turnNo, options = {}, onEvent = () => {}, signal, recall = null,
   // 测试注入点：生产环境永远用 chatStream，测试可传一个假流跑完整循环。
   stream = chatStream,
 } = {}) {
-  const cfg = config.agents.narrator;
   const seg = config.narration;
+  // 单轮输出上限：显式 options.maxTokens（含 runTurn 的 override）> narrator 绑定上限与
+  // 分段轮预算的较小者。推理过程也计入 max_tokens，所以不能只取 roundMaxTokens。
+  const roundMaxTokens = options.maxTokens ?? Math.min(resolveAgent('narrator').maxTokens, seg.roundMaxTokens);
   const maxRounds = Math.max(1, seg.maxRounds);
   const emit = (evt) => { try { onEvent(evt); } catch { /* 监听器错误不影响演绎 */ } };
 
@@ -314,7 +350,7 @@ export async function runNarratorSegmented({
     world,
     context,
     guidance: options.guidance,
-    segmentedNote: segmentedInstruction({ maxRounds }),
+    segmentedNote: segmentedInstruction({ maxRounds, checklist: CRAFT_CHECKLIST }),
   });
   const baseLen = messages.length;
 
@@ -336,11 +372,12 @@ export async function runNarratorSegmented({
     const calls = new Map();
 
     for await (const ev of stream({
+      agent: 'narrator',
       messages,
-      model: options.model ?? cfg.model ?? undefined,
-      temperature: options.temperature ?? cfg.temperature,
-      maxTokens: options.maxTokens ?? Math.min(cfg.maxTokens, seg.roundMaxTokens),
-      reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
+      model: options.model,
+      temperature: options.temperature,
+      maxTokens: roundMaxTokens,
+      reasoningEffort: options.reasoningEffort,
       tools: SEGMENTED_TOOLS,
       toolChoice: 'auto',
       signal,
@@ -386,6 +423,7 @@ export async function runNarratorSegmented({
           args,
           draft,
           card: world?.card || null,
+          recall,
         });
       tools += 1;
 

@@ -1,10 +1,10 @@
 /**
  * panels/memory.js — 记忆与上下文面板（v4）
  *
- * 分区：概览 / 分支 / 场次索引 / 断言账本 / 人物状态 / 线索 / 原声 / 校勘 / 笔记
+ * 分区：概览 / 分支 / 场次索引 / 事实记录账本 / 人物状态 / 线索 / 台词样本 / 一致性检查 / 笔记
  *
  * 设计取向：这些数字存在的意义是「让作者知道引擎记得什么」。
- * v4 的记忆是「原文 + 场次 + 断言账本 + 原声」，没有摘要金字塔——
+ * v4 的记忆是「原文 + 场次 + 事实记录账本 + 台词样本」，没有摘要金字塔——
  * 所以这里能看到的每一样东西都能点开看到原文出处。
  */
 import { el, clear, fmtNumber, truncate } from '../util.js';
@@ -16,10 +16,62 @@ const VISIBILITY_LABEL = { public: '公开', engine: '引擎', secret: '只你�
 const PATCH_KIND_LABEL = {
   contradiction: '矛盾', knowledge_breach: '知识越界', timeline: '时间线',
   alias: '别名冲突', stale_thread: '线索陈旧', state_jump: '状态跳变',
-  offstage_event: '幕后事件', uncertain: '待确认', scene: '场次', assertion: '断言',
-  world_change: '世界变化',
+  offstage_event: '幕后事件', scene: '场次', assertion: '事实记录',
+  world_change: '世界变化', rejected_delta: '数值被拒',
+  // 下面四类没进标签表会以裸标识符露在分组摘要里（`skipped_targets 10`），
+  // 面板面向作者，代码标识符不该出现在界面上。
+  skipped_targets: '越界写入', life_state_inferred: '生死补齐',
+  archivist_parse_failed: '记忆整理失败', stale: '过期作废',
 };
 const SEVERITY_LABEL = { blocker: '阻断', major: '重要', minor: '轻微', info: '提示' };
+// 提案落到 `failed` 终态后，界面要回答「为什么没执行」——否则作者只会看到一条
+// 点了没反应的记录。「形态没写对」和「这条通道没实现」是两件不同的事，
+// 后者不是模型的错，也不该期待重试。
+const FAIL_REASON_LABEL = {
+  stale_value: '这条修复要改的是当场应有的值，隔拍再执行会把状态改回过去，已作废',
+  not_implemented: '这类修复还没有实现，仅作记录',
+  not_a_person: '目标不是角色，无法改人物状态',
+  unknown_field: '字段不在受控表里，拒写',
+};
+
+/** 从提案的 payload.fix_result 里取「为什么没执行」的原因码。 */
+function patchFailReason(p) {
+  return p?.payload?.fix_result?.reason || null;
+}
+
+/**
+ * 提案的「一句话说明」。
+ *
+ * 各类提案把话放在不同字段（断言/矛盾是 claim，世界变化是 path/op/value 三元组），
+ * 缺一档就会把整条 JSON 原样显示给作者。
+ * 世界变化最多，且 payload 全是机器字段，退回 JSON 等于面板里一大片花括号。
+ */
+function patchClaim(p) {
+  const pl = p.payload || {};
+  if (pl.claim) return pl.claim;
+  if (pl.what) return pl.what;
+  if (pl.text) return pl.text;
+  if (pl.detail) return pl.detail;
+  // 断言的三元组（subject/predicate/object）：中文里「谁 谓词 什么」直接连起来就是人话。
+  if (pl.subject && pl.predicate) {
+    const obj = Array.isArray(pl.object) ? pl.object.join('、') : (pl.object ?? '');
+    const tail = obj && obj !== true ? ` ${obj}` : '';
+    return `${pl.subject} ${pl.predicate}${tail}`;
+  }
+  if (pl.op === 'introduce') {
+    // introduce 没有 path（是「凭空多出一个实体」），只有 kind + name/value.name。
+    const kind = { person: '角色', place: '地点' }[pl.kind || pl.entity_kind] || pl.kind || '实体';
+    const name = pl.name || pl.value?.name || pl.entity_id || '';
+    return `新增${kind}「${name}」`;
+  }
+  if (pl.path) {
+    const op = { add: '新增', set: '改写', remove: '移除', delta: '增减' }[pl.op] || pl.op || '写入';
+    const val = pl.value !== undefined && pl.value !== null ? String(pl.value) : '';
+    return `${op} ${pl.path}${val ? ` = ${val}` : ''}`;
+  }
+  // 实在没有可读字段时给一段短的结构化描述，不要把 JSON 直接铺在界面上。
+  return Object.keys(pl).slice(0, 3).map((k) => `${k}: ${truncate(JSON.stringify(pl[k]), 40)}`).join('，');
+}
 
 export async function openMemoryPanel(sessionId, opts = {}) {
   let data = null;
@@ -29,6 +81,10 @@ export async function openMemoryPanel(sessionId, opts = {}) {
   let threads = [];
   let voices = [];
   let patches = [];
+  let patchCounts = {};
+  let patchTotal = 0;
+  let patchOpenTotal = 0;
+  let voiceTotal = 0;
   let branches = [];
   let worldChanges = [];
   let worldVersion = null;
@@ -45,11 +101,11 @@ export async function openMemoryPanel(sessionId, opts = {}) {
     const cards = [
       { label: '回合', value: fmtNumber(data.turn_count), hint: '原文逐字保留，永不修改' },
       { label: '场次', value: fmtNumber(data.scene_count), hint: '每场从完整原文重写，不是摘要的摘要' },
-      { label: '有效断言', value: fmtNumber(assertions.length), hint: '带有效期；冲突时旧的失效，不删除' },
+      { label: '有效事实记录', value: fmtNumber(assertions.length), hint: '带有效期；冲突时旧的作废，不删除' },
       { label: '世界变化', value: fmtNumber(worldChanges.length), hint: '本局世界线相对初始卡片的增量，不写回模板' },
       { label: '未回收线索', value: fmtNumber(threads.filter((t) => t.status === 'open').length), hint: '埋了没收的，和已经收掉的' },
-      { label: '原声样本', value: fmtNumber(voices.length), hint: '从正文里摘的台词，用来锚定声音' },
-      { label: '待处理', value: fmtNumber(patches.filter((p) => p.status !== 'applied' && p.status !== 'dismissed').length), hint: '校勘与幕后推演的提案' },
+      { label: '台词样本', value: fmtNumber(voiceTotal), hint: '从正文里摘的台词，用来锚定声音' },
+      { label: '待处理', value: fmtNumber(patchOpenTotal), hint: '一致性检查与幕后推演的提案' },
     ];
     for (const c of cards) {
       overview.appendChild(el('div', { class: 'mem-card' },
@@ -65,12 +121,12 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       body.appendChild(el('div.mem-world', {},
         el('h4', {}, `世界卡 · ${world.title}`),
         el('p.muted', {},
-          `卡司 ${world.cast_count}｜辞书 ${world.codex_count}｜`
-          + `起点前事件 ${world.timeline_past}｜扣留的原著后续 ${world.timeline_future}`),
+          `角色 ${world.person_count}｜设定集 ${world.fact_count}｜`
+          + `前史 ${world.timeline_past}｜参考走向 ${world.timeline_future}`),
         el('p.mem-world-note', {},
           world.timeline_future > 0
-            ? '原著后续只作校勘参考，不会注入提示词，也不作为演绎目标。'
-            : '这是一张原创世界卡：没有原著路线，故事完全由玩家与角色推动。'),
+            ? '参考走向只作作者对照，不会注入提示词，也不作为演绎目标。'
+            : '没有参考走向：故事完全由玩家与角色推动。'),
       ));
     }
 
@@ -94,30 +150,57 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       type: 'button', style: 'margin-top:8px;',
       onclick: async () => {
         const ok = await confirmDialog({
-          title: '定稿为新的世界卡？',
-          message: '会把本局当前的人物状态、知识、辞书与新出场实体固化到一张新卡，并生成一个当前场景的起点锚点。原世界卡与进行中的会话都不会被改动。',
-          confirmText: '定稿',
+          title: '存为新的世界卡？',
+          message: '会把本局当前的人物状态、知识、设定集与新出场实体固化到一张新卡，并生成一个当前场景的起点。原世界卡与进行中的会话都不会被改动。',
+          confirmText: '保存',
         });
         if (!ok) return;
         try {
           const r = await api.canonizeSession(sessionId);
           toast(`已生成世界卡：${r.world.title}`, { type: 'success' });
         } catch (err) {
-          toast(err.message || '定稿失败', { type: 'error' });
+          toast(err.message || '保存失败', { type: 'error' });
         }
       },
-    }, icon('book', { size: 13 }), '定稿为新世界卡'));
+    }, icon('book', { size: 13 }), '存为新世界卡'));
 
     /* ---------------- 分支 ---------------- */
     body.appendChild(el('h4', {}, '分支'));
-    body.appendChild(el('p.muted', {}, '回滚不是删历史，是从分叉点开一条新线。旧线标为 abandoned，随时可以回去看。'));
+    body.appendChild(el('p.muted', {}, '回滚不是删历史，是从分叉点开一条新线。每条线都能切回去继续写。'));
     const branchList = el('div.mem-branches');
+    const isCurrent = (b) => (b.is_current != null ? b.is_current : b.branch_id === data.branch);
     for (const b of branches) {
-      branchList.appendChild(el('div', { class: 'mem-branch' + (b.branch_id === data.branch ? ' is-current' : '') },
-        el('span.mem-branch-id', {}, b.branch_id + (b.branch_id === data.branch ? ' · 当前' : '')),
-        el('span.mem-branch-meta', {}, `第 ${b.fork_turn} 轮分叉｜${b.status}`),
+      const cur = isCurrent(b);
+      const row = el('div', { class: 'mem-branch' + (cur ? ' is-current' : '') },
+        el('span.mem-branch-id', {}, b.branch_id + (cur ? ' · 当前' : '')),
+        el('span.mem-branch-meta', {},
+          `第 ${b.fork_turn} 轮分叉｜${b.turn_count != null ? `${b.turn_count} 轮` : b.status}`),
         b.note ? el('span.mem-branch-note', {}, b.note) : null,
-      ));
+      );
+      if (!cur) {
+        row.appendChild(el('button.mem-branch-go', {
+          type: 'button',
+          title: '切到这条线继续写（不新建分支）',
+          onclick: async (e) => {
+            e.stopPropagation();
+            const ok = await confirmDialog({
+              title: `切到 ${b.branch_id}`,
+              message: `这一局会从 ${b.branch_id} 继续写。当前那条线标为已废弃，但不删，随时能再切回来。`,
+              confirmText: '切过去',
+            });
+            if (!ok) return;
+            try {
+              await api.checkoutBranch(sessionId, b.branch_id);
+              await refresh();
+              opts.onUpdate?.();
+              toast(`已切到 ${b.branch_id}`, { type: 'success' });
+            } catch (err) {
+              toast(err.message, { type: 'error' });
+            }
+          },
+        }, '切到这条线'));
+      }
+      branchList.appendChild(row);
     }
     body.appendChild(branchList);
 
@@ -140,12 +223,12 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       body.appendChild(sceneList);
     }
 
-    /* ---------------- 断言账本 ---------------- */
-    body.appendChild(el('h4', {}, '断言账本'));
-    body.appendChild(el('p.muted', {}, '世界的真相。同主同谓不同对象的旧断言会被标记失效而不是删掉——「她曾经相信过什么」本身就是剧情。'));
+    /* ---------------- 事实记录账本 ---------------- */
+    body.appendChild(el('h4', {}, '事实记录账本'));
+    body.appendChild(el('p.muted', {}, '世界的真相。同主同谓不同对象的旧事实记录会被标记作废而不是删掉——「她曾经相信过什么」本身就是剧情。'));
     const assertionList = el('div.mem-assertions');
     if (!assertions.length) {
-      assertionList.appendChild(el('p.muted', {}, '还没有断言。史官每轮会从正文里抽取。'));
+      assertionList.appendChild(el('p.muted', {}, '还没有事实记录。记忆整理每轮会从正文里抽取。'));
     }
     for (const a of assertions.slice(0, 60)) {
       assertionList.appendChild(el('div', { class: 'mem-assertion' },
@@ -199,35 +282,55 @@ export async function openMemoryPanel(sessionId, opts = {}) {
     }
     body.appendChild(threadList);
 
-    /* ---------------- 原声 ---------------- */
-    body.appendChild(el('h4', {}, '原声'));
+    /* ---------------- 台词样本 ---------------- */
+    body.appendChild(el('h4', {}, '台词样本'));
     body.appendChild(el('p.muted', {}, '从正文里原样摘出来的台词。它比「这个人说话短促」有用得多。'));
     const voiceList = el('div.mem-voices');
-    if (!voices.length) voiceList.appendChild(el('p.muted', {}, '暂无。史官每轮会摘本轮出现的台词。'));
+    if (!voices.length) voiceList.appendChild(el('p.muted', {}, '暂无。记忆整理每轮会摘本轮出现的台词。'));
     for (const v of voices.slice(0, 40)) {
       voiceList.appendChild(el('div', { class: 'mem-voice' },
         el('span.mem-voice-who', {}, v.who),
         el('span.mem-voice-text', {}, v.text),
         el('span.mem-voice-turn', {}, `第 ${v.turn_no} 轮`),
-        v.pinned ? el('span.mem-voice-pin', {}, '钉选') : null,
+        v.pinned ? el('span.mem-voice-pin', {}, '固定带出') : null,
       ));
     }
     body.appendChild(voiceList);
 
-    /* ---------------- 校勘提案 ---------------- */
-    body.appendChild(el('h4', {}, '校勘与幕后推演'));
+    /* ---------------- 一致性检查提案 ---------------- */
+    body.appendChild(el('h4', {}, '一致性检查与幕后推演'));
     body.appendChild(el('p.muted', {}, 'Agent 只提案，代码才落库。这里能看到谁提的、证据是什么。'));
     const patchList = el('div.mem-patches');
     if (!patches.length) patchList.appendChild(el('p.muted', {}, '暂无提案。'));
-    for (const p of patches.slice(0, 40)) {
-      const pending = p.status !== 'applied' && p.status !== 'dismissed';
-      patchList.appendChild(el('div', { class: 'mem-patch' + (pending ? ' is-pending' : '') },
+    // 按类分堆：不同 kind 的产出速率差两个数量级，混在一起会把真正需要处置的少数几条
+    // 挤出可视范围。这里显示每一类的总数，并说明列表里只展示最近多少条——不静默截断。
+    const shown = patches.slice(0, 40);
+    const counts = patchCounts || {};
+    const shownKinds = {};
+    for (const p of shown) shownKinds[p.kind] = (shownKinds[p.kind] || 0) + 1;
+    const kindSummary = Object.entries(counts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([k, n]) => `${PATCH_KIND_LABEL[k] || k} ${shownKinds[k] ? `${shownKinds[k]}/${n}` : `${n}`}`)
+      .join(' · ');
+    if (kindSummary) {
+      patchList.appendChild(el('p.muted', {},
+        `${kindSummary}（斜线后为该类总数；共 ${patchTotal} 条，列表只显示最近 ${shown.length} 条，未逐条列出不代表没有问题）`));
+    }
+    for (const p of shown) {
+      // `failed`（D31：模型给出的修复提案形态不对、或那类通道根本没实现）是终态，
+      // 再点「接受」也不会执行——只有 `open` 才是等人裁决。把它当 pending 会给出
+      // 两个按了没反应的按钮，比不显示更坏。
+      const pending = p.status !== 'applied' && p.status !== 'dismissed' && p.status !== 'failed';
+      const terminalFail = p.status === 'failed';
+      patchList.appendChild(el('div', { class: 'mem-patch' + (pending ? ' is-pending' : '') + (terminalFail ? ' is-failed' : '') },
         el('span.mem-patch-kind', {}, PATCH_KIND_LABEL[p.kind] || p.kind),
         el('span.mem-patch-sev', {}, SEVERITY_LABEL[p.severity] || p.severity),
         el('span.mem-patch-agent', {}, p.agent),
-        el('span.mem-patch-claim', {}, truncate(p.payload?.claim || p.payload?.what || JSON.stringify(p.payload), 140)),
+        // 各类提案把话放在不同字段，统一走 patchClaim 归一，不要把 JSON 铺在界面上。
+        el('span.mem-patch-claim', {}, truncate(patchClaim(p), 140)),
         p.evidence ? el('span.mem-patch-ev', {}, truncate(p.evidence, 120)) : null,
-        el('span.mem-patch-status', {}, p.status),
+        el('span.mem-patch-status', {}, terminalFail ? '未执行' : p.status),
+        terminalFail ? el('span.mem-patch-note', {}, FAIL_REASON_LABEL[patchFailReason(p)] || '这条修复无法自动执行') : null,
         pending ? el('div.mem-patch-actions', {},
           el('button.btn-sm', {
             onclick: async () => {
@@ -236,7 +339,8 @@ export async function openMemoryPanel(sessionId, opts = {}) {
               await refresh();
             },
           }, '接受'),
-          el('button.btn-sm btn-ghost', {
+          el('button.btn-sm', {
+            class: 'btn-ghost',
             onclick: async () => {
               await api.resolvePatch(sessionId, p.id, 'dismissed');
               await refresh();
@@ -313,7 +417,17 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       scenes = sc.scenes || [];
       threads = th.threads || [];
       voices = v.voices || [];
+      voiceTotal = Number(v.total) || voices.length;
       patches = p.patches || [];
+      patchCounts = p.counts || {};
+      patchTotal = Number(p.total) || patches.length;
+      // 总览卡的「待处理」必须用后端 open 计数：列表只取最近 100 条，
+      // 用 patches 本地过滤会把它报成「22」，实际 133（长跑实测）。
+      // 只有后端字段缺失（旧响应）时才退回本地过滤，不要用 `|| 0` 判真——
+      // 真正 0 条 open 与「字段没给」是两件事。
+      patchOpenTotal = Number.isFinite(Number(p.open_total))
+        ? Number(p.open_total)
+        : patches.filter((x) => x.status !== 'applied' && x.status !== 'dismissed').length;
       branches = br.branches || [];
       worldChanges = ws.changes || [];
       worldVersion = ws.world_version ?? null;

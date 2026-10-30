@@ -14,22 +14,37 @@
  *      plain text) so generic clients still see them.
  */
 import { Router } from 'express';
-import { config } from '../config.js';
 import { chat } from '../llm.js';
+import { getEffectiveConfig, resolveModelTarget } from '../model-registry.js';
 import { runTurn, createSessionWithSettings } from '../agents/orchestrator.js';
 import { getSession } from '../memory/store.js';
 
 export const openaiRouter = Router();
 
-const VIRTUAL_MODELS = [
-  { id: config.upstream.model, object: 'model', created: 1700000000, owned_by: 'stepfun' },
-  { id: 'roleplay-narrator', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
-  { id: 'roleplay-branch', object: 'model', created: 1700000000, owned_by: 'ai-roleplay' },
-  { id: 'step-router-v1', object: 'model', created: 1700000000, owned_by: 'stepfun' },
-];
+/** 对外暴露的模型清单：运行期配置里的模型 + 两个 roleplay 虚拟模型。 */
+function listVirtualModels() {
+  const configured = getEffectiveConfig().models
+    .filter((m) => m.enabled !== false)
+    .map((m) => ({
+      id: m.model, object: 'model', created: 1700000000, owned_by: m.providerId === 'env-provider' ? 'stepfun' : 'configured',
+    }));
+  const data = [];
+  const seen = new Set();
+  for (const entry of [
+    ...configured,
+    { id: 'roleplay-narrator', object: 'model', created: 1700000000, owned_by: 'narrative-studio' },
+    { id: 'roleplay-branch', object: 'model', created: 1700000000, owned_by: 'narrative-studio' },
+    { id: 'step-router-v1', object: 'model', created: 1700000000, owned_by: 'stepfun' },
+  ]) {
+    if (seen.has(entry.id)) continue;
+    seen.add(entry.id);
+    data.push(entry);
+  }
+  return data;
+}
 
 openaiRouter.get('/v1/models', (req, res) => {
-  res.json({ object: 'list', data: VIRTUAL_MODELS });
+  res.json({ object: 'list', data: listVirtualModels() });
 });
 
 openaiRouter.post('/v1/chat/completions', async (req, res) => {
@@ -51,6 +66,10 @@ openaiRouter.post('/v1/chat/completions', async (req, res) => {
 async function handlePassthrough(req, res, body) {
   const upstreamBody = sanitizeBody(body);
   const wantsStream = body.stream === true;
+  // 透传也走运行期配置：未指定 model 时用 narrator 的生效模型；指定了就按配置解析服务商。
+  // 客户端显式给的 model 字符串永远优先，未登记的名字按原样转发。
+  const target = resolveModelTarget({ model: body.model || null });
+  upstreamBody.model = target.model;
 
   if (!wantsStream) {
     const out = await chat({
@@ -85,14 +104,14 @@ async function handlePassthrough(req, res, body) {
   }
 
   // Stream: pipe upstream SSE through untouched (already OpenAI format).
-  const upstream = await fetch(`${config.upstream.baseUrl}/chat/completions`, {
+  const upstream = await fetch(`${target.baseUrl.replace(/\/+$/, '')}/chat/completions`, {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      'Authorization': `Bearer ${config.upstream.apiKey}`,
+      'Authorization': `Bearer ${target.apiKey}`,
     },
     body: JSON.stringify(upstreamBody),
-    signal: AbortSignal.any([req.signal, AbortSignal.timeout(config.upstream.timeoutMs)]),
+    signal: AbortSignal.any([req.signal, AbortSignal.timeout(target.timeoutMs)]),
   });
   if (!upstream.ok || !upstream.body) {
     const text = await upstream.text().catch(() => '');
@@ -126,7 +145,8 @@ function sanitizeBody(body) {
     session_id, settings, generate_branches, branch_choice, roleplay, world_id, is_opening,
     directive, ...rest
   } = body;
-  const out = { model: model || config.upstream.model, messages: messages || [], ...rest };
+  // model 只保留客户端显式给的值；缺省时由 handlePassthrough 用运行期配置补。
+  const out = { model: model || '', messages: messages || [], ...rest };
   if (temperature != null) out.temperature = temperature;
   if (max_tokens != null) out.max_tokens = max_tokens;
   if (top_p != null) out.top_p = top_p;
@@ -170,7 +190,7 @@ async function handleRoleplay(req, res, body, sessionIdRaw) {
 
   const completionId = `chatcmpl-${Date.now()}`;
   const created = Math.floor(Date.now() / 1000);
-  const model = body.model || config.upstream.model;
+  const model = body.model || resolveModelTarget({ agent: 'narrator' }).model;
 
   if (!wantsStream) {
     const result = await runTurn({

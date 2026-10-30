@@ -82,12 +82,45 @@ export function setTheme(theme) {
   applyTheme(theme);
 }
 
-export function cycleTheme() {
-  const order = ['light', 'dark', 'system'];
-  const cur = ui.get().theme;
-  const next = order[(order.indexOf(cur) + 1) % order.length];
-  setTheme(next);
-  return next;
+/**
+ * 带水波纹的外观切换：以 (x, y) 为圆心，新主题像涟漪一样加速扩散到全屏。
+ * 依赖 View Transitions API；不支持或用户偏好减少动效时直接切换。
+ * 状态变更只依赖 apply() 一次执行：过渡被跳过时由 finished 兜底补跑。
+ * @param {() => void} apply  实际改主题（以及依赖主题的 DOM 重绘）的回调
+ * @param {number} x  波纹圆心（视口坐标）
+ * @param {number} y
+ */
+export function applyWithRipple(apply, x, y) {
+  const reduce = window.matchMedia
+    && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  if (typeof document.startViewTransition !== 'function' || reduce) {
+    apply();
+    return;
+  }
+  let ran = false;
+  const run = () => { if (!ran) { ran = true; apply(); } };
+  let vt;
+  try {
+    vt = document.startViewTransition(run);
+  } catch {
+    run();
+    return;
+  }
+  vt.finished.catch(() => {}).then(run);
+  vt.ready.then(() => {
+    const r = Math.hypot(
+      Math.max(x, window.innerWidth - x),
+      Math.max(y, window.innerHeight - y),
+    ) * 1.12;
+    document.documentElement.animate(
+      { clipPath: [`circle(0px at ${x}px ${y}px)`, `circle(${r}px at ${x}px ${y}px)`] },
+      {
+        duration: 680,
+        easing: 'cubic-bezier(0.42, 0, 0.9, 0.5)',  // 先缓后急：向右上加速漫开
+        pseudoElement: '::view-transition-new(root)',
+      },
+    );
+  }).catch(() => { /* 中断即直接切换，不报错 */ });
 }
 
 if (mq && typeof mq.addEventListener === 'function') {

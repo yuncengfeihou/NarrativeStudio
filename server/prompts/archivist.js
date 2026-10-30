@@ -13,9 +13,20 @@ import { PREDICATES } from '../memory/predicates.js';
 export { PREDICATES };
 
 export const VISIBILITIES = ['public', 'engine', 'secret'];
-export const STATE_FIELDS = ['condition', 'mood', 'location', 'goal'];
+/**
+ * 人物「生死/在场之外」的受控字段。
+ * life_state 是唯一让代码能可靠判定死亡/离场的字段：自由文本（「死了」「战死」）
+ * 不可枚举，靠关键词判定会漏、也会误伤（AGENTS §1.2 不堆识别器）。
+ */
+export const LIFE_STATES = ['alive', 'injured', 'dead', 'gone'];
+export const STATE_FIELDS = ['condition', 'mood', 'location', 'goal', 'life_state'];
 
-export function archivistSystemPrompt({ castIndex, codexIndex, openThreads, playerName }) {
+/**
+ * 史官的 system 只放稳定内容：身份、schema、字段规范。
+ * 人物/事实/线索是会变的参考事实，走 user 消息——否则每轮线索一变，
+ * 这个每轮都要跑的 Agent 就无法复用 system 前缀缓存。
+ */
+export function archivistSystemPrompt() {
   return `# 身份
 你是长篇互动剧情的「史官」。你的唯一职责是把刚发生的一轮剧情，转成高密度、可校验、可长期携带的结构化记忆。
 你不创作剧情，不评论，不推测剧情之外的事。宁可少记，绝不编造。正文没有明说的，一律放到 uncertain，不许当成事实。
@@ -44,16 +55,17 @@ schema：
     "last_hook": "她说出「以前认识」四个字"
   },
   "changes": [
-    {"kind": "cast", "id": "凌玥", "path": "knowledge.knows", "op": "add", "value": "七年前是她母亲把伍卿丢在街上"},
-    {"kind": "cast", "id": "凌玥", "path": "status", "op": "set", "value": "左肩中箭，强撑着"},
-    {"kind": "codex", "id": "玉佩", "path": "reveal", "op": "set", "value": "public"},
-    {"kind": "codex", "id": "tingyu-lou", "op": "introduce", "fields": {"type": "place", "name": "听雨楼", "summary": "城南的暗线据点"}},
-    {"kind": "cast", "id": "a-jiu", "op": "introduce", "fields": {"name": "阿九", "role": "听雨楼的跑堂"}}
+    {"kind": "person", "id": "凌玥", "path": "knowledge.knows", "op": "add", "value": "七年前是她母亲把伍卿丢在街上"},
+    {"kind": "person", "id": "凌玥", "path": "status", "op": "set", "value": "左肩中箭，强撑着"},
+    {"kind": "item", "id": "玉佩", "path": "reveal", "op": "set", "value": "public"},
+    {"kind": "player", "id": "player", "path": "money", "op": "delta", "value": -60},
+    {"kind": "place", "id": "听雨楼", "op": "introduce", "fields": {"type": "place", "name": "听雨楼", "summary": "城南的暗线据点"}},
+    {"kind": "person", "id": "a-jiu", "op": "introduce", "fields": {"name": "阿九", "role": "听雨楼的跑堂"}}
   ],
   "assertions": [
     {"subject": "凌玥", "predicate": "知道", "object": "七年前是她母亲把伍卿丢在街上", "confidence": 0.95, "visibility": "public", "evidence": "她盯着那条街看了一眼"}
   ],
-  "states": [{"who": "伍卿", "field": "condition", "value": "湿透，腿在抖"}],
+  "states": [{"who": "伍卿", "field": "condition", "value": "湿透，腿在抖"}, {"who": "凌玥", "field": "life_state", "value": "dead"}],
   "relations": [{"from": "凌玥", "to": "伍卿", "kind": "旧识·执念", "sentiment": 0.8, "note": "她第一次没有甩开他的手"}],
   "threads": [{"action": "plant", "title": "玉佩在暗处发绿光", "weight": 0.9, "note": "只在夜里发作"}],
   "quotes": [{"who": "凌玥", "text": "「卿儿，过来。」"}],
@@ -67,6 +79,8 @@ schema：
 - predicate 只能从这个表里选：${PREDICATES.join(' / ')}
 - 「位于 / 是 / 曾经是」是单值：同一时刻只能有一个对象；其余谓词可以并存，
   不要因为对象不同就当成矛盾（知道 A 与知道 B 可以同时成立）。
+- **金额不写成断言**：断言没有数量概念，「拥有」又是可以并存的谓词，同一个钱包会
+  留下好几个互相矛盾的余额，每拍都渲染进「已成立的事实」。银钱只走 changes 的 money。
 - visibility：
   - public  —— 在场的人都知道
   - engine  —— 只有演绎引擎知道（用于保持自洽，不得由角色说出）
@@ -77,28 +91,44 @@ schema：
 ## ledger.characters
 - 只写本轮**状态发生变化**的角色，键用规范名。
 - 字段限定 condition（身体状况/穿着）/ mood（情绪）/ location（所在）/ goal（此刻想要什么）。
+  生死与离场用 life_state（见下），不要塞进 condition。
 
 ## states
 - 与 ledger.characters 二选一即可，都写则以 states 为准。字段限定：${STATE_FIELDS.join(' / ')}
+- life_state 只取这四种值之一：${LIFE_STATES.join(' / ')}（活着 / 受伤 / 已死 / 已离场）。
+  任何角色**死亡或离场**都必须写 life_state，否则下一拍他还会被当成在场者说话。
+- **gone 是「这一次走开了」，不是「从此不再出现」**：离场的人重新回到正文里（走回来、
+  被找到、被叫来），同样要写 life_state 为 alive 或 injured。不写回就会一直按离场处理：
+  场记单每拍印「已故／离场」，模型同时看到「她已离场」和「她在说话」。
 
 ## changes（世界线的运行期状态）
 - 用来记「这个世界后来变了什么」，只写本轮正文明确支撑的变化。
 - kind / path 白名单（不在表内的会被代码拒绝）：
-  - cast: status / condition / mood / location / goal / one_line / role / aliases；
+  - person: status / condition / mood / location / goal / life_state / summary / role / aliases；
     knowledge.knows / knowledge.does_not_know / knowledge.believes_falsely；
     psyche.wants / psyche.fears / psyche.hides / psyche.values
-  - codex（运行态）: status / condition / access / open_to / owner_id / location_id /
+  - 事实实体（place / institution / item / faction / concept / custom，运行态）:
+    status / condition / access / open_to / owner_id / location_id /
     reveal / facets.sensory；facets.rules / facets.consequences / aliases / tags / links
-  - codex 的 summary / detail / facets.history 是作者定义，运行期不可写；
+  - 事实实体的 summary / detail / facets.history 是作者定义，运行期不可写；
     新条目用 introduce 一次写清。
   - player: situation / capability / inner_voice / wants / afraid；
-    status / condition / mood / location / goal；
-    knowledge.knows / knowledge.does_not_know
+    status / condition / mood / location / goal / life_state；
+    knowledge.knows / knowledge.does_not_know；
+    money（银钱，唯一的数值字段）
   - world: status（城邦/阵营/天下的整体局势，例如「全城戒严」）
 - op：set 写标量；add / remove 写列表；introduce 让剧情里第一次出现的实体进入当前世界线。
+- **money 只写「这一拍变了多少」，不要写你算完的余额**：付出去写负数、收进来写正数，
+  op 用 delta（例：{"kind":"player","id":"player","path":"money","op":"delta","value":-60}）。
+  加减由代码做，你只声明变化量；算错了会变成账本里的假数。
+  只有确知「他现在一共只有多少」时才用 op set 写绝对值。
 - 角色在正文里学到/误解/遗忘一件事，必须写 knowledge.*；不要只写进 assertions 就完事。
-- 死亡、重伤、失势、身份变化写 cast.status；不要让世界索引一直显示开局标签。
-- 新地点/新物件/新人物用 introduce，给出 name 与最小 fields；它们只属于这一局，不会写回世界卡。
+- **死亡 / 重伤 / 离场**：先用 life_state 标 dead / injured / gone，再用 person.status 写细节
+  （怎么死的、尸体在哪里、谁看见了）；只写自由文本 code 判定不了，死人在后续回合仍会开口。
+- 死亡、失势、身份变化也要提醒「不要让世界索引一直显示开局标签」——索引是冻结的，
+  正文与场记单以运行态为准。
+- 新地点/新物件/新人物用 introduce，给出 name 与最小 fields；kind 用实体类型（人物 person，
+  其余 place / institution / item / faction / concept / custom）。它们只属于这一局，不会写回世界卡。
 - 身份根（id / name / identity / voice）不可写。运行时改名请用 aliases，不要改 name。
 
 ## relations
@@ -107,29 +137,48 @@ schema：
 - note 写变化的**触发点**，一句话。
 
 ## threads
-- action: "plant" 埋下新线索/伏笔；"resolve" 回收已埋线索（title 必须与下面给出的未回收线索**完全一致**）。
-- weight 0-1：主线伏笔 0.8-1.0，小悬念 0.3-0.5。
-- 不要为凑数而编造线索；只有正文真的留下了「未解之事」才记。
+- 线索 = 读者会追问「后来呢」的那件事（没兑现的承诺、没解释的物件、没说完的话）。
+  气氛、情绪、普通动作、本场已交代的事都不是线索；**多数回合不该有新线索**。
+- action: "plant" 埋新线索；"resolve" 回收（title 必须与下面清单里的一条完全一致）。
+- weight 0-1：主线 0.8-1.0，支线钩子 0.6-0.7。低于 0.6 撑不起一次回收，不要提。
 
 ## quotes
 - 只摘**真正出现在本轮正文里**的原话，带引号，不超过 40 字。
 - 这是给后续轮次锚定声音用的，宁可少摘，不许改写。
 
 ## scene_change
-- 只有地点、时间、在场者发生实质变化时才 changed: true。同一场景内的推进不要切场。
+- 只有时间真的跳到另一段、或地点真的换了一处，才 changed: true。同一场景内的推进不要切场。
+- when 只在时间跳到另一段时写（几小时后 / 次日 / 更晚）；同一时段的连续推进不要写 when，
+  也不要写「紧接着」「片刻后」「话音刚落」这类同刻相对词。
+- place 只在真的换了地方时写；同一地点内的位置变化（车里换座、门口到院中）不写新 place。
 - present 每轮必填，只列这一拍**真正在镜头里**的人物（规范名）；不在场的人不要列。
   场景没变也要写当前在场者，它是「谁在场」的唯一依据，不是「最近谁被提到」。
-- 发生时间跳跃或跨地点移动时，changed 必须为 true，并写新的 when / place。
-
-# 参考信息
-${castIndex ? `【已知人物】（主语/宾语/键名一律用这里的规范名）\n${castIndex}` : '（作者未提供卡司）'}
-${codexIndex ? `【已知事物】\n${codexIndex}` : ''}
-${openThreads?.length ? `【当前未回收的线索】（resolve 时 title 必须与这里完全一致）\n${openThreads.map((t) => `· ${t}`).join('\n')}` : '（暂无未回收线索）'}
-${playerName ? `【玩家角色】${playerName}——他的行动由玩家决定，你只记录后果，不替他做决定。` : ''}`;
+- 发生时间跳跃或跨地点移动时，changed 必须为 true，并写新的 when / place。`;
 }
 
-export function archivistUserPrompt({ turnNo, playerText, branchChoice, narrative }) {
+export function archivistUserPrompt({
+  turnNo, playerText, branchChoice, narrative,
+  castIndex = '', codexIndex = '', openThreads = [], threadLimit = 0, playerName = '',
+}) {
+  const refs = [];
+  refs.push(castIndex
+    ? `【已知人物】（主语/宾语/键名一律用这里的规范名）\n${castIndex}`
+    : '（作者未提供卡司）');
+  if (codexIndex) refs.push(`【已知事物】\n${codexIndex}`);
+  // 余量是**事实**不是催告：并进「未回收的线索」这一块的表头，不新开一个注入通道。
+  // 到顶时说清楚，模型才知道该优先回收而不是按惯性每拍埋一条。限额本身由代码强制
+  // （archivist.js 会拒绝第 N+1 条并留 patch），这里只是让它不至于撞墙才知道。
+  const threadRoom = threadLimit - openThreads.length;
+  const threadLeft = threadLimit > 0
+    ? (threadRoom > 0 ? `，还可新埋 ${threadRoom} 条` : `，已满，这一拍只能推进或回收`)
+    : '';
+  refs.push(openThreads.length
+    ? `【当前未回收的线索】（共 ${openThreads.length} 条${threadLeft}；resolve 时 title 必须与这里完全一致）\n${openThreads.map((t) => `· ${t}`).join('\n')}`
+    : `（暂无未回收线索${threadLeft}）`);
+  if (playerName) refs.push(`【玩家角色】${playerName}——他的行动由玩家决定，你只记录后果，不替他做决定。`);
+
   const parts = [
+    `【参考信息】\n${refs.join('\n')}`,
     `【回合】第 ${turnNo} 轮`,
     `【玩家行动】${(playerText || '').trim() || '（开场轮，玩家尚未行动）'}`,
   ];
@@ -148,7 +197,8 @@ export function archivistUserPrompt({ turnNo, playerText, branchChoice, narrativ
 export function sceneKeeperSystemPrompt() {
   return `# 身份
 你是长篇互动剧情的「场记」。一场戏结束后，你读这一场的**完整原文**，为它写一行记录。
-这份记录是后续检索的入口，不是摘要——它必须能让人判断「这场里有什么」，从而决定要不要调原文。
+这份记录是长程记忆的载体，不是摘要——它必须让人只读这一行，就知道这场里发生过什么、
+留下了什么、为什么会走到这里。后续剧情靠这些记录保持连贯。
 
 # 输出要求
 只输出一个纯 JSON 对象：
@@ -156,22 +206,36 @@ export function sceneKeeperSystemPrompt() {
   "question": "这一场真正在问的问题，一句话，不超过 30 字",
   "outcome": "这一场结束时局势变成了什么样，一句话，不超过 50 字",
   "threads": ["本场埋下或推进的线索标题"],
-  "key_detail": "一个值得被长久记住的具体细节（数字、原话、物件、身体变化），没有就空字符串"
+  "key_detail": "一个值得被长久记住的具体细节（数字、原话、物件、身体变化），没有就空字符串",
+  "causal": "这一场为什么会接在上一场后面（上一场留下的什么导致了这一场），不超过 40 字",
+  "hooks": ["本场结束时仍然悬着的具体钩子"],
+  "life_changes": [{"who": "黎婆", "life_state": "dead"}]
 }
 
 # 硬性要求
 1. 只写这一场里真实发生的事，不写你的评价，不预测下一场。
 2. question 写成一个问题，不写成一个事件。「她会不会认下这个乞丐？」而不是「她认出了他」。
 3. outcome 写局势的变化，不写过程。
-4. key_detail 必须具体到可以被检索：「八万」而不是「一大笔钱」。`;
+4. key_detail 必须具体到可以被检索：「八万」而不是「一大笔钱」；「三十一块八毛」而不是「一点钱」。
+   优先记数字、专有名词、身体变化、一句原话。这一条是几十轮后唯一能唤回细节的东西。
+5. causal 不是 outcome 的复述，而是**因果连接**：上一场的什么决定了这一场的起点。
+   没有连接就写空字符串。
+6. hooks 写「还悬着什么」，不写「发生了什么」。每条不超过 25 字。
+7. life_changes 只记本场里**状态发生变化**的人：life_state ∈ alive / injured / dead / gone，
+   who 必须是【在场】名单里的人。没变就留空数组。`;
 }
 
-export function sceneKeeperUserPrompt({ sceneId, turnFrom, turnTo, when, place, cast, turns }) {
+export function sceneKeeperUserPrompt({
+  sceneId, turnFrom, turnTo, when, place, cast, turns, previous = null,
+}) {
   return [
     `【场次】${sceneId}｜第 ${turnFrom}-${turnTo} 轮`,
     when ? `【时间】${when}` : '',
     place ? `【地点】${place}` : '',
     cast?.length ? `【在场】${cast.join('、')}` : '',
+    previous
+      ? `【上一场】${previous.scene_id}｜结果：${previous.outcome || '（无）'}${previous.hooks?.length ? `｜残留钩子：${previous.hooks.join('；')}` : ''}`
+      : '',
     '',
     '【本场完整原文】',
     turns.map((t) => `第${t.turn_no}轮${t.kind === 'player' ? '（玩家）' : ''}：${t.content}`).join('\n\n'),
@@ -199,13 +263,21 @@ export function continuitySystemPrompt() {
       "subject": "涉及的人物或事物",
       "claim": "问题是什么，一句话",
       "evidence": "原文或账本里的依据，必须引用具体内容",
-      "fix": {"action": "invalidate_assertion|set_state|resolve_thread|merge_alias|none", "target": "断言 id / 状态键 / 线索标题", "value": "新值"}
+      "fix": {"action": "invalidate_assertion|set_state|resolve_thread|none", "target": "见下方「target 写法」", "value": "新值"}
     }
   ],
   "healthy": ["没问题的部分，一句话，用于确认你确实看过"]
 }
 
-# 五类问题
+# target 写法（写错就等于没提，代码只认下面这几种形态）
+- invalidate_assertion → target 填断言 id，就写数字（「2517」，带不带 # 都行）。
+- set_state → target 必须是「人物名::字段名」，中间是**两个半角冒号**，字段只能取
+  condition / mood / location / goal / life_state（例：「凌玥::location」）。
+  写「凌玥.location」「凌玥位置」「凌玥」都不会执行——等于没提。
+- resolve_thread → target 填线索标题原文。
+- alias 类问题（同一实体两个名字）只报告，action 填 none：合并别名要人确认，没有自动通道。
+
+# 六类问题
 1. contradiction：两条断言同时有效却互相冲突（注意：被标记为「曾经」的不算冲突）。
 2. knowledge_breach：角色说出/用上了他不可能知道的信息。
 3. timeline：时间顺序对不上，或同一时间出现在两个地方。
@@ -304,7 +376,6 @@ export function worldTickSystemPrompt() {
       "what": "她把南荣家的请柬压进了抽屉最底层",
       "visibility": "rumor|hidden|public",
       "affects": ["伍卿", "凌玥"],
-      "thread": "要不要去南荣的宴（没有就空字符串）",
       "pressure": 0.7
     }
   ]
@@ -322,9 +393,10 @@ export function worldTickSystemPrompt() {
 6. 不得推进「尚未发生的原著剧情」。你只推演这些人物**以自己的性格**会做的事。`;
 }
 
-export function worldTickUserPrompt({ turnNo, offstage, recentSummary, place }) {
+export function worldTickUserPrompt({ turnNo, offstage, recentSummary, place, when }) {
   return [
     `【推演到】第 ${turnNo} 轮`,
+    when ? `【本场时间】${when}` : '',
     place ? `【玩家当前所在】${place}` : '',
     '',
     '【不在场但活着的人物】（各带私心）',

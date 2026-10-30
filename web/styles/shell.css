@@ -87,10 +87,11 @@ body {
   border-radius: var(--r-sm);
   color: var(--ink-2);
   transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
-    box-shadow var(--dur) var(--ease);
+    box-shadow var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .rail-item:hover { background: rgb(0 0 0 / 4%); color: var(--ink); }
 :root[data-theme="dark"] .rail-item:hover { background: rgb(255 255 255 / 5%); }
+.rail-item:active { transform: scale(0.92); }
 .rail-item.is-active {
   background: var(--paper-raised);
   color: var(--accent);
@@ -120,7 +121,7 @@ body {
 }
 
 /* =========================================================================
- * 二级栏：目录
+ * 二级栏：目录（白瓷面）
  * ========================================================================= */
 .subbar {
   display: flex;
@@ -215,7 +216,7 @@ body {
   transition: background-color var(--dur) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .sb-item:hover { background: var(--paper-sunken); }
-.sb-item:active { transform: scale(0.995); }
+.sb-item:active { transform: scale(0.99); }
 .sb-item.is-active { background: var(--accent-soft); }
 .sb-item.is-active .sb-item-title { color: var(--accent-ink); font-weight: 600; }
 
@@ -318,11 +319,11 @@ body {
   animation: view-enter var(--dur-enter) var(--ease-out);
 }
 @keyframes view-enter {
-  from { opacity: 0; transform: translateY(6px); }
+  from { opacity: 0; transform: translateY(8px); }
   to { opacity: 1; transform: none; }
 }
 
-/* 顶部条：48px，标题居中，两侧各留按钮位 */
+/* 顶部条：48px，标题居中，两侧各留按钮位；纸色毛玻璃 */
 .topbar {
   display: flex;
   align-items: center;
@@ -338,6 +339,10 @@ body {
   transition: box-shadow var(--dur) var(--ease);
 }
 .topbar.is-scrolled { box-shadow: 0 4px 18px rgb(33 30 27 / 6%); }
+/* 暗色下暖棕阴影不可见，换黑色投影保持「滚过头就有分界」的层次。 */
+:root[data-theme="dark"] .topbar.is-scrolled {
+  box-shadow: 0 1px 0 var(--line), 0 10px 28px rgb(0 0 0 / 45%);
+}
 .topbar-title {
   flex: 1;
   min-width: 0;
@@ -445,7 +450,7 @@ body {
     background: var(--paper-raised);
     box-shadow: var(--sh-lg);
     transform: translateX(-102%);
-    transition: transform var(--dur-slow) var(--ease);
+    transition: transform var(--dur-slow) var(--ease-soft);
   }
   .subbar.is-open { transform: none; }
   .subbar-scrim {

@@ -11,7 +11,10 @@ import { presetsRouter } from './routes/presets.js';
 import { smithRouter } from './routes/smith.js';
 import { fontsRouter } from './routes/fonts.js';
 import { staticRouter } from './routes/static.js';
+import { craftRouter } from './routes/craft.js';
 import { getDb } from './memory/store.js';
+import { initCraftConfig } from './world/craft-store.js';
+import { currentPlan } from './memory/context-plan.js';
 
 try {
   assertConfig();
@@ -23,6 +26,8 @@ try {
 
 // 触发建表（幂等）
 getDb();
+// 工艺取值表：存储里有自定义就装进来（校验失败该轴回落到内置，问题进 GET /api/craft）。
+initCraftConfig();
 
 const app = express();
 
@@ -50,8 +55,17 @@ app.use((req, res, next) => {
   next();
 });
 
+// 运行期配置与会话状态随时可变：API 响应一律禁止缓存。
+// 只靠 express 默认 ETag 会让浏览器发条件请求、拿到 304 后继续用旧 JSON
+// （典型症状：设置页保存了模型配置，接口却仍是旧值）。
+app.use(['/api', '/v1'], (req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store');
+  next();
+});
+
 app.use('/api', worldsRouter);
 app.use('/api', sessionsRouter);
+app.use('/api', craftRouter);
 app.use('/api', presetsRouter);
 app.use('/api', smithRouter);
 app.use('/api', fontsRouter);
@@ -80,6 +94,8 @@ process.on('unhandledRejection', (reason) => {
 
 app.listen(config.port, config.host, () => {
   const shown = config.host === '0.0.0.0' ? 'localhost' : config.host;
+  // 预算从 narrator 绑定模型的窗口推导，启动横幅直接显示推导结果（换模型即变）。
+  const plan = currentPlan();
   console.log(`
   ╔══════════════════════════════════════════════════════════╗
   ║           AI Roleplay Studio — 已启动                     ║
@@ -88,8 +104,9 @@ app.listen(config.port, config.host, () => {
   ║  OpenAI 兼容 API http://${shown}:${config.port}/v1
   ║    模型: ${config.upstream.model}
   ║    上游: ${config.upstream.baseUrl}
-  ║  上下文软目标    ${config.context.softTokens.toLocaleString()} tokens
-  ║  上下文硬上限    ${config.context.maxTokens.toLocaleString()} tokens
+  ║  模型窗口        ${plan.window.toLocaleString()} tokens
+  ║  提示词硬上限    ${plan.hardMax.toLocaleString()} tokens（已扣生成预留 ${plan.outputReserve.toLocaleString()}）
+  ║  上下文软目标    ${plan.softMax.toLocaleString()} tokens${plan.autoSoft ? '（按窗口自动）' : ''}
   ╚══════════════════════════════════════════════════════════╝
   `);
 });

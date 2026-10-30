@@ -12,7 +12,7 @@ import { $, el, clear, formatTime, firstChar } from './util.js';
 import { icon } from './icons.js';
 import { api } from './api.js';
 import { navigate, matchRoute, openActionSheet, confirmDialog, toast, openPopover } from './app.js';
-import { ui, cycleTheme } from './store.js';
+import { ui, setTheme, applyWithRipple } from './store.js';
 import { hueGlyph } from './ui-kit.js';
 
 const railEl = $('#rail');
@@ -71,12 +71,21 @@ function renderRail() {
   railEl.appendChild(items);
 
   const foot = el('div.rail-foot');
+  // 快捷切换只在深浅两档间翻转（跟随系统留给设置页），图标对应当前外观。
+  const resolved = document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
   foot.appendChild(el('button.rail-item', {
     type: 'button', title: '切换外观', 'aria-label': '切换外观',
-    onclick: () => { cycleTheme(); renderRail(); },
+    onclick: (e) => {
+      const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark';
+      const r = e.currentTarget.getBoundingClientRect();
+      applyWithRipple(
+        () => { setTheme(next); renderRail(); },
+        r.left + r.width / 2, r.top + r.height / 2,
+      );
+    },
   },
-    icon(ui.get().theme === 'dark' ? 'sun' : ui.get().theme === 'light' ? 'moon' : 'palette', { size: 17 }),
-    el('span.rail-item-label', {}, ui.get().theme === 'dark' ? '浅色' : ui.get().theme === 'light' ? '深色' : '跟随'),
+    icon(resolved === 'dark' ? 'sun' : 'moon', { size: 17 }),
+    el('span.rail-item-label', {}, resolved === 'dark' ? '浅色' : '深色'),
   ));
   railEl.appendChild(foot);
 }
@@ -133,11 +142,12 @@ function buildWorldSubbar(worldId) {
   ));
 
   if (world) {
+    const stats = entityStats(world);
     subbarEl.appendChild(el('div.subbar-world-info', {},
       el('div.subbar-world-meta', {},
-        el('span.chip.is-plain', {}, `${world.card?.charter_count || 0} 条宪章`),
-        el('span.chip.is-plain', {}, `${world.card?.cast?.length || 0} 人`),
-        el('span.chip.is-plain', {}, `${world.card?.codex_count || 0} 条辞书`),
+        el('span.chip.is-plain', {}, `${world.card?.charter_count || 0} 条世界规则`),
+        el('span.chip.is-plain', {}, `${stats.persons} 人`),
+        el('span.chip.is-plain', {}, `${stats.facts} 条设定集`),
       ),
     ));
   }
@@ -177,6 +187,7 @@ function paintWorlds() {
   }
 
   for (const w of items) {
+    const stats = entityStats(w);
     listEl.appendChild(el('button.sb-item', {
       type: 'button',
       class: w.id === activeWorldId ? 'is-active' : '',
@@ -187,12 +198,24 @@ function paintWorlds() {
         el('div.sb-item-title', {}, w.title),
         el('div.sb-item-meta', {},
           el('span', {}, `${w.session_count || 0} 段`),
-          w.card?.codex_count ? el('span.dot') : null,
-          w.card?.codex_count ? el('span', {}, `${w.card.codex_count} 条辞书`) : null,
+          stats.facts ? el('span.dot') : null,
+          stats.facts ? el('span', {}, `${stats.facts} 条设定集`) : null,
         ),
       ),
     ));
   }
+}
+
+/**
+ * v5 列表计数：GET /api/worlds 顶层带 persons[] / entity_count / fact_count。
+ * 字段缺失时按 0 显示，不读旧 cast/codex（v5 卡不再有它们）。
+ */
+function entityStats(w) {
+  const persons = Array.isArray(w.persons) ? w.persons.length : 0;
+  const facts = Number.isFinite(w.fact_count)
+    ? w.fact_count
+    : Number.isFinite(w.entity_count) ? Math.max(0, w.entity_count - persons) : 0;
+  return { persons, facts };
 }
 
 function paintSessions() {
@@ -325,7 +348,7 @@ export function closeDrawer() {
       const route = matchRoute();
       if (route.name !== 'world' && route.name !== 'play' && route.name !== 'worlds') subbarEl.hidden = true;
     }
-  }, 240);
+  }, 420);
 }
 
 scrimEl.addEventListener('click', closeDrawer);

@@ -1,16 +1,16 @@
 /**
  * views/settings.js — 设置
  *
- * 分组：外观 / 字体 / 阅读 / 遥测 / 模型 / 接入
- * 所有项即时生效并持久化（localStorage），没有「保存」按钮。
+ * 分组：外观 / 字体 / 阅读 / 遥测 / 模型 / 上下文与记忆 / 接入
+ * 界面偏好即时生效并持久化（localStorage）；模型配置在服务端，需显式「保存」。
  * 桌面端左侧是吸顶的分组导航，窄屏折成横向滚动条。
  */
 
 import { el, clear, fmtNumber, fmtTokens } from '../util.js';
 import { icon } from '../icons.js';
 import { api } from '../api.js';
-import { navigate, toast, openSheet } from '../app.js';
-import { ui, setTheme, setPref, applyAppearancePrefs } from '../store.js';
+import { navigate, toast, openSheet, confirmDialog } from '../app.js';
+import { ui, setTheme, setPref, applyAppearancePrefs, applyWithRipple } from '../store.js';
 import {
   FONT_PRESETS, COMMON_FONTS, fontDisplayName, fontStack,
   listLocalFonts, supportsLocalFonts,
@@ -23,8 +23,26 @@ const SECTIONS = [
   ['reading', '阅读'],
   ['telemetry', '遥测'],
   ['model', '模型'],
+  ['craft', '演绎工艺'],
+  ['context', '上下文与记忆'],
   ['api', '接入'],
 ];
+
+// Agent 在界面上的名字。服务端只认 key，这里只做展示。
+const AGENT_META = {
+  narrator: ['演绎旁白', '写正文，最常调用'],
+  archivist: ['记忆整理', '每轮把正文抽成结构化记忆'],
+  sceneKeeper: ['本场状态', '每场收尾时整理本场状态'],
+  retrieval: ['设定检索', '判断这一拍要不要查设定集'],
+  continuity: ['一致性检查', '定期核对矛盾与知识越界'],
+  librarian: ['设定集维护', '整理设定集条目'],
+  worldTick: ['后台推演', '切场时推演不在场角色的行动'],
+  branch: ['走向生成', '回合末给 3–4 条走向'],
+  cardSmith: ['世界卡生成', '小说 → 世界卡'],
+};
+const EFFORT_LABELS = { low: '低', medium: '中', high: '高', xhigh: '极高', max: '最高' };
+const EFFORTS_LOCAL = Object.keys(EFFORT_LABELS);
+
 
 // 字体列表在进程内缓存：设置页重新挂载、反复打开选择器都不用再扫一次。
 let cachedFontList = null;
@@ -50,9 +68,14 @@ export default {
 
   async mount(root) {
     let cfg = null;
+    let draft = null;        // 可编辑副本：只在点「保存」时写服务端
+    let dirty = false;
+    let saving = false;
     let activeSection = 'appearance';
     let sectionNodes = [];
     let navButtons = [];
+    let spyPaused = false;   // 点击导航后的平滑滚动期间，暂停滚动联动
+    let spyToken = 0;
     let fontRowRefs = [];
     let fontPreview = null;
 
@@ -103,12 +126,16 @@ export default {
       reading.appendChild(readingGroup());
       const telemetry = section('telemetry', '遥测', '每轮旁白下方那排数字。');
       telemetry.appendChild(telemetryGroup());
-      const model = section('model', '模型与记忆', '服务端默认值；改 .env 才能调整。');
+      const model = section('model', '模型', '选择服务商与模型，并给每个 Agent 分配。保存后立即生效，无需重启。');
       model.appendChild(modelGroup());
+      const craftSec = section('craft', '演绎工艺', '「怎么写」的三条轴：文风取向、对白形态、推进尺度。这里可以增删条目、改它们的正文与默认值。');
+      craftSec.appendChild(craftGroup());
+      const contextSec = section('context', '上下文与记忆', '当前生效的预算与节奏。模型能读多长，取决于上面绑定的模型上下文窗口。');
+      contextSec.appendChild(contextGroup());
       const apiSec = section('api', '接入', '把叙事台当成一个 OpenAI 兼容服务来用。');
       apiSec.appendChild(apiGroup());
 
-      sectionNodes = [appearance, type, reading, telemetry, model, apiSec];
+      sectionNodes = [appearance, type, reading, telemetry, model, craftSec, contextSec, apiSec];
       content.append(...sectionNodes);
       content.appendChild(about());
 
@@ -137,11 +164,23 @@ export default {
     function scrollToSection(id) {
       const target = scroll.querySelector(`#settings-${id}`);
       if (!target) return;
+      // 点击导航的平滑滚动期间暂停 scroll-spy：竖线直接落位到目标分组，
+      // 不跟着途经的中间分组逐项跳动（否则看起来在上下抖动）。
+      const token = ++spyToken;
+      spyPaused = true;
+      const release = () => {
+        if (token !== spyToken) return;  // 期间又点了别的分组，让新的一次接管
+        spyPaused = false;
+        onScroll();
+      };
+      scroll.addEventListener('scrollend', release, { once: true });
+      setTimeout(release, 900);  // scrollend 缺席时的兜底
       // scroll-margin-top 在窄屏会为吸顶的分组导航留出高度。
       target.scrollIntoView({ behavior: 'smooth', block: 'start' });
     }
 
     function onScroll() {
+      if (spyPaused) return;
       if (!sectionNodes.length) return;
       const edge = scroll.getBoundingClientRect().top + 44;
       let current = sectionNodes[0].dataset.section;
@@ -171,9 +210,12 @@ export default {
         const btn = el('button.theme-card', {
           type: 'button',
           class: current === value ? 'is-active' : '',
-          onclick: () => {
-            setTheme(value);
-            cards.forEach((c, i) => c.classList.toggle('is-active', options[i][0] === value));
+          onclick: (e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            applyWithRipple(() => {
+              setTheme(value);
+              cards.forEach((c, i) => c.classList.toggle('is-active', options[i][0] === value));
+            }, r.left + r.width / 2, r.top + r.height / 2);
             toast(value === 'dark' ? '已切换深色' : value === 'light' ? '已切换浅色' : '跟随系统');
           },
         },
@@ -510,41 +552,761 @@ export default {
       return el('div.group', {}, card);
     }
 
-    /* ---- 模型与记忆 ---- */
+    /* ---- 模型草稿：界面只在闭包里改，点「保存」才落库 ---- */
+
+    function cloneRuntime(rt) {
+      const base = rt || {};
+      const agentKeys = base.options?.agent_keys || Object.keys(AGENT_META);
+      const agents = {};
+      for (const key of agentKeys) {
+        const a = base.agents?.[key];
+        // 未绑定（source=env）的 Agent 不写进 agents，保住 .env 里的按 Agent *_MODEL。
+        if (!a || a.source !== 'db' || !a.modelId) continue;
+        agents[key] = {
+          modelId: a.modelId,
+          effort: EFFORTS_LOCAL.includes(a.effort) ? a.effort : null,
+          temperature: typeof a.temperature === 'number' ? a.temperature : null,
+          maxTokens: Number.isFinite(a.maxTokens) ? a.maxTokens : null,
+        };
+      }
+      return {
+        providers: (base.providers || []).map((p) => ({
+          id: p.id, name: p.name, baseUrl: p.baseUrl,
+          protocol: p.protocol || 'openai',
+          enabled: p.enabled !== false,
+          apiKey: p.hasKey ? '***' : '',
+        })),
+        models: (base.models || []).map((m) => ({
+          id: m.id, providerId: m.providerId, model: m.model, label: m.label || m.model,
+          contextWindow: m.contextWindow, maxOutput: m.maxOutput,
+          supportsReasoning: m.supportsReasoning !== false,
+          reasoningEfforts: Array.isArray(m.reasoningEfforts) && m.reasoningEfforts.length
+            ? [...m.reasoningEfforts]
+            : (m.supportsReasoning === false ? [] : [...EFFORTS_LOCAL]),
+          supportsTemperature: m.supportsTemperature !== false,
+          enabled: m.enabled !== false,
+        })),
+        agents,
+      };
+    }
+
+    function syncDraft() {
+      draft = cfg?.runtime ? cloneRuntime(cfg.runtime) : null;
+      dirty = false;
+    }
+
+    function markDirty() {
+      dirty = true;
+      const top = scroll.scrollTop;
+      render();
+      scroll.scrollTop = top;
+    }
+
+    async function refreshConfig() {
+      try { cfg = await api.getConfig(); } catch { /* 保留旧 cfg，界面提示由调用方处理 */ }
+    }
+
+    async function saveDraft() {
+      if (!draft || saving) return;
+      saving = true;
+      const top = scroll.scrollTop;
+      render();
+      scroll.scrollTop = top;
+      try {
+        const res = await api.saveConfig(draft);
+        cfg = { ...cfg, runtime: res.runtime };
+        await refreshConfig();
+        syncDraft();
+        toast('已保存，立即生效');
+      } catch (err) {
+        toast(err?.message || '保存失败', { type: 'error', duration: 3600 });
+      } finally {
+        saving = false;
+        const keep = scroll.scrollTop;
+        render();
+        scroll.scrollTop = keep;
+      }
+    }
+
+    async function resetDraft() {
+      const okd = await confirmDialog({
+        title: '恢复 .env 默认',
+        message: '删除这份运行期配置，所有服务商、模型、Agent 分配回到 .env 默认值。不会改 .env 文件。',
+        confirmText: '恢复默认',
+        destructive: true,
+      });
+      if (!okd) return;
+      try {
+        const res = await api.resetConfig();
+        cfg = { ...cfg, runtime: res.runtime };
+        await refreshConfig();
+        syncDraft();
+        toast('已恢复 .env 默认');
+      } catch (err) {
+        toast(err?.message || '恢复失败', { type: 'error', duration: 3600 });
+      }
+      const top = scroll.scrollTop;
+      render();
+      scroll.scrollTop = top;
+    }
+
+    /* ---- 模型（服务端配置，显式保存后立即生效） ---- */
     function modelGroup() {
-      const card = el('div.group-card');
-      if (!cfg) {
-        card.appendChild(el('div.li', {}, el('div.li-body', {}, el('div.li-sub', {}, '读取配置中…'))));
-      } else {
-        card.appendChild(infoRow('模型', cfg.models?.default || '—', '所有 Agent 共用'));
-        card.appendChild(infoRow('演绎推理强度', effortLabel(cfg.defaults?.narrator_effort), '越高越细腻，越慢'));
-        card.appendChild(infoRow('史官推理强度', effortLabel(cfg.defaults?.archivist_effort), '每轮把正文抽成结构化记忆'));
-        card.appendChild(infoRow('上下文软目标', `${fmtNumber(cfg.limits?.context_soft_tokens || 52000)} tok`, '每轮装配的目标体积'));
-        card.appendChild(infoRow('上下文硬上限', `${fmtNumber(cfg.limits?.context_max_tokens || 200000)} tok`, '绝对安全线'));
-        card.appendChild(infoRow('逐字保留回合', String(cfg.defaults?.recent_raw_turns ?? 4), '一个回合 = 你的行动 + 旁白'));
-        card.appendChild(infoRow('校勘间隔', `每 ${cfg.defaults?.continuity_every ?? 10} 轮`, '查矛盾、知识越界、别名冲突'));
-        card.appendChild(infoRow('世界呼吸间隔', `每 ${cfg.defaults?.world_tick_every ?? 8} 轮`, '推演不在场角色的行动'));
+      if (!cfg || !draft) {
+        return el('div.group', {}, el('div.group-card', {},
+          el('div.li', {}, el('div.li-body', {}, el('div.li-sub', {}, '读取配置中…')))));
       }
 
-      const b = cfg?.budget;
-      const wrap = el('div.group', {}, card);
+      const wrap = el('div.group');
+      const fromDb = cfg.runtime?.source === 'db';
+      const actions = el('div', { style: 'display:flex;gap:8px;flex-wrap:wrap;' });
 
+      const saveBtn = el('button.btn.btn-primary', { type: 'button', disabled: !dirty || saving },
+        saving ? '保存中…' : (dirty ? '保存' : '已保存'));
+      saveBtn.addEventListener('click', () => { void saveDraft(); });
+      const resetBtn = el('button.btn.btn-ghost', { type: 'button' }, '恢复 .env 默认');
+      resetBtn.addEventListener('click', () => { void resetDraft(); });
+      actions.append(saveBtn, resetBtn);
+
+      wrap.appendChild(el('div.group-card', {},
+        el('div.li', { style: 'align-items:flex-start;flex-wrap:wrap;gap:8px;' },
+          el('div.li-icon', {}, icon('sliders', { size: 13 })),
+          el('div.li-body', {},
+            el('div.li-title', {}, fromDb ? '运行期配置（已保存）' : '来自 .env 的默认值'),
+            el('div.li-sub', {}, fromDb
+              ? '保存后对新回合立即生效；「恢复 .env 默认」会删除这份运行期配置。'
+              : '保存后会写入数据库并覆盖 .env 默认值；不保存则一直使用 .env。'),
+          ),
+          actions,
+        ),
+      ));
+
+      wrap.appendChild(el('div', {},
+        el('div.group-title', {}, '服务商'),
+        el('div.group-card', {},
+          ...draft.providers.map((p) => providerRow(p)),
+          addRow('添加服务商', () => openProviderSheet(null)),
+        ),
+      ));
+
+      wrap.appendChild(el('div', {},
+        el('div.group-title', {}, '模型'),
+        el('div.group-card', {},
+          ...draft.models.map((m) => modelRow(m)),
+          addRow('添加模型', () => openModelSheet(null)),
+        ),
+      ));
+
+      wrap.appendChild(el('div', {},
+        el('div.group-title', {}, 'Agent 分配'),
+        el('div.group-card', {},
+          ...Object.keys(AGENT_META).map((key) => agentRow(key)),
+        ),
+        el('div.group-note', {},
+          '没有单独分配的 Agent 会跟随 .env（每轮对话的模型、温度、推理强度都来自环境变量）。'
+          + '这里改的是「这一局怎么调用模型」，不改提示词。'),
+      ));
+
+      return wrap;
+    }
+
+    function addRow(label, onclick) {
+      return el('div.li.is-button', { onclick },
+        el('div.li-icon', {}, icon('plus', { size: 13 })),
+        el('div.li-body', {}, el('div.li-title', {}, label)),
+        el('span.li-accent', {}, icon('chevronRight', { size: 13 })),
+      );
+    }
+
+    function providerRow(p) {
+      const key = p.apiKey ? '密钥已配置' : '未配置密钥';
+      const sub = `${p.baseUrl || '—'} · ${key}`;
+      return el('div.li.is-button', { onclick: () => openProviderSheet(p) },
+        el('div.li-icon', {}, icon('globe', { size: 13 })),
+        el('div.li-body', {},
+          el('div.li-title', {}, p.name || p.id || '未命名服务商'),
+          el('div.li-sub', {}, (p.enabled === false ? '已停用 · ' : '') + sub),
+        ),
+        el('div.li-value', {}, icon('edit', { size: 13 })),
+      );
+    }
+
+    function modelRow(m) {
+      const provider = draft.providers.find((p) => p.id === m.providerId);
+      return el('div.li.is-button', { onclick: () => openModelSheet(m) },
+        el('div.li-icon', {}, icon('sparkles', { size: 13 })),
+        el('div.li-body', {},
+          el('div.li-title', {}, m.label || m.model),
+          el('div.li-sub', {},
+            `${m.model} · ${provider?.name || m.providerId} · 上下文 ${fmtNumber(m.contextWindow)} tok`),
+        ),
+        el('div.li-value', {}, icon('edit', { size: 13 })),
+      );
+    }
+
+    function agentRow(key) {
+      const [label, desc] = AGENT_META[key];
+      const binding = draft.agents[key];
+      const effective = cfg.runtime?.agents?.[key];
+      let summary;
+      if (binding) {
+        const model = draft.models.find((m) => m.id === binding.modelId);
+        const parts = [model?.label || '跟随 .env 模型'];
+        if (binding.effort) parts.push(`推理 ${EFFORT_LABELS[binding.effort] || binding.effort}`);
+        if (typeof binding.temperature === 'number') parts.push(`温度 ${binding.temperature}`);
+        if (Number.isFinite(binding.maxTokens)) parts.push(`输出 ${fmtNumber(binding.maxTokens)}`);
+        summary = parts.join(' · ');
+      } else {
+        summary = `跟随 .env（${effective?.model || '—'}）`;
+      }
+      return el('div.li.is-button', { onclick: () => openAgentSheet(key) },
+        el('div.li-icon', {}, icon('users', { size: 13 })),
+        el('div.li-body', {},
+          el('div.li-title', {}, label),
+          el('div.li-sub', {}, desc),
+        ),
+        el('div.li-value', { style: 'max-width:46%;text-align:right;font-size:var(--fs-caption);color:var(--ink-3);' }, summary),
+      );
+    }
+
+    /* ---- 配置编辑 sheet ---- */
+
+    function formLine(label, control, hint = null) {
+      return el('div', { style: 'margin-bottom:14px;' },
+        el('div.field-label', { style: 'margin-bottom:6px;' }, label),
+        control,
+        hint ? el('div.field-hint', { style: 'margin-top:6px;' }, hint) : null,
+      );
+    }
+
+    function makeSelect(options, value) {
+      const sel = el('select.field', {});
+      for (const [v, label] of options) {
+        const opt = el('option', { value: v }, label);
+        if (String(v) === String(value ?? '')) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      return sel;
+    }
+
+    function openProviderSheet(existing) {
+      const isNew = !existing;
+      const item = existing || { id: null, name: '', baseUrl: '', protocol: 'openai', enabled: true, apiKey: '' };
+      let keyAction = item.apiKey === '***' ? 'keep' : 'none';
+      let enabled = item.enabled !== false;
+
+      const nameIn = el('input.field', { type: 'text', value: item.name || '', placeholder: '例如：StepFun 主账号' });
+      const urlIn = el('input.field', { type: 'text', value: item.baseUrl || '', placeholder: 'https://api.example.com/v1' });
+      const keyIn = el('input.field', {
+        type: 'password', value: '',
+        placeholder: keyAction === 'keep' ? '已配置，留空表示保留' : 'sk-…（没有可留空）',
+      });
+      keyIn.addEventListener('input', () => { keyAction = keyIn.value ? 'set' : 'none'; });
+      const keyHint = el('div.field-hint', { style: 'margin-top:6px;' }, keyAction === 'keep'
+        ? `已保存的密钥末 4 位：${item.hasKey ? (cfg.runtime?.providers || []).find((p) => p.id === item.id)?.keyHint || '****' : '****'}；留空表示不修改。`
+        : '留空表示这个服务商没有密钥（地址与 .env 相同则沿用 .env 的密钥）。');
+      const clearBtn = el('button.btn.btn-ghost', { type: 'button', style: 'margin-top:8px;' }, '清除已保存的密钥');
+      clearBtn.addEventListener('click', () => {
+        keyIn.value = '';
+        keyAction = 'clear';
+        keyHint.textContent = '将清除已保存的密钥（保存后生效）。';
+      });
+
+      const sheetApi = openSheet({
+        title: isNew ? '添加服务商' : '编辑服务商',
+        confirmText: '保存',
+        render(body) {
+          body.appendChild(formLine('名称', nameIn));
+          body.appendChild(formLine('Base URL', urlIn, 'OpenAI 兼容地址，通常以 /v1 结尾。'));
+          body.appendChild(formLine('API Key', keyIn));
+          body.appendChild(keyHint);
+          if (item.apiKey === '***') body.appendChild(clearBtn);
+          body.appendChild(toggleRow('启用', '停用后引用它的 Agent 会回落到 .env 默认模型', enabled, (v) => { enabled = v; }));
+          if (!isNew) {
+            const del = el('button.btn.btn-ghost', { type: 'button', style: 'margin-top:12px;color:var(--danger,#c0392b);' }, '删除这个服务商');
+            del.addEventListener('click', async () => {
+              const refs = draft.models.filter((m) => m.providerId === item.id);
+              if (refs.length) { toast('还有模型引用这个服务商，先删除对应模型', { type: 'error' }); return; }
+              const okd = await confirmDialog({ title: '删除服务商', message: `删除「${item.name || item.id}」？只影响界面配置，不改 .env。`, confirmText: '删除', destructive: true });
+              if (!okd) return;
+              draft.providers = draft.providers.filter((p) => p.id !== item.id);
+              sheetApi.close();
+              markDirty();
+            });
+            body.appendChild(del);
+          }
+        },
+        onConfirm(api2) {
+          const name = nameIn.value.trim();
+          const baseUrl = urlIn.value.trim();
+          if (!name) { toast('给服务商起个名字', { type: 'error' }); return false; }
+          if (!/^https?:\/\/.+/i.test(baseUrl)) { toast('Base URL 需要以 http:// 或 https:// 开头', { type: 'error' }); return false; }
+          const apiKey = keyAction === 'keep' ? '***' : keyAction === 'clear' ? '' : keyIn.value.trim();
+          const record = { id: item.id || `provider-${Date.now().toString(36)}`, name, baseUrl, protocol: 'openai', enabled, apiKey };
+          const i = draft.providers.findIndex((p) => p.id === record.id);
+          if (i >= 0) draft.providers[i] = record; else draft.providers.push(record);
+          markDirty();
+          return true;
+        },
+      });
+    }
+
+    function openModelSheet(existing) {
+      const isNew = !existing;
+      const item = existing || {
+        id: null, providerId: draft.providers[0]?.id || '', model: '', label: '',
+        contextWindow: 200000, maxOutput: 12000,
+        supportsReasoning: true, reasoningEfforts: [...EFFORTS_LOCAL],
+        supportsTemperature: true, enabled: true,
+      };
+      let enabled = item.enabled !== false;
+      let supportsReasoning = item.supportsReasoning !== false;
+      let supportsTemperature = item.supportsTemperature !== false;
+      const effortsSel = new Set(
+        Array.isArray(item.reasoningEfforts) && item.reasoningEfforts.length
+          ? item.reasoningEfforts
+          : (item.supportsReasoning === false ? [] : EFFORTS_LOCAL),
+      );
+
+      const labelIn = el('input.field', { type: 'text', value: item.label || '', placeholder: '例如：主力大模型' });
+      const modelIn = el('input.field', { type: 'text', value: item.model || '', placeholder: '上游 model 名，例如 step-5-preview' });
+      const providerSel = makeSelect(draft.providers.map((p) => [p.id, p.name || p.id]), item.providerId);
+      const ctxIn = el('input.field', { type: 'number', min: 1, step: 1000, value: item.contextWindow || '' });
+      const outIn = el('input.field', { type: 'number', min: 1, step: 1000, value: item.maxOutput || '' });
+
+      const sheetApi = openSheet({
+        title: isNew ? '添加模型' : '编辑模型',
+        confirmText: '保存',
+        render(body) {
+          body.appendChild(formLine('显示名', labelIn));
+          body.appendChild(formLine('服务商', providerSel));
+          body.appendChild(formLine('上游 model 名', modelIn, '请求体里的 model 字段。'));
+          body.appendChild(formLine('上下文窗口（token）', ctxIn, '决定这一局能读多长；超过这里的值会被硬上限拦住。'));
+          body.appendChild(formLine('单次最大输出（token）', outIn, 'Agent 没有单独设置 maxTokens 时用它。'));
+          body.appendChild(toggleRow('支持推理强度', '关掉后不向上游发送 reasoning_effort', supportsReasoning, (v) => { supportsReasoning = v; }));
+          const effortsBox = el('div', { style: 'display:flex;gap:12px;flex-wrap:wrap;' });
+          for (const e of EFFORTS_LOCAL) {
+            const cb = el('input', { type: 'checkbox' });
+            cb.checked = effortsSel.has(e);
+            cb.addEventListener('change', () => { if (cb.checked) effortsSel.add(e); else effortsSel.delete(e); });
+            effortsBox.appendChild(el('label', { style: 'display:flex;align-items:center;gap:4px;font-size:var(--fs-caption);' }, cb, EFFORT_LABELS[e]));
+          }
+          body.appendChild(formLine('可选的推理强度', effortsBox, '按上游实际支持勾选；Agent 的推理强度只能从这里选，都不勾则由上游取默认档。'));
+          body.appendChild(toggleRow('支持温度', '关掉后不向上游发送 temperature', supportsTemperature, (v) => { supportsTemperature = v; }));
+          body.appendChild(toggleRow('启用', '停用后引用它的 Agent 会回落到 .env 默认模型', enabled, (v) => { enabled = v; }));
+          if (!isNew) {
+            const del = el('button.btn.btn-ghost', { type: 'button', style: 'margin-top:12px;color:var(--danger,#c0392b);' }, '删除这个模型');
+            del.addEventListener('click', async () => {
+              const okd = await confirmDialog({ title: '删除模型', message: `删除「${item.label || item.model}」？引用它的 Agent 会回到「跟随 .env」。`, confirmText: '删除', destructive: true });
+              if (!okd) return;
+              draft.models = draft.models.filter((m) => m.id !== item.id);
+              for (const key of Object.keys(draft.agents)) {
+                if (draft.agents[key].modelId === item.id) draft.agents[key].modelId = null;
+              }
+              sheetApi.close();
+              markDirty();
+            });
+            body.appendChild(del);
+          }
+        },
+        onConfirm() {
+          const model = modelIn.value.trim();
+          if (!model) { toast('填一下上游 model 名', { type: 'error' }); return false; }
+          const contextWindow = Number(ctxIn.value);
+          const maxOutput = Number(outIn.value);
+          if (!Number.isFinite(contextWindow) || contextWindow <= 0) { toast('上下文窗口需要是正整数', { type: 'error' }); return false; }
+          if (!Number.isFinite(maxOutput) || maxOutput <= 0) { toast('最大输出需要是正整数', { type: 'error' }); return false; }
+          const efforts = EFFORTS_LOCAL.filter((e) => effortsSel.has(e));
+          if (supportsReasoning && !efforts.length) { toast('至少勾选一档推理强度', { type: 'error' }); return false; }
+          const record = {
+            id: item.id || `model-${Date.now().toString(36)}`,
+            providerId: providerSel.value,
+            model,
+            label: labelIn.value.trim() || model,
+            contextWindow: Math.trunc(contextWindow),
+            maxOutput: Math.trunc(maxOutput),
+            supportsReasoning,
+            reasoningEfforts: supportsReasoning ? efforts : [],
+            supportsTemperature,
+            enabled,
+          };
+          const i = draft.models.findIndex((m) => m.id === record.id);
+          if (i >= 0) draft.models[i] = record; else draft.models.push(record);
+          markDirty();
+          return true;
+        },
+      });
+    }
+
+    function openAgentSheet(key) {
+      const [label] = AGENT_META[key];
+      const binding = draft.agents[key] || { modelId: null, effort: null, temperature: null, maxTokens: null };
+      const effective = cfg.runtime?.agents?.[key] || {};
+      const modelOptions = [['', `跟随 .env（${effective.model || '—'}）`],
+        ...draft.models.map((m) => [m.id, `${m.label || m.model} · ${draft.providers.find((p) => p.id === m.providerId)?.name || m.providerId}`])];
+      const modelSel = makeSelect(modelOptions, binding.modelId || '');
+      const envAllowed = Array.isArray(cfg.models?.reasoning_efforts) && cfg.models.reasoning_efforts.length
+        ? cfg.models.reasoning_efforts
+        : EFFORTS_LOCAL;
+      const allowedFor = (modelId) => {
+        const m = modelId ? draft.models.find((x) => x.id === modelId) : null;
+        return m && Array.isArray(m.reasoningEfforts) && m.reasoningEfforts.length ? m.reasoningEfforts : envAllowed;
+      };
+      const effortSel = makeSelect(
+        [['', `跟随 .env（${effective.effort ? (EFFORT_LABELS[effective.effort] || effective.effort) : '—'}）`],
+          ...allowedFor(modelSel.value).map((e) => [e, EFFORT_LABELS[e] || e])],
+        binding.effort || '',
+      );
+      modelSel.addEventListener('change', () => {
+        const allowed = allowedFor(modelSel.value);
+        const current = effortSel.value;
+        effortSel.textContent = '';
+        effortSel.appendChild(el('option', { value: '' }, `跟随 .env（${effective.effort ? (EFFORT_LABELS[effective.effort] || effective.effort) : '—'}）`));
+        for (const e of allowed) {
+          const opt = el('option', { value: e }, EFFORT_LABELS[e] || e);
+          if (e === current) opt.selected = true;
+          effortSel.appendChild(opt);
+        }
+        if (!allowed.includes(current)) effortSel.value = '';
+      });
+      const tempIn = el('input.field', {
+        type: 'number', min: 0, max: 2, step: 0.05,
+        value: typeof binding.temperature === 'number' ? binding.temperature : '',
+        placeholder: `跟随 .env（${effective.temperature ?? '—'}）`,
+      });
+      const maxIn = el('input.field', {
+        type: 'number', min: 1, step: 1000,
+        value: Number.isFinite(binding.maxTokens) ? binding.maxTokens : '',
+        placeholder: `跟随 .env（${effective.maxTokens ?? '—'}）`,
+      });
+
+      const sheetApi = openSheet({
+        title: `分配 · ${label}`,
+        confirmText: '保存',
+        render(body) {
+          body.appendChild(formLine('使用模型', modelSel, '「跟随 .env」= 不写绑定，用环境变量里的模型。'));
+          body.appendChild(formLine('推理强度', effortSel));
+          body.appendChild(formLine('温度', tempIn, '留空表示跟随 .env。'));
+          body.appendChild(formLine('单次最大输出（token）', maxIn, '留空表示跟随模型的最大输出或 .env。'));
+          const clear = el('button.btn.btn-ghost', { type: 'button', style: 'margin-top:8px;' }, '清空绑定，回到跟随 .env');
+          clear.addEventListener('click', () => {
+            delete draft.agents[key];
+            sheetApi.close();
+            markDirty();
+          });
+          body.appendChild(clear);
+        },
+        onConfirm() {
+          const modelId = modelSel.value || null;
+          const effort = effortSel.value || null;
+          const temperature = tempIn.value === '' ? null : Number(tempIn.value);
+          const maxTokens = maxIn.value === '' ? null : Number(maxIn.value);
+          if (temperature != null && (!Number.isFinite(temperature) || temperature < 0 || temperature > 2)) {
+            toast('温度需要在 0–2 之间', { type: 'error' }); return false;
+          }
+          if (maxTokens != null && (!Number.isFinite(maxTokens) || maxTokens <= 0)) {
+            toast('最大输出需要是正整数', { type: 'error' }); return false;
+          }
+          if (!modelId && !effort && temperature == null && maxTokens == null) delete draft.agents[key];
+          else draft.agents[key] = { modelId, effort, temperature, maxTokens };
+          markDirty();
+          return true;
+        },
+      });
+    }
+
+    /* ---- 上下文与记忆（只读） ---- */
+    /* ---- 演绎工艺（取值表本身：增删改条目与正文） ----
+       这一节与上面的运行时配置是两套独立的保存：工艺表走 PUT /api/craft，
+       有自己的「保存 / 恢复内置」。混进 cfg 的 draft 会让「保存模型配置」
+       顺手把工艺表也提交一遍，失败时不知道该报哪个错。 */
+    let craftEditor = null;   // {view, draft, dirty}
+
+    function craftGroup() {
+      const wrap = el('div.group');
+      const box = el('div');
+      wrap.appendChild(box);
+      paintCraftEditor(box);
+      return wrap;
+    }
+
+    function paintCraftEditor(box) {
+      clear(box);
+
+      // 工艺表是独立请求：首帧还没回来时先占位，不要解构 null。
+      if (!craftEditor) {
+        box.appendChild(el('div.group-card', {},
+          el('div.group-note', { style: 'margin:0;' }, '正在读取工艺表…')));
+        return;
+      }
+
+      const { view, draft } = craftEditor;
+      const card = el('div.group-card');
+
+      // 顶条：来源与问题。校验失败或存储损坏时必须让人看见，不能静默回落。
+      const head = el('div', { style: 'display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;flex-wrap:wrap;' },
+        el('div.group-note', { style: 'margin:0;' },
+          view.source === 'db' ? '正在使用自定义工艺表（已保存到数据库）。'
+            : '正在使用内置工艺表。改动并保存后会成为自定义工艺表。'),
+        el('div', { style: 'display:flex;gap:8px;' },
+          el('button.btn.btn-ghost', {
+            type: 'button',
+            onclick: async () => {
+              if (!craftEditor.dirty || await confirmResetCraft()) {
+                try {
+                  const res = await api.resetCraft();
+                  craftEditor = { view: res.craft, draft: JSON.parse(JSON.stringify({ axes: res.craft.axes })), dirty: false };
+                  paintCraftEditor(box);
+                  toast('已恢复内置工艺表', { type: 'success' });
+                } catch (err) { toast(err.message || '恢复失败', { type: 'error' }); }
+              }
+            },
+          }, '恢复内置'),
+          el('button.btn.btn-primary', {
+            type: 'button',
+            onclick: () => saveCraftEditor(box),
+          }, '保存工艺表'),
+        ),
+      );
+      head.lastChild.lastChild.disabled = !craftEditor.dirty;
+      card.appendChild(head);
+
+      if (view.problems?.length) {
+        card.appendChild(el('div.craft-edit-problems', {},
+          '工艺表有问题，以下轴已回落内置：',
+          el('br'), ...view.problems.map((p) => el('div', {}, `· ${p}`))));
+      }
+
+      for (const axis of draft.axes) {
+        card.appendChild(craftAxisBlock(axis, box));
+      }
+      box.appendChild(card);
+    }
+
+    function craftAxisBlock(axis, box) {
+      const block = el('div.craft-edit-axis');
+      block.appendChild(el('div.craft-edit-head', {},
+        el('span.craft-edit-title', {}, axis.label),
+        el('span.craft-edit-where', {}, `→ ${axis.where || axis.field}`),
+      ));
+      if (axis.hint) block.appendChild(el('div.craft-edit-note', {}, axis.hint));
+      block.appendChild(el('div.craft-edit-note', {},
+        `这一轴最多 ${axis.max_options || 24} 条。默认值必须在条目里选；删掉一个正在用的取值，老会话会按新默认演绎并在抽屉里提示。`));
+
+      const list = el('div');
+      block.appendChild(list);
+
+      function paintList() {
+        clear(list);
+        const values = new Set(axis.options.map((o) => o.value));
+        for (const opt of axis.options) {
+          list.appendChild(craftOptionCard(axis, opt, values, paintList, box));
+        }
+        list.appendChild(el('button.btn.btn-ghost', {
+          type: 'button', style: 'width:100%;margin-top:2px;',
+          onclick: () => {
+            const n = axis.options.length + 1;
+            let v = `custom-${n}`;
+            const used = new Set(axis.options.map((o) => o.value));
+            while (used.has(v)) v = `custom-${++n}`;
+            const fresh = { value: v, label: '', desc: '', text: '' };
+            if (axis.axis === 'pacing') { fresh.tail = ''; fresh.branch = ''; delete fresh.text; }
+            axis.options.push(fresh);
+            markCraftDirty();
+            paintList();
+          },
+        }, '添加一条'));
+      }
+      paintList();
+      return block;
+    }
+
+    function craftOptionCard(axis, opt, values, repaint, box) {
+      const isDefault = axis.default === opt.value;
+      const item = el('div.craft-edit-item' + (isDefault ? '.is-default' : ''));
+
+      const labelInput = el('input.field', {
+        type: 'text', value: opt.label || '', placeholder: '名称（演绎页抽屉里显示）',
+        style: 'flex:1;min-width:0;',
+      });
+      labelInput.addEventListener('input', () => { opt.label = labelInput.value; markCraftDirty(); });
+
+      const defaultBtn = el('button.btn.btn-ghost', {
+        type: 'button', title: '把这个取值设为该轴的默认',
+        onclick: () => { axis.default = opt.value; markCraftDirty(); repaint(); },
+      }, isDefault ? '默认' : '设为默认');
+
+      const delBtn = el('button.btn.btn-ghost', {
+        type: 'button', title: '删除这条取值',
+        onclick: async () => {
+          if (axis.options.length <= 1) { toast('每一轴至少要留一条取值', { type: 'error' }); return; }
+          axis.options = axis.options.filter((o) => o !== opt);
+          if (axis.default === opt.value) axis.default = axis.options[0].value;
+          markCraftDirty();
+          repaint();
+        },
+      }, '删除');
+
+      item.appendChild(el('div.craft-edit-row', {},
+        el('span.craft-edit-id', {}, opt.value),
+        labelInput,
+        defaultBtn,
+        delBtn,
+      ));
+
+      const body = el('div.craft-edit-body');
+      const descInput = el('input.field', {
+        type: 'text', value: opt.desc || '', placeholder: '副标题（一句话说明这种写法的取向）',
+      });
+      descInput.addEventListener('input', () => { opt.desc = descInput.value; markCraftDirty(); });
+      body.appendChild(formLine('副标题', descInput));
+
+      if (axis.axis === 'pacing') {
+        // 推进尺度的正文分两处：尾注（影响正文）与走向（影响选项）。
+        // 拆成两个框是因为它们进的是不同的提示词位置，
+        // 作者需要能分别调——「正文敢推」和「选项敢给」不是一回事。
+        const tail = el('textarea.field', { rows: 3, placeholder: '尾注里怎么写（作用于正文）' });
+        tail.value = opt.tail || '';
+        tail.addEventListener('input', () => { opt.tail = tail.value; markCraftDirty(); });
+        body.appendChild(formLine('尾注正文', tail, '写进每一轮的尾注，决定这一拍推进多少。'));
+
+        const branch = el('textarea.field', { rows: 3, placeholder: '走向里怎么写（作用于选项）' });
+        branch.value = opt.branch || '';
+        branch.addEventListener('input', () => { opt.branch = branch.value; markCraftDirty(); });
+        body.appendChild(formLine('走向正文', branch, '写进走向 Agent 的提示词，决定选项的风险水位。'));
+      } else {
+        const text = el('textarea.field', { rows: 5, placeholder: '正文：这段文字会整段写进演绎契约（system）' });
+        text.value = opt.text || '';
+        text.addEventListener('input', () => { opt.text = text.value; markCraftDirty(); });
+        body.appendChild(formLine('正文', text,
+          axis.axis === 'preset'
+            ? '会写进 system 的「怎么写」段。世界卡的「文风」非空时以卡为准，这里不生效。'
+            : '会写进 system 的对白段。'));
+      }
+      item.appendChild(body);
+      return item;
+    }
+
+    function markCraftDirty() {
+      if (craftEditor) craftEditor.dirty = true;
+      // 顶栏保存按钮要跟着亮起来，否则改完不知道去哪保存。
+      const sec = document.getElementById('settings-craft');
+      const btn = sec?.querySelector('.btn-primary');
+      if (btn) btn.disabled = false;
+    }
+
+    function confirmResetCraft() {
+      return new Promise((resolve) => {
+        openSheet({
+          title: '放弃未保存的改动？',
+          confirmText: '放弃',
+          cancelText: '取消',
+          render(body) {
+            body.appendChild(el('div', { style: 'font-size:var(--fs-body);line-height:1.7;' },
+              '当前工艺表有未保存的改动，恢复内置会丢掉它们。'));
+          },
+          onConfirm() { resolve(true); },
+        });
+        // openSheet 没有 onCancel 回调；用户点取消或遮罩时靠 view 卸载感知不到。
+        // 这里只处理「确认」这一条路径，取消时 Promise 不 resolve 也就不会执行恢复。
+      });
+    }
+
+    async function saveCraftEditor(box) {
+      const payload = {};
+      for (const axis of craftEditor.draft.axes) {
+        payload[axis.axis] = {
+          default: axis.default,
+          options: axis.options.map((o) => {
+            const e = { value: o.value, label: o.label || '', desc: o.desc || '' };
+            if (axis.axis === 'pacing') { e.tail = o.tail || ''; e.branch = o.branch || ''; }
+            else e.text = o.text || '';
+            return e;
+          }),
+        };
+      }
+      try {
+        const res = await api.saveCraft(payload);
+        craftEditor = {
+          view: res.craft,
+          draft: JSON.parse(JSON.stringify({ axes: res.craft.axes })),
+          dirty: false,
+        };
+        paintCraftEditor(box);
+        toast('已保存。演绎页抽屉与卡级默认都会用新表', { type: 'success' });
+      } catch (err) {
+        // 400 时服务端会带 problems：逐条列出，让人知道哪一条不合法。
+        const problems = Array.isArray(err.problems) ? err.problems : [];
+        if (problems.length) {
+          toast(`保存失败：${problems[0]}`, { type: 'error' });
+          const box2 = document.querySelector('.craft-edit-problems');
+          if (box2) box2.remove();
+          const node = el('div.craft-edit-problems', {},
+            `保存失败，以下条目有问题（共 ${problems.length} 条）：`,
+            el('br'), ...problems.slice(0, 8).map((p) => el('div', {}, `· ${p}`)));
+          document.getElementById('settings-craft')?.querySelector('.group-card')?.prepend(node);
+        } else {
+          toast(err.message || '保存失败', { type: 'error' });
+        }
+      }
+    }
+
+    function contextGroup() {
+      if (!cfg) {
+        return el('div.group', {}, el('div.group-card', {},
+          el('div.li', {}, el('div.li-body', {}, el('div.li-sub', {}, '读取配置中…')))));
+      }
+      const wrap = el('div.group');
+      const ctx = cfg.runtime?.context || {};
+      const hard = ctx.hard_max_tokens ?? cfg.limits?.context_max_tokens ?? 0;
+      const soft = ctx.soft_target_tokens ?? cfg.limits?.context_soft_tokens ?? 0;
+      const windowTok = ctx.window_tokens ?? cfg.limits?.context_window_tokens ?? 0;
+      const reserve = ctx.output_reserve_tokens ?? cfg.limits?.context_output_reserve_tokens ?? 0;
+
+      wrap.appendChild(el('div', {},
+        el('div.group-title', {}, '上下文'),
+        el('div.group-card', {},
+          infoRow('模型窗口', `${fmtNumber(windowTok)} tok`,
+            `来自演绎模型${ctx.model ? `（${ctx.model}）` : ''}；预算从这里推导，不再写死各层常量`),
+          infoRow('提示词硬上限', `${fmtNumber(hard)} tok`,
+            `窗口 − 生成预留 ${fmtNumber(reserve)} tok − 安全余量；超过这一轮会被拒绝，绝不把半句话送进模型`),
+          infoRow('软目标', `${fmtNumber(soft)} tok`,
+            ctx.auto_soft
+              ? '按窗口自动取 55%；超出时先收窄易变尾部，再收窄历史'
+              : '每轮装配的目标体积（.env 指定）；超出时先收窄易变尾部，再收窄历史'),
+        ),
+      ));
+
+      const b = cfg.budget;
       if (b) {
-        wrap.appendChild(el('div.group', {},
+        wrap.appendChild(el('div', {},
           el('div.group-title', {}, '各层 token 配额'),
           el('div.group-card', {},
-            infoRow('系统层', `${fmtTokens(b.system)} tok`, '演绎契约 + 命题 + 宪章 + 世界索引'),
-            infoRow('最近原文', `${fmtTokens(b.recent)} tok`, '逐字保留的最近若干轮'),
-            infoRow('场记单', `${fmtTokens(b.scene)} tok`, '当前这一刻的世界状态，每场渲染一次'),
+            infoRow('世界规则', `${fmtTokens(b.system)} tok`, '演绎契约 + 故事方向 + 世界规则 + 世界索引 + 前史 + 主角'),
+            infoRow('场次索引', `${fmtTokens(b.archive)} tok`, '一行一场，只追加；这是长程记忆的载体'),
+            infoRow('最近场次细节', `${fmtTokens(b.archiveDetail)} tok`, '刚才那一场怎么收的'),
+            infoRow('最近原文', `${fmtTokens(b.recent)} tok`, '当前场次逐字原文的规划上限；只用于决定何时强制封场，不裁原文'),
+            infoRow('本场状态', `${fmtTokens(b.scene)} tok`, '账本 + 在场者 + 设定集候选 + 关系 + 知识边界 + 原声'),
+            infoRow('检索结果', `${fmtTokens(b.retrieval)} tok`, '模型主动查到的设定全文，当拍蒸发'),
             infoRow('本轮输入', `${fmtTokens(b.current)} tok`, '你的行动 + 本场指令 + 尾注'),
           ),
           el('div.group-note', {},
-            '提示词是从世界状态渲染出来的，不是从词条库检索出来的。四层各自独立配额，'
-            + '互不挤占；剧情推进一千轮，每层仍只占这么多。'),
+            '各层按职责比例从模型窗口推导（合计 = 软目标），记忆载体优先：'
+            + '场次索引与逐字原文占 70%。历史不会被「再摘要一次」：场次索引只追加，'
+            + '原文按场次边界收，收不下的部分先降级粒度而不是静默丢字。'),
         ));
       }
 
-      wrap.appendChild(el('div.group-note', {}, '这些是服务端默认值，可在 .env 里调整。'));
+      const d = cfg.defaults || {};
+      wrap.appendChild(el('div', {},
+        el('div.group-title', {}, '节奏'),
+        el('div.group-card', {},
+          infoRow('一致性检查', `每 ${d.continuity_every ?? 10} 轮`, `最多保留 ${d.continuity_max_applied ?? 20} 条修正`),
+          infoRow('强制封场', d.scene_every ? `每 ${d.scene_every} 轮` : '只按地点变化', `单场原文上限 ${fmtNumber(d.scene_max_tokens ?? 20000)} tok`),
+          infoRow('后台推演', '切场时触发', '推演不在场角色的行动，不按固定轮数'),
+        ),
+      ));
+      wrap.appendChild(el('div.group-note', {}, '这些是 .env 里的服务端节奏；模型与上下文窗口在上面的「模型」一节里配置。'));
       return wrap;
     }
 
@@ -595,20 +1357,36 @@ export default {
       );
     }
 
-    function effortLabel(v) {
-      return ({ low: '低', medium: '中', high: '高' })[v] || v || '—';
-    }
-
     render();
     loadServerFonts();
     scroll.addEventListener('scroll', onScroll, { passive: true });
 
     api.getConfig().then((c) => {
       cfg = c;
+      syncDraft();
       const keep = scroll.scrollTop;
       render();
       scroll.scrollTop = keep;
     }).catch(() => {});
+
+    // 工艺表与运行时配置分开加载：一个坏了不该拖垮另一个。
+    api.getCraft().then((res) => {
+      craftEditor = {
+        view: res.craft,
+        draft: JSON.parse(JSON.stringify({ axes: res.craft.axes })),
+        dirty: false,
+      };
+      const keep = scroll.scrollTop;
+      render();
+      scroll.scrollTop = keep;
+    }).catch(() => {
+      const sec = document.getElementById('settings-craft');
+      const box = sec?.querySelector('.group');
+      if (box) {
+        clear(box);
+        box.appendChild(el('div.craft-edit-problems', {}, '读取工艺表失败。请确认服务端已重启。'));
+      }
+    });
 
     return {
       unmount() {

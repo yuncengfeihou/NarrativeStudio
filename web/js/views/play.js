@@ -16,6 +16,7 @@ import {
 } from '../app.js';
 import { ui } from '../store.js';
 import { openMemoryPanel } from '../panels/memory.js';
+import { openTimelinePanel, refreshTimelinePanels } from '../panels/timeline.js';
 import { formatNarrative } from '../markdown.js';
 import { usageBar, buildRing } from '../ui-kit.js';
 
@@ -39,14 +40,20 @@ export default {
     let selectedBranch = null;
     let attachments = [];
     let memStats = null;
+    let ctxLimits = null;
+    let statusView = null;
     let lastTurnNo = 0;
     let contextMeta = null;
+    // 普通回合不会全量刷新 detail（那只在挂载/重写/回滚时做），当前轮的轮数与字数
+    // 靠 SSE 增量预支；全量刷新拿到权威统计后再清零，避免 header 停在开局数据上。
+    let pendingStats = { turnNo: 0, chars: 0 };
     let assemblerBudget = null;
     let fallbackNotified = false;
 
     /* ---------------- DOM ---------------- */
     let navTitle, navSub, scroll, msgList, branchHost, composerWrap, ctxMeterFill;
     let input, sendBtn, attachStrip, quickRow, selStrip, ringSlot, jumpBtn, fileInput;
+    let statusStrip, statusSummary, statusDetail;
 
     /* ---------------- 骨架 ---------------- */
     navTitle = el('div', {}, '加载中');
@@ -63,14 +70,32 @@ export default {
       onclick: () => openMore(),
     }, icon('more', { size: 16 }));
 
+    const timelineBtn = el('button.icon-btn', {
+      type: 'button', title: '时间线', 'aria-label': '时间线',
+      onclick: () => openTimeline(),
+    }, icon('history', { size: 16 }));
+
+    // 工艺层（文风 / 对白 / 推进）：一局只设一两次，但一旦想找就必须找得到。
+    // 曾经藏在「更多」的 13 项行动单第三项里，实测用户找不到——所以提到顶栏。
+    const craftBtn = el('button.icon-btn', {
+      type: 'button', title: '演绎工艺（文风 / 对白 / 推进）', 'aria-label': '演绎工艺',
+      onclick: () => openCraft(),
+    }, icon('palette', { size: 16 }));
+
     const nav = el('header.topbar', {},
       el('button.icon-btn.mobile-only', {
         type: 'button', 'aria-label': '目录',
         onclick: () => import('../shell.js').then((m) => m.openDrawer()),
       }, icon('sidebar', { size: 17 })),
       el('div.topbar-title', {}, navTitle, navSub),
-      el('div.topbar-actions', {}, memBtn, moreBtn),
+      el('div.topbar-actions', {}, craftBtn, timelineBtn, memBtn, moreBtn),
     );
+
+    // 场景信息条：只读展示服务端投影好的 playerView，默认收起。
+    // 账本里的心境/目标/物品/任务不进这里（见 server/memory/player-view.js）。
+    statusSummary = el('summary.status-strip-line');
+    statusDetail = el('div.status-strip-more');
+    statusStrip = el('details.status-strip', { style: 'display:none;' }, statusSummary, statusDetail);
 
     msgList = el('div.play-body', {});
     branchHost = el('div', {});
@@ -81,7 +106,7 @@ export default {
     /* ---------------- 输入区 ---------------- */
     input = el('textarea.composer-input', {
       rows: 1,
-      placeholder: '讲述你的行动，或选一个走向…',
+      placeholder: '讲述你的行动，或选一个选项…',
       enterkeyhint: 'send',
       'aria-label': '输入行动',
     });
@@ -140,7 +165,7 @@ export default {
     );
 
     const view = el('section.view.play-view', { 'data-view': 'play' },
-      nav, scroll, composerWrap, jumpBtn, fileInput,
+      nav, statusStrip, scroll, composerWrap, jumpBtn, fileInput,
     );
     root.appendChild(view);
 
@@ -162,6 +187,12 @@ export default {
     }
     hideLoading();
 
+    // 预算上限由服务端从模型窗口推导（context-plan.js），前端不再写死默认值。
+    try {
+      const cfg = await api.getConfig();
+      ctxLimits = cfg?.limits || null;
+    } catch { /* 忽略：退回会话统计里的值 */ }
+
     world = detail.world || null;
     memStats = detail.memoryStats;
     if (detail.session?.world_id) {
@@ -177,8 +208,10 @@ export default {
     paintRing();
     paintCtxMeter();
     renderTurns();
+    statusView = detail.playerView || null;
+    paintStatusBar();
 
-    document.addEventListener('sessions:changed', onSessionsChanged);
+    window.addEventListener('sessions:changed', onSessionsChanged);
 
     async function loadWorldCard() {
       if (!detail.session?.world_id) return null;
@@ -199,9 +232,10 @@ export default {
     }
 
     function updateSub() {
-      const count = detail?.session?.turn_count ?? 0;
+      const count = pendingStats.turnNo || detail?.session?.turn_count || 0;
       const turns = detail?.turns || [];
-      const chars = turns.reduce((s, t) => s + (t.kind === 'narrator' ? (t.content || '').length : 0), 0);
+      const chars = turns.reduce((s, t) => s + (t.kind === 'narrator' ? (t.content || '').length : 0), 0)
+        + pendingStats.chars;
       const uso = detail?.usage;
       const parts = [];
       if (count) parts.push(`${count} 轮`);
@@ -343,7 +377,7 @@ export default {
       if (branchChoice) {
         bubble.appendChild(el('span.branch-tag', {},
           TONE_MARK[branchChoice.tone] || '·',
-          branchChoice.title || '走向',
+          branchChoice.title || '选项',
         ));
       }
       const text = String(content || '').trim();
@@ -393,9 +427,12 @@ export default {
       removeContinue();
 
       const host = scroll.querySelector('.play-body');
+      // 玩家气泡是**乐观渲染**：先上屏，等后端确认这一拍真的落库。失败要能整条撤掉，
+      // 否则屏幕上会留下一条「我说了但没人回」的行动，而数据库里并没有它。
+      let playerNode = null;
       if (!silent && (playerText || images.length || branchChoice)) {
         const shown = playerText || (branchChoice ? branchChoice.description || branchChoice.title : '');
-        appendPlayer(shown, images, branchChoice, host);
+        playerNode = appendPlayer(shown, images, branchChoice, host);
       }
       scrollToBottom(true);
 
@@ -420,26 +457,70 @@ export default {
         finalize();
       } catch (err) {
         pending.remove();
+        // finalize() 会把 live 置空，先判断这一拍到底有没有产出正文。
+        const produced = String(live?.text || '').trim().length > 0;
         finalize();
         if (err?.name === 'AbortError') {
+          // 取消：服务端可能在落库前 abort。玩家气泡保留（用户知道自己点了停止），
+          // 但正文没有产出时要把那句话还回输入框，不然它只存在于屏幕上。
+          if (!produced && playerText) restoreAction(playerText, playerNode);
           toast('已停止生成');
         } else {
+          const evt = err?.evt || {};
+          // 服务端明确说「这一拍没有落库」→ 撤掉乐观气泡、把行动放回输入框，让用户原样重发。
+          // 这类失败（空正文 / 上游连接断了）不是用户写错了，不该让他们重打一遍。
+          if (!produced && (evt.not_persisted || evt.empty_narration || evt.retryable)) {
+            restoreAction(playerText || (branchChoice ? branchChoice.description || branchChoice.title : ''), playerNode);
+          }
           toast(err.message || '生成失败', { type: 'error', duration: 3200 });
           showError(err.message || '生成出错');
         }
       } finally {
         streaming = false;
         abortCtl = null;
+        // 取消/出错时占位行可能没被事件清掉；回合已结束，统一收尾。
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
         paintSend();
         updateSub();
         paintRing();
       }
     }
 
+    /** 把一次没有落库的行动还给输入框：撤掉乐观气泡，文本回填（图片也回填）。 */
+    function restoreAction(text, playerNode) {
+      playerNode?.remove();
+      if (text && !input.value.trim()) {
+        input.value = text;
+        input.style.height = 'auto';
+        input.style.height = `${Math.min(input.scrollHeight, 180)}px`;
+        input.focus();
+      }
+      paintSend();
+    }
+
     function handleEvent(pending) {
       let pendingGone = false;
       const dropPending = () => {
         if (!pendingGone) { pending.remove(); pendingGone = true; }
+      };
+
+      // 正文写完后，史官/走向/世界呼吸还要跑几分钟。这段窗口既没有正文增量也没有事件，
+      // 只在原地留一条「整理记忆与选项…」，避免看起来像卡死（不改协议、不加浮层）。
+      let postPending = null;
+      const showPostPending = () => {
+        if (postPending?.isConnected) return;
+        const host = scroll.querySelector('.play-body');
+        if (!host) return;
+        postPending = el('div.gen-pending', {},
+          el('span.typing-dots', {}, el('i'), el('i'), el('i')),
+          el('span', {}, '整理记忆与选项…'),
+        );
+        host.insertBefore(postPending, branchHost);
+        if (isNearBottom(scroll, 200)) scrollToBottom(false);
+      };
+      const dropPostPending = () => {
+        postPending?.remove();
+        postPending = null;
       };
 
       const ensureLive = () => {
@@ -454,7 +535,9 @@ export default {
         switch (evt.type) {
           case 'turn_start': {
             lastTurnNo = evt.turn_no || lastTurnNo + 1;
+            pendingStats = { turnNo: lastTurnNo, chars: 0 };
             fallbackNotified = false;
+            updateSub();
             const host = scroll.querySelector('.play-body');
             const mark = turnMark(lastTurnNo, Date.now());
             if (pending.parentNode) host.insertBefore(mark, pending);
@@ -470,6 +553,8 @@ export default {
           }
           case 'scene': {
             appendSceneCard(evt);
+            // 时间线面板开着时跟着刷新：新场次是它唯一的数据增长来源。
+            refreshTimelinePanels();
             break;
           }
           case 'world_tick': {
@@ -480,7 +565,7 @@ export default {
             const issues = evt.report?.issues || [];
             if (issues.length) {
               const hasBlocker = issues.some((i) => i.severity === 'blocker');
-              toast(`校勘发现 ${issues.length} 处问题${hasBlocker ? '（含阻断级）' : ''}`, { type: 'warn' });
+              toast(`一致性检查发现 ${issues.length} 处问题${hasBlocker ? '（含阻断级）' : ''}`, { type: 'warn' });
             }
             break;
           }
@@ -536,10 +621,25 @@ export default {
               toast('分段演绎不可用，已回退单发', { type: 'warn' });
             }
             break;
+          case 'narration_retry':
+            // 上游抖动自动整拍重发：不打断输入、不弹 toast 抢注意力，
+            // 只在进度行说明「正在重试」。服务器已经把这一拍的残稿清掉了。
+            if (pending?.isConnected) {
+              const label = pending.querySelector('span:last-child');
+              if (label) label.textContent = `上游中断，重试中 ${evt.attempt}/${evt.max}…`;
+            }
+            break;
           case 'narrative_done':
             if (live && evt.content) live.text = evt.content;
+            if (evt.content) {
+              pendingStats.chars = String(evt.content).length;
+              updateSub();
+            }
+            // 后处理（史官/走向/世界呼吸）可能还要几分钟：先把进度挂在原地。
+            if (live?.text?.trim()) showPostPending();
             break;
           case 'narrative_reset':
+            pendingStats.chars = 0;
             if (live) { live.text = ''; live.reasoning = ''; }
             if (live?.prose) live.prose.innerHTML = '';
             if (live?.thinkBody) live.thinkBody.textContent = '';
@@ -557,6 +657,11 @@ export default {
               paintRing();
             }
             break;
+          case 'state':
+            // 只把服务端投影好的展示字段交给状态条；完整账本不参与前端渲染。
+            statusView = evt.player_view || null;
+            paintStatusBar();
+            break;
           case 'summary': {
             // 前情提要：best-effort。成功时给一条轻提示，失败静默（下一拍会再判）。
             if (evt.state === 'end' && evt.ok) {
@@ -570,15 +675,25 @@ export default {
             break;
           }
           case 'done': {
+            dropPostPending();
             if (evt.usage && live) live.usage = evt.usage;
+            // 头部统计先用本轮的累计值兜底，随后 sessions:changed 会用服务端最新数据校正。
+            if (evt.session_usage && detail) detail.usage = evt.session_usage;
+            if (Number(evt.turn_no)) pendingStats.turnNo = Math.max(pendingStats.turnNo || 0, Number(evt.turn_no));
             finalize(evt);
             updateSub();
             paintRing();
             window.dispatchEvent(new CustomEvent('sessions:changed'));
             break;
           }
-          case 'error':
-            throw new Error(evt.message || '生成失败');
+          case 'error': {
+            dropPostPending();
+            const fail = new Error(evt.message || '生成失败');
+            // 带上原始事件：空正文这类「服务器没有落库、可以原样重发」的失败，
+            // 前端要把玩家那句话放回输入框，不能只弹一个 toast 就把它吞掉。
+            fail.evt = evt;
+            throw fail;
+          }
           default:
             break;
         }
@@ -710,12 +825,12 @@ export default {
       clear(selStrip);
       selStrip.style.display = '';
       selStrip.appendChild(icon('compass', { size: 12 }));
-      selStrip.appendChild(el('span.sel-strip-title', {}, b.title || '走向'));
+      selStrip.appendChild(el('span.sel-strip-title', {}, b.title || '选项'));
       selStrip.appendChild(el('span.spacer'));
       selStrip.appendChild(el('button.mini-btn', {
         type: 'button', onclick: () => clearSelection(),
       }, '取消'));
-      input.placeholder = '按 ↑ 确认这个走向，或先说点什么…';
+      input.placeholder = '按 ↑ 确认这个选项，或先说点什么…';
       input.focus();
       paintSend();
     }
@@ -726,7 +841,7 @@ export default {
       quickRow.querySelectorAll('.qb.is-selected').forEach((n) => n.classList.remove('is-selected'));
       selStrip.style.display = 'none';
       clear(selStrip);
-      input.placeholder = '讲述你的行动，或选一个走向…';
+      input.placeholder = '讲述你的行动，或选一个选项…';
       paintSend();
     }
 
@@ -746,7 +861,7 @@ export default {
         el('button.btn.btn-secondary', { type: 'button', onclick: () => { removeContinue(); send({ silent: true, generateBranches: true }); } },
           icon('sparkles', { size: 13 }), '接着往下演绎'),
         el('button.btn.btn-ghost', { type: 'button', onclick: () => { removeContinue(); regenerateBranches(); } },
-          icon('compass', { size: 13 }), '看看走向'),
+          icon('compass', { size: 13 }), '看看选项'),
       ));
       scrollToBottom(true);
     }
@@ -757,14 +872,14 @@ export default {
 
     async function regenerateBranches() {
       if (streaming) return toast('正在演绎中');
-      showLoading('正在设计走向…');
+      showLoading('正在设计选项…');
       try {
         const set = await api.generateBranches(sessionId);
         if (set?.branches?.length) {
           renderBranches(set);
           toast('已换一批', { type: 'success' });
         } else {
-          toast('没能生成走向', { type: 'error' });
+          toast('没能生成选项', { type: 'error' });
         }
       } catch (err) {
         toast(err.message, { type: 'error' });
@@ -795,7 +910,7 @@ export default {
         sendBtn.classList.remove('is-stop');
         clear(sendBtn);
         sendBtn.appendChild(icon('arrowUp', { size: 15, stroke: 2.2 }));
-        sendBtn.title = selectedBranch && !input.value.trim() ? '确认这个走向' : '发送';
+        sendBtn.title = selectedBranch && !input.value.trim() ? '确认这个选项' : '发送';
         sendBtn.disabled = !has;
       }
     }
@@ -817,7 +932,7 @@ export default {
         return;
       }
       if (!text && !imgs.length) {
-        toast('说点什么，或选一个走向');
+        toast('说点什么，或选一个选项');
         return;
       }
       resetInput();
@@ -901,7 +1016,7 @@ export default {
           const guidance = ta.value.trim();
           const ok = await confirmDialog({
             title: '确认重写',
-            message: `会从第 ${turnNo} 轮之前开一条新分支，当前分支标为 abandoned（历史不删）。`,
+            message: `会从第 ${turnNo} 轮之前开一条新分支，当前分支标为 已废弃（历史不删）。`,
             confirmText: '重写', destructive: true,
           });
           if (!ok) return false;
@@ -950,6 +1065,7 @@ export default {
         });
         finalize();
         detail = await api.getSession(sessionId);
+        pendingStats = { turnNo: 0, chars: 0 };
         renderTurns();
         updateSub();
         paintRing();
@@ -960,6 +1076,7 @@ export default {
       } finally {
         streaming = false;
         abortCtl = null;
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
         paintSend();
       }
     }
@@ -996,7 +1113,7 @@ export default {
       if (streaming) return toast('正在演绎中');
       const ok = await confirmDialog({
         title: `回到第 ${turnNo} 轮`,
-        message: `会从第 ${turnNo} 轮开一条新分支。当前这条线标为 abandoned，历史不删，随时可以回去看。`,
+        message: `会从第 ${turnNo} 轮开一条新分支。当前这条线标为 已废弃，历史不删，随时可以回去看。`,
         confirmText: '回滚', destructive: true,
       });
       if (!ok) return;
@@ -1004,6 +1121,7 @@ export default {
       try {
         await api.rollback(sessionId, turnNo);
         detail = await api.getSession(sessionId);
+        pendingStats = { turnNo: 0, chars: 0 };
         renderTurns();
         clearBranches();
         showContinue();
@@ -1042,6 +1160,107 @@ export default {
       }
     }
 
+    /* =====================================================================
+     * 演绎工艺（文风取向 / 对白形态 / 推进尺度）
+     *
+     * 轴的取值清单**不在前端**：一律读 GET /api/config 的 craft 段
+     * （由 server/world/craft.js 的 craftCatalog() 生成）。前端曾自己抄过一份，
+     * 结果后端加了预设、前端还显示旧选项，点旧选项被静默回退成默认——
+     * 看起来选中了、其实没生效。不要再把清单写回这里。
+     *
+     * 三个轴都落在既有通道里：preset/dialogue 只改 system，pacing 只改尾注与走向。
+     * 这里只做「选」，不做自由文本——作者的具体文风写在世界卡的 prompt.style_guide，
+     * 卡的优先级永远压过这里的预设（界面文案要让人看得出来这一点）。
+     * ===================================================================== */
+    async function loadCraftCatalog() {
+      // 不缓存：作者可能在设置页改了取值表，缓存会让抽屉继续显示旧选项
+      // （这正是 D3 那个「抄第二份清单」bug 的另一种形状）。
+      const cfg = await api.getConfig();
+      return cfg?.craft || { axes: [] };
+    }
+
+    function craftValue(key) {
+      return detail?.session?.settings?.[key];
+    }
+
+    async function openCraft() {
+      let catalog;
+      try {
+        catalog = await loadCraftCatalog();
+      } catch (err) {
+        toast(err.message || '读取工艺选项失败', { type: 'error' });
+        return null;
+      }
+      if (!catalog.axes?.length) {
+        toast('服务端没有提供工艺选项', { type: 'error' });
+        return null;
+      }
+
+      const dirty = {};
+      const sheet = openSheet({
+        title: '演绎工艺',
+        confirmText: '保存',
+        onConfirm: async () => {
+          if (!Object.keys(dirty).length) return;
+          try {
+            const updated = await api.patchSession(sessionId, { settings: dirty });
+            if (detail?.session) {
+              detail.session = updated || {
+                ...detail.session,
+                settings: { ...(detail.session.settings || {}), ...dirty },
+              };
+            }
+            toast('已更新演绎工艺（下一拍生效）', { type: 'success' });
+          } catch (err) {
+            toast(err.message || '保存失败', { type: 'error' });
+            return false;
+          }
+        },
+        render: (body) => {
+          for (const axis of catalog.axes) {
+            const cur = craftValue(axis.key);
+            const options = axis.options || [];
+            // 会话里存的值可能已被作者在设置页删掉。此时既不能高亮任何一项，
+            // 也不能假装「没设置过」——前者是空白抽屉，后者会静默改掉用户的选择。
+            // 处理方式：照「未设置」渲染默认项，并在轴上显式说明那个取值没了。
+            const known = options.some((o) => o.value === cur);
+            const effective = known ? cur : undefined;
+            const group = el('div.craft-group');
+            group.appendChild(el('div.craft-label', {}, axis.label));
+            if (axis.hint) group.appendChild(el('div.craft-hint', {}, axis.hint));
+            if (cur !== undefined && !known) {
+              group.appendChild(el('div.craft-hint.is-warn', {},
+                `本局用的取值「${cur}」已被删除，这里按默认演绎；保存后即以选中的为准。`));
+            }
+            const list = el('div.craft-list');
+            for (const opt of options) {
+              const active = effective === opt.value;
+              const btn = el('button.craft-option' + (active ? '.is-active' : ''), { type: 'button' },
+                el('span.craft-option-main', {},
+                  el('span.craft-option-label', {}, opt.label),
+                  opt.desc ? el('span.craft-option-desc', {}, opt.desc) : null,
+                  // 未显式设置任何值时，标出哪一项是默认（否则第一次打开看不出「当前」）。
+                  effective === undefined && opt.value === axis.default
+                    ? el('span.craft-option-tag', {}, '默认') : null,
+                ),
+              );
+              btn.addEventListener('click', () => {
+                dirty[axis.key] = opt.value;
+                for (const sib of list.querySelectorAll('.craft-option')) sib.classList.remove('is-active');
+                btn.classList.add('is-active');
+              });
+              list.appendChild(btn);
+            }
+            group.appendChild(list);
+            body.appendChild(group);
+          }
+          body.appendChild(el('div.craft-foot', {},
+            '要增删这些条目或改它们的正文，去「设置 → 演绎工艺」。'));
+        },
+      });
+      return sheet;
+    }
+
     async function openMore() {
       const action = await openActionSheet({
         title: detail.session?.title || '剧情',
@@ -1052,11 +1271,14 @@ export default {
             value: 'segmented',
             icon: 'sparkles',
           },
-          { label: '换一批走向', value: 'branches', icon: 'compass' },
+          { label: '演绎工艺（文风 / 对白 / 推进）', value: 'craft', icon: 'palette' },
+          { label: statusBarLabel(), value: 'statusbar', icon: 'layers' },
+          { label: '换一批选项', value: 'branches', icon: 'compass' },
           { label: '搜索本段剧情', value: 'search', icon: 'search' },
           { label: '回忆旧事', value: 'recall', icon: 'rewind' },
+          { label: '时间线', value: 'timeline', icon: 'history' },
           { label: '记忆与上下文', value: 'memory', icon: 'memory' },
-          { label: '跑一次校勘', value: 'audit', icon: 'check' },
+          { label: '跑一次一致性检查', value: 'audit', icon: 'check' },
           { label: '导出', value: 'export', icon: 'download' },
           { label: '世界卡', value: 'world', icon: 'book' },
           { label: '删除这段剧情', value: 'delete', icon: 'trash', destructive: true },
@@ -1064,15 +1286,18 @@ export default {
       });
       if (action === 'continue') send({ silent: true, generateBranches: true });
       else if (action === 'segmented') toggleSegmentation();
+      else if (action === 'craft') openCraft();
+      else if (action === 'statusbar') toggleStatusBar();
       else if (action === 'branches') regenerateBranches();
       else if (action === 'search') openSearch();
       else if (action === 'recall') openRecall();
+      else if (action === 'timeline') openTimeline();
       else if (action === 'memory') openMemory();
       else if (action === 'audit') {
         try {
           const report = await api.audit(sessionId);
           const issues = report.issues || [];
-          if (!issues.length) toast('校勘通过：没有发现矛盾');
+          if (!issues.length) toast('一致性检查通过：没有发现矛盾');
           else {
             toast(`发现 ${issues.length} 处问题，详见记忆面板`);
             openMemory();
@@ -1168,7 +1393,7 @@ export default {
      * 上下文 / 记忆
      * ===================================================================== */
     function paintRing() {
-      const max = Number(memStats?.context_max) || 200000;
+      const max = Number(memStats?.context_max) || Number(ctxLimits?.context_max_tokens) || 0;
       const used = Number(memStats?.context_tokens) || 0;
       const ratio = max > 0 ? Math.min(1, used / max) : 0;
       clear(ringSlot);
@@ -1182,13 +1407,70 @@ export default {
     }
 
     function paintCtxMeter() {
-      const soft = Number(memStats?.context_soft) || 52000;
+      const soft = Number(memStats?.context_soft) || Number(ctxLimits?.context_soft_tokens) || 0;
       const used = assemblerBudget?.total ?? (Number(memStats?.context_tokens) || 0);
       const ratio = soft > 0 ? Math.min(1, used / soft) : 0;
       ctxMeterFill.style.width = `${(ratio * 100).toFixed(1)}%`;
       ctxMeterFill.style.background = ratio > 0.9 ? 'var(--warn)' : 'var(--accent)';
       const val = composerWrap.querySelector('.ctx-meter-val');
-      if (val) val.textContent = `${fmtTokens(used)} / ${fmtTokens(soft)}`;
+      if (val) val.textContent = soft > 0 ? `${fmtTokens(used)} / ${fmtTokens(soft)}` : fmtTokens(used);
+    }
+
+    /* ---------------------------------------------------------------------
+     * 场景信息条
+     *
+     * 数据来源只有 playerView（服务端 player-view.js 白名单投影）。
+     * 要加展示字段：先改投影并把字段登记进 docs/CONTRACTS.md，再动这里。
+     * ------------------------------------------------------------------- */
+    function statusBarOff() {
+      return detail?.session?.settings?.status_bar === 'off';
+    }
+
+    function statusBarLabel() {
+      return statusBarOff() ? '场景信息条：已关' : '场景信息条：已开';
+    }
+
+    async function toggleStatusBar() {
+      const next = statusBarOff() ? 'on' : 'off';
+      try {
+        const updated = await api.patchSession(sessionId, { settings: { status_bar: next } });
+        if (detail?.session) {
+          detail.session = updated || {
+            ...detail.session,
+            settings: { ...(detail.session.settings || {}), status_bar: next },
+          };
+        }
+        paintStatusBar();
+        toast(next === 'on' ? '已显示场景信息条' : '已收起场景信息条', { type: 'success' });
+      } catch (err) {
+        toast(err.message || '切换失败', { type: 'error' });
+      }
+    }
+
+    function paintStatusBar() {
+      const view = statusView;
+      const line = view ? [view.time, view.place, view.weather].filter(Boolean) : [];
+      const people = view?.present || [];
+      const show = (line.length > 0 || people.length > 0) && !statusBarOff();
+      statusStrip.style.display = show ? '' : 'none';
+      if (!show) return;
+
+      clear(statusSummary);
+      if (line.length) {
+        line.forEach((text, i) => {
+          if (i) statusSummary.appendChild(el('span.status-strip-sep', {}, '·'));
+          statusSummary.appendChild(el('span', {}, text));
+        });
+      } else {
+        statusSummary.appendChild(el('span', {}, `在场 ${people.length} 人`));
+      }
+      if (people.length) statusSummary.appendChild(el('span.status-strip-caret', {}, '▾'));
+
+      clear(statusDetail);
+      if (people.length) {
+        statusDetail.appendChild(el('span.status-strip-key', {}, '在场'));
+        statusDetail.appendChild(el('span.status-strip-people', {}, people.join('、')));
+      }
     }
 
     function openMemory() {
@@ -1202,17 +1484,29 @@ export default {
       });
     }
 
+    function openTimeline() {
+      // 跳轮次前先收起面板：面板是整屏浮层，留着它玩家看不到自己跳到了哪里。
+      // openTimelinePanel 是 async 的，所以这里拿 promise，点击时再取真正的 sheetApi。
+      const pending = openTimelinePanel(sessionId, {
+        card: detail?.card || null,
+        onJump: async (turnNo) => {
+          (await pending)?.close?.();
+          jumpToTurn(turnNo);
+        },
+      });
+    }
+
     /* =====================================================================
-     * 场记单 / 切场 / 世界呼吸 / 回忆
+     * 本场状态 / 切场 / 后台推演 / 回忆
      *
      * 这四个东西是 v4 的「世界在呼吸」的可视化：
-     *   - 场记单：这一刻世界的既定事实（引擎据此接续）
+     *   - 本场状态：这一刻世界的既定事实（引擎据此接续）
      *   - 切场卡片：一场戏结束时发生了什么变化
-     *   - 世界呼吸：玩家看不见的地方，人物按自己的私心动了
+     *   - 后台推演：玩家看不见的地方，人物按自己的私心动了
      *   - 回忆：按需去原文里找旧事，带出处
      * ===================================================================== */
 
-    /** 在场记单位置展示本轮的场记单（可折叠）。 */
+    /** 在本场状态位置展示本轮的本场状态（可折叠）。 */
     function showSceneSheet(text) {
       let host = scroll.querySelector('.scene-sheet-slot');
       if (!host) {
@@ -1222,7 +1516,7 @@ export default {
       }
       clear(host);
       const box = el('details.scene-sheet', {},
-        el('summary', {}, '本场场记单'),
+        el('summary', {}, '本场本场状态'),
         el('pre.scene-sheet-text', {}, text),
       );
       host.appendChild(box);
@@ -1232,18 +1526,24 @@ export default {
     function appendSceneCard(evt) {
       const body = scroll.querySelector('.play-body');
       if (!body) return;
+      // 服务端发的是 {type:'scene', scene:{...}}；早期这里按扁平字段读过，
+      // 于是场次 id 与轮次范围永远是空串。两种形状都认，避免再错一次。
+      const s = evt.scene || evt;
+      const range = (s.turn_from && s.turn_to) ? `第 ${s.turn_from}-${s.turn_to} 轮` : '';
+      const meta = [s.when_label, s.place].filter(Boolean).join(' · ');
       const card = el('div.scene-card', {},
         el('div.scene-card-head', {},
-          el('span.scene-card-id', {}, evt.scene_id || ''),
-          el('span.scene-card-range', {}, `第 ${evt.turn_from}-${evt.turn_to} 轮`),
+          el('span.scene-card-id', {}, s.scene_id || ''),
+          el('span.scene-card-range', {}, range),
         ),
-        evt.question ? el('div.scene-card-q', {}, `本场在问：${evt.question}`) : null,
-        evt.outcome ? el('div.scene-card-outcome', {}, evt.outcome) : null,
+        meta ? el('div.scene-card-meta', {}, meta) : null,
+        s.question ? el('div.scene-card-q', {}, `本场在问：${s.question}`) : null,
+        s.outcome ? el('div.scene-card-outcome', {}, s.outcome) : null,
       );
       body.appendChild(card);
     }
 
-    /** 世界呼吸：幕后事件以流言形式出现，不直接告诉玩家「发生了什么」。 */
+    /** 后台推演：幕后事件以流言形式出现，不直接告诉玩家「发生了什么」。 */
     function appendWorldTick(events) {
       const body = scroll.querySelector('.play-body');
       if (!body) return;
@@ -1328,6 +1628,7 @@ export default {
         });
         finalize();
         detail = await api.getSession(sessionId);
+        pendingStats = { turnNo: 0, chars: 0 };
         updateSub();
       } catch (err) {
         pending.remove();
@@ -1336,6 +1637,7 @@ export default {
       } finally {
         streaming = false;
         abortCtl = null;
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
         paintSend();
       }
     }
@@ -1343,6 +1645,10 @@ export default {
     function onSessionsChanged() {
       api.getSession(sessionId).then((d) => {
         detail = d;
+        statusView = d.playerView || null;
+        // 服务端统计已经是权威值，增量预支的当前轮清零，避免重复计数。
+        pendingStats = { turnNo: 0, chars: 0 };
+        paintStatusBar();
         updateSub();
       }).catch(() => {});
     }
@@ -1353,7 +1659,7 @@ export default {
     return {
       unmount() {
         abortCtl?.abort();
-        document.removeEventListener('sessions:changed', onSessionsChanged);
+        window.removeEventListener('sessions:changed', onSessionsChanged);
         document.title = '叙事台';
       },
     };

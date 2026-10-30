@@ -7,16 +7,23 @@
 import { Router } from 'express';
 import { config } from '../config.js';
 import {
-  auditSession, canonizeSession, createSessionWithSettings, forkSessionSafe, getMemoryStats,
-  getSessionSnapshot, recallSession, runTurn,
+  EFFORTS, getEffectiveConfig, resetRuntimeConfig, resolveAgent, saveRuntimeConfig,
+} from '../model-registry.js';
+import { currentPlan } from '../memory/context-plan.js';
+import {
+  auditSession, canonizeSession, checkoutBranchSafe, createSessionWithSettings, forkSessionSafe,
+  getMemoryStats, getSessionSnapshot, recallSession, runTurn,
 } from '../agents/orchestrator.js';
 import {
-  addAssertion, addNote, deleteNote, deleteSession, deleteVoice, getAssertions,
-  getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
+  addAssertion, addNote, countVisibleTurns, deleteNote, deleteSession, deleteVoice, getAssertions,
+  getBranch, getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
   getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
+  countPatches, patchKindCounts, countVoices,
   retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
   updateTurnContent,
 } from '../memory/store.js';
+import { recallHistory } from '../memory/recall-history.js';
+import { craftCatalog, normalizeCraftSettings } from '../world/craft.js';
 
 export const sessionsRouter = Router();
 
@@ -25,29 +32,64 @@ function intOr(v, fallback) {
   return Number.isFinite(n) ? Math.trunc(n) : fallback;
 }
 
+/** 生效配置视图 + 预算规划：窗口是硬事实，硬上限/软目标/各层配额从它推导。 */
+function runtimeWithPlan() {
+  const runtime = getEffectiveConfig();
+  const plan = currentPlan();
+  return {
+    ...runtime,
+    context: {
+      ...runtime.context,
+      hard_max_tokens: plan.hardMax,
+      soft_target_tokens: plan.softMax,
+      auto_soft: plan.autoSoft,
+      layers: { ...plan.layers },
+      shares: { ...plan.shares },
+    },
+  };
+}
+
 /* ------------------------------ 配置 ------------------------------ */
 
+/**
+ * GET /api/config
+ * 旧字段（models/defaults/limits/budget/narration）保持原形状与含义，值改为「生效值」：
+ * 未保存运行期配置时与 .env 逐项一致；保存后无需重启即反映 DB 绑定。
+ * `runtime` 是模型配置层的完整视图（服务商 / 模型 / Agent 绑定，apiKey 只给掩码）。
+ */
 sessionsRouter.get('/config', (req, res) => {
+  const narrator = resolveAgent('narrator');
+  const archivist = resolveAgent('archivist');
+  const branch = resolveAgent('branch');
+  const plan = currentPlan();
   res.json({
     models: {
-      default: config.upstream.model,
-      reasoning_efforts: ['low', 'medium', 'high'],
+      default: narrator.model,
+      reasoning_efforts: [...EFFORTS],
     },
     defaults: {
-      narrator_effort: config.agents.narrator.reasoningEffort,
-      archivist_effort: config.agents.archivist.reasoningEffort,
-      branch_effort: config.agents.branch.reasoningEffort,
-      recent_raw_turns: config.context.recentRawTurns,
+      narrator_effort: narrator.effort ?? config.agents.narrator.reasoningEffort,
+      archivist_effort: archivist.effort ?? config.agents.archivist.reasoningEffort,
+      branch_effort: branch.effort ?? config.agents.branch.reasoningEffort,
+      archive_budget: plan.layers.archive,
+      archive_detail_budget: plan.layers.archiveDetail,
+      scene_every: config.context.sceneEvery,
+      scene_max_tokens: config.context.sceneMaxTokens,
       continuity_every: config.context.continuityEvery,
       continuity_max_applied: config.context.continuityMaxApplied,
       world_tick_every: config.context.worldTickEvery,
     },
     limits: {
-      context_max_tokens: config.context.maxTokens,
-      context_soft_tokens: config.context.softTokens,
-      narrator_max_tokens: config.agents.narrator.maxTokens,
+      // 提示词硬上限（窗口 − 生成预留 − 安全余量）；窗口本身单独给出。
+      context_max_tokens: plan.hardMax,
+      context_soft_tokens: plan.softMax,
+      context_window_tokens: plan.window,
+      context_output_reserve_tokens: plan.outputReserve,
+      narrator_max_tokens: narrator.maxTokens,
     },
-    budget: config.context.layerBudget,
+    // 各层配额：由窗口推导（不是 env 常量）。比例见 context-plan.js。
+    budget: plan.layers,
+    budget_shares: plan.shares,
     narration: {
       default_mode: config.narration.mode,
       max_rounds: config.narration.maxRounds,
@@ -55,7 +97,34 @@ sessionsRouter.get('/config', (req, res) => {
       tool_history_tokens: config.narration.toolHistoryTokens,
       tool_result_max_tokens: config.narration.toolResultMaxTokens,
     },
+    // 工艺层的轴与取值由 craft.js 独家提供：前端不再自带一份选项清单，
+    // 加/删预设只改后端一处（见 AGENTS.md §11.8）。
+    craft: craftCatalog(),
+    runtime: runtimeWithPlan(),
   });
+});
+
+/** PUT /api/config —— 全量保存运行期模型配置（立即生效，不需要重启）。 */
+sessionsRouter.put('/config', (req, res) => {
+  try {
+    saveRuntimeConfig(req.body || {});
+    res.json({ ok: true, runtime: runtimeWithPlan() });
+  } catch (err) {
+    const status = err?.status === 400 ? 400 : 500;
+    if (status === 500) console.warn(`[config] 保存失败：${err?.message || err}`);
+    res.status(status).json({ error: { message: err?.message || String(err) } });
+  }
+});
+
+/** DELETE /api/config —— 删除运行期配置，回到 .env 默认（立即生效）。 */
+sessionsRouter.delete('/config', (req, res) => {
+  try {
+    resetRuntimeConfig();
+    res.json({ ok: true, runtime: runtimeWithPlan() });
+  } catch (err) {
+    console.warn(`[config] 重置失败：${err?.message || err}`);
+    res.status(500).json({ error: { message: err?.message || String(err) } });
+  }
 });
 
 /* ------------------------------ 会话 ------------------------------ */
@@ -71,17 +140,26 @@ sessionsRouter.post('/sessions', (req, res) => {
   const world = wid ? getWorld(wid) : null;
   if (wid && !world) return res.status(404).json({ error: { message: 'world not found' } });
   const card = world?.card || {};
+  const cap = currentPlan().hardMax;
+  const sessionSettings = {
+    title: title || card.title || '未命名剧情',
+    narrator_effort: 'high',
+    context_max_tokens: cap,
+    style_tags: card.genre || [],
+    ...(settings || {}),
+  };
+  // 工艺层取值归一：非法值不静默落库（否则改回默认时旧值会一直躺在 settings 里）。
+  Object.assign(sessionSettings, normalizeCraftSettings(sessionSettings, { fill: true }));
+  // 会话级上限只能是模型窗口内的一次收窄，不能超过 narrator 绑定模型的 contextWindow。
+  const requestedMax = Number(sessionSettings.context_max_tokens);
+  sessionSettings.context_max_tokens = Number.isFinite(requestedMax) && requestedMax > 0
+    ? Math.min(requestedMax, cap)
+    : cap;
   const session = createSessionWithSettings({
     title: title || card.title || '未命名剧情',
     worldId: wid,
     anchorId: anchor_id || null,
-    settings: {
-      title: title || card.title || '未命名剧情',
-      narrator_effort: 'high',
-      context_max_tokens: config.context.maxTokens,
-      style_tags: card.genre || [],
-      ...(settings || {}),
-    },
+    settings: sessionSettings,
   });
   res.status(201).json(session);
 });
@@ -100,6 +178,7 @@ sessionsRouter.patch('/sessions/:id', (req, res) => {
     const cur = getSession(req.params.id);
     patch.settings = { ...(cur?.settings || {}), scene_directive: String(scene_directive || '') };
   }
+  if (patch.settings) patch.settings = normalizeCraftSettings(patch.settings);
   const session = updateSession(req.params.id, patch);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
   res.json(session);
@@ -308,7 +387,36 @@ sessionsRouter.post('/sessions/:id/rollback', async (req, res) => {
 sessionsRouter.get('/sessions/:id/branches', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  res.json({ branches: listBranches(session.id), current: session.branch_id || 'main' });
+  const current = session.branch_id || 'main';
+  const branches = listBranches(session.id).map((b) => ({
+    ...b,
+    // 每条线各能看见多少拍：fork 之后各线长度不同，只有一条 turn_count 是错的。
+    turn_count: countVisibleTurns(session.id, b.branch_id),
+    is_current: b.branch_id === current,
+  }));
+  res.json({ branches, current, turn_count: countVisibleTurns(session.id, current) });
+});
+
+/**
+ * 切回一条已有的世界线（不新建分支）。
+ *
+ * 界面一直写着「旧线随时可以回去看」，在此之前没有任何入口真的切回去——
+ * `setSessionBranch` 只被 `forkSession` 调过。这是那条文案的实现（D33）。
+ */
+sessionsRouter.post('/sessions/:id/checkout', async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const branchId = String(req.body?.branch_id || '').trim();
+  if (!branchId) return res.status(400).json({ error: { message: 'branch_id is required' } });
+  if (!getBranch(session.id, branchId)) {
+    return res.status(404).json({ error: { message: `branch not found: ${branchId}` } });
+  }
+  try {
+    const result = await checkoutBranchSafe({ sessionId: session.id, branchId });
+    res.json({ ...result, memoryStats: getMemoryStats(session.id) });
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
 });
 
 /** 把当前世界线定稿为一张新世界卡（显式操作，不改动旧会话）。 */
@@ -344,6 +452,26 @@ sessionsRouter.post('/sessions/:id/recall', async (req, res) => {
   try {
     const result = await recallSession({ sessionId: session.id, question });
     res.json(result);
+  } catch (err) {
+    res.status(500).json({ error: { message: err.message } });
+  }
+});
+
+sessionsRouter.post('/sessions/:id/recall-history', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const query = String(req.body?.query || '').trim();
+  if (!query) return res.status(400).json({ error: { message: 'query is required' } });
+  try {
+    const out = recallHistory({
+      sessionId: session.id,
+      branchId: session.branch_id || 'main',
+      atTurn: req.body?.at_turn != null ? intOr(req.body.at_turn, getMaxTurnNo(session.id)) : getMaxTurnNo(session.id),
+      query,
+      limit: req.body?.limit,
+      kinds: Array.isArray(req.body?.kinds) ? req.body.kinds : undefined,
+    });
+    res.json({ query: out.meta.query, hits: out.hits, text: out.text, meta: out.meta });
   } catch (err) {
     res.status(500).json({ error: { message: err.message } });
   }
@@ -455,7 +583,11 @@ sessionsRouter.get('/sessions/:id/world-state', (req, res) => {
 sessionsRouter.get('/sessions/:id/voices', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
-  res.json({ voices: getVoices(session.id, { branchId: session.branch_id || 'main', limit: 100 }) });
+  const branchId = session.branch_id || 'main';
+  // limit 可调（默认 100、上限 500），并回 total：面板要能说「共 N 条，显示最近 M 条」，
+  // 而不是在 234 条样本上显示 100 却看不出被截断。
+  const limit = Math.max(1, Math.min(500, intOr(req.query.limit, 100)));
+  res.json({ voices: getVoices(session.id, { branchId, limit }), total: countVoices(session.id, { branchId }) });
 });
 
 sessionsRouter.post('/sessions/:id/voices/:voiceId/pin', (req, res) => {
@@ -475,12 +607,20 @@ sessionsRouter.delete('/sessions/:id/voices/:voiceId', (req, res) => {
 sessionsRouter.get('/sessions/:id/patches', (req, res) => {
   const session = getSession(req.params.id);
   if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const branchId = session.branch_id || 'main';
+  const status = req.query.status ? String(req.query.status) : null;
+  const kind = req.query.kind ? String(req.query.kind) : null;
+  const limit = Math.max(1, Math.min(500, intOr(req.query.limit, 100)));
+  // total / counts 让面板能说「这一类共 N 条，显示最近 M 条」，
+  // 而不是把 209 条待确认和 3 条矛盾混在一起静默截断到 100。
+  // open_total / open_counts 是「还没处置的」计数：总览卡的待处理数必须用它，
+  // 从前端拿到的这一页列表本地过滤会漏（实测报 22、实际 133）。
   res.json({
-    patches: listPatches(session.id, {
-      branchId: session.branch_id || 'main',
-      status: req.query.status ? String(req.query.status) : null,
-      limit: 100,
-    }),
+    patches: listPatches(session.id, { branchId, status, kind, limit }),
+    total: countPatches(session.id, { branchId, status, kind }),
+    counts: patchKindCounts(session.id, { branchId, status }),
+    open_total: countPatches(session.id, { branchId, status: 'open', kind }),
+    open_counts: patchKindCounts(session.id, { branchId, status: 'open' }),
   });
 });
 

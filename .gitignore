@@ -29,6 +29,7 @@ _work/real-10turn-report.json
 
 # 第三方参考实现（仅本地研究，不随仓库分发）
 /Liyuan-1.6.4/
+/shujuku/
 
 # 内部开发文档与素材（不入公开仓库）
 /AGENTS.md
@@ -38,3 +39,10 @@ _work/real-10turn-report.json
 
 # 内部脚本说明
 /_work/README.md
+
+# 个人工具目录与临时探针输出（不入库）
+/.soloent/
+/_work/tmp-*.json
+
+/_work/tmp-realrun-*.jsonl
+/_work/tmp-longrun-*.jsonl

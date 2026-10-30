@@ -111,19 +111,22 @@ class SSEDecoder {
 // 底层请求封装
 // ============================================================
 
-/** 构造一个携带 status 的 Error */
+/** 构造一个携带 status 的 Error；服务端 422 的阻断项挂在 err.issues 上供表单展示 */
 async function makeError(res) {
   let message = `HTTP ${res.status}${res.statusText ? ' ' + res.statusText : ''}`;
+  let issues = null;
   try {
     const ct = res.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
       const data = await res.json();
       if (data && data.error && data.error.message) message = data.error.message;
       else if (data && typeof data.message === 'string') message = data.message;
+      if (data && data.error && Array.isArray(data.error.issues)) issues = data.error.issues;
     }
   } catch { /* 非 JSON 响应，保留默认消息 */ }
   const err = new Error(message);
   err.status = res.status;
+  if (issues) err.issues = issues;
   return err;
 }
 
@@ -173,7 +176,12 @@ async function runStream(path, body, handlers = {}) {
   const handle = (evt) => {
     if (!evt) return;
     if (evt.type === 'error') {
-      throw new Error(evt.message || '服务端返回错误事件');
+      // 把原始事件挂在错误上：`not_persisted` / `empty_narration` / `retryable` 这几个
+      // 字段决定调用方能不能把这一拍安全地重发（服务器没落库 vs 落了半拍）。
+      // 只留一句 message 的话，界面层只能一律当「失败」，无法区分。
+      const fail = new Error(evt.message || '服务端返回错误事件');
+      fail.evt = evt;
+      throw fail;
     }
     if (evt.type === 'done') final = evt;
     else if (final == null || final.type !== 'done') final = evt;
@@ -203,9 +211,39 @@ export const api = {
     return request('/api/config', { signal });
   },
 
+  /**
+   * PUT /api/config -> { ok, runtime }
+   * 体：{ providers, models, agents }；apiKey 省略或 '***' 表示保留已保存的密钥，'' 表示清除。
+   */
+  saveConfig(body, signal) {
+    return request('/api/config', { method: 'PUT', body, signal });
+  },
+
+  /** DELETE /api/config -> { ok, runtime }（删除运行期配置，回到 .env 默认） */
+  resetConfig(signal) {
+    return request('/api/config', { method: 'DELETE', signal });
+  },
+
   /** GET /api/fonts -> { fonts: string[], source }（服务端本机字体，浏览器 API 的兜底） */
   getFonts(signal) {
     return request('/api/fonts', { signal });
+  },
+
+  /* ---------------- 演绎工艺（取值表本身，可增删改） ---------------- */
+
+  /** GET /api/craft -> { craft, catalog }（craft 带每条正文，编辑器用） */
+  getCraft(signal) {
+    return request('/api/craft', { signal });
+  },
+
+  /** PUT /api/craft  body:{preset:{default,options[]},dialogue:…,pacing:…}；空体 = 恢复内置 */
+  saveCraft(body, signal) {
+    return request('/api/craft', { method: 'PUT', body, signal });
+  },
+
+  /** DELETE /api/craft -> 回到内置表 */
+  resetCraft(signal) {
+    return request('/api/craft', { method: 'DELETE', signal });
   },
 
   /* ---------------- 世界卡 ---------------- */
@@ -218,6 +256,11 @@ export const api = {
   /** GET /api/worlds/:id -> {…world, codex, sessions} */
   getWorld(id, signal) {
     return request(`/api/worlds/${encodeURIComponent(id)}`, { signal });
+  },
+
+  /** GET /api/worlds/:id/lint -> {issues, counts}（只读内容体检，blocker 会拦保存） */
+  getWorldLint(id, signal) {
+    return request(`/api/worlds/${encodeURIComponent(id)}/lint`, { signal });
   },
 
   /** POST /api/worlds  body:{id?, title?, card, tags?, cover_hue?} */
@@ -244,9 +287,9 @@ export const api = {
     return fetch(`/api/worlds/${encodeURIComponent(id)}/export`, { signal }).then((r) => r.text());
   },
 
-  /** POST /api/worlds/:id/codex/:codexId/pin  body:{pinned} */
-  pinCodex(worldId, codexId, pinned, signal) {
-    return request(`/api/worlds/${encodeURIComponent(worldId)}/codex/${encodeURIComponent(codexId)}/pin`,
+  /** POST /api/worlds/:id/entities/:entityId/pin  body:{pinned}（v5：person 与事实实体共用一套钉选） */
+  setEntityPinned(worldId, entityId, pinned, signal) {
+    return request(`/api/worlds/${encodeURIComponent(worldId)}/entities/${encodeURIComponent(entityId)}/pin`,
       { method: 'POST', body: { pinned }, signal });
   },
 
@@ -279,7 +322,8 @@ export const api = {
     return request('/api/sessions', { method: 'POST', body, signal });
   },
 
-  /** GET /api/sessions/:id -> {session, world, turns, state, usage, memoryStats} */
+  /** GET /api/sessions/:id -> {session, card, world, turns, state, playerView, usage, memoryStats}
+   *  state 是完整账本（导出/排查用）；展示层只读 playerView。 */
   getSession(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}`, { signal });
   },
@@ -301,7 +345,7 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/world-state`, { signal });
   },
 
-  /** 把当前世界线定稿为一张新世界卡（显式操作） */
+  /** 把当前世界线存为一张新世界卡（显式操作） */
   canonizeSession(id, body = {}, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/canonize`, { method: 'POST', body, signal });
   },
@@ -362,21 +406,32 @@ export const api = {
   deleteVoice(id, voiceId, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/voices/${voiceId}`, { method: 'DELETE', signal });
   },
+  /** params: { status?, kind?, limit? }；响应同时给 total / counts（按 kind 分组）。 */
   getPatches(id, params = {}, signal) {
-    const qs = params.status ? `?status=${encodeURIComponent(params.status)}` : '';
-    return request(`/api/sessions/${encodeURIComponent(id)}/patches${qs}`, { signal });
+    const qs = new URLSearchParams();
+    if (params.status) qs.set('status', params.status);
+    if (params.kind) qs.set('kind', params.kind);
+    if (params.limit) qs.set('limit', String(params.limit));
+    const q = qs.toString();
+    return request(`/api/sessions/${encodeURIComponent(id)}/patches${q ? `?${q}` : ''}`, { signal });
   },
   resolvePatch(id, patchId, status, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/patches/${patchId}/resolve`,
       { method: 'POST', body: { status }, signal });
   },
 
-  /* ---------------- 分支 / 校勘 / 回忆 ---------------- */
+  /* ---------------- 分支 / 一致性检查 / 回忆 ---------------- */
 
   getBranches(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/branches`, { signal });
   },
-  /** POST /api/sessions/:id/audit -> 立即跑一次校勘 */
+  /** POST /api/sessions/:id/checkout body:{branch_id} -> 切到另一条已有世界线（不新建分支） */
+  checkoutBranch(id, branchId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/checkout`, {
+      method: 'POST', body: { branch_id: branchId }, signal,
+    });
+  },
+  /** POST /api/sessions/:id/audit -> 立即跑一次一致性检查 */
   audit(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/audit`, { method: 'POST', signal });
   },

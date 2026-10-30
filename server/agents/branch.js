@@ -2,12 +2,11 @@
  * server/agents/branch.js — 剧情分支 Agent
  *
  * 输入：世界卡、当前状态、最近文本、在场人物、当前幕
- * 输出：3-4 条可执行、有赌注、有分歧的走向
+ * 输出：3-4 条可执行、有分歧的走向（至少一条带赌注，其余可为日常/关系/推时间）
  *
  * 解析容错链：整体 JSON → 正则提取 {...} → 打捞 branches 数组 → 3 条通用兜底。
  * LLM 调用失败同样降级，绝不阻断回合。
  */
-import { config } from '../config.js';
 import { chat } from '../llm.js';
 import { branchSystemPrompt, branchUserPrompt, BRANCH_TONES } from '../prompts/branch.js';
 
@@ -157,13 +156,12 @@ function parseBranchPayload(content) {
  * @returns {Promise<{branches, scene_summary, usage}>}
  */
 export async function runBranchAgent({
-  world, state, recentNarrative, present, sceneSheet, options = {}, signal,
+  world, state, recentNarrative, present, sceneSheet, craft = null, options = {}, signal,
 } = {}) {
-  const cfg = config.agents.branch;
   const sceneSummary = summarizeScene(state);
 
   const messages = [
-    { role: 'system', content: branchSystemPrompt(world) },
+    { role: 'system', content: branchSystemPrompt(world, { pacing: craft?.pacingBranch || null }) },
     {
       role: 'user',
       content: branchUserPrompt({
@@ -176,11 +174,12 @@ export async function runBranchAgent({
   let usage = null;
   try {
     const res = await chat({
+      agent: 'branch',
       messages,
-      temperature: options.temperature ?? cfg.temperature,
-      maxTokens: options.maxTokens ?? cfg.maxTokens,
-      reasoningEffort: options.reasoningEffort ?? cfg.reasoningEffort,
-      model: options.model ?? cfg.model ?? undefined,
+      temperature: options.temperature,
+      maxTokens: options.maxTokens,
+      reasoningEffort: options.reasoningEffort,
+      model: options.model,
       responseFormat: { type: 'json_object' },
       signal,
     });

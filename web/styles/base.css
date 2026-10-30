@@ -3,6 +3,7 @@
  *
  * 只有 tokens.css 的变量，没有硬编码颜色。
  * 层次 = 白面 + hairline + 一层浅阴影；交互尺寸按手指设计。
+ * 交互动效统一弹簧曲线：按压微缩放、开关弹簧位移（见 tokens.css）。
  * ========================================================================= */
 
 *, *::before, *::after { box-sizing: border-box; }
@@ -129,7 +130,7 @@ code, kbd, pre { font-family: var(--font-mono); }
 .page-head .eyebrow { margin-bottom: 8px; }
 
 /* =========================================================================
- * 按钮
+ * 按钮 — 朱砂主钮保留釉面渐变；按压统一微缩放
  * ========================================================================= */
 .btn {
   display: inline-flex;
@@ -149,7 +150,7 @@ code, kbd, pre { font-family: var(--font-mono); }
     transform var(--dur-fast) var(--ease), box-shadow var(--dur) var(--ease);
   user-select: none;
 }
-.btn:active:not(:disabled) { transform: scale(0.98); }
+.btn:active:not(:disabled) { transform: scale(0.97); }
 .btn:disabled { opacity: 0.45; pointer-events: none; }
 .btn.is-dirty::after {
   content: "";
@@ -211,7 +212,7 @@ code, kbd, pre { font-family: var(--font-mono); }
     transform var(--dur-fast) var(--ease);
 }
 .icon-btn:hover { background: var(--paper-sunken); color: var(--ink); }
-.icon-btn:active { transform: scale(0.94); }
+.icon-btn:active { transform: scale(0.92); }
 .icon-btn.is-active { background: var(--accent-soft); color: var(--accent); }
 .icon-btn.is-sm { width: 24px; height: 24px; }
 
@@ -229,10 +230,10 @@ code, kbd, pre { font-family: var(--font-mono); }
     transform var(--dur-fast) var(--ease);
 }
 .btn-icon:hover { background: var(--paper-sunken); color: var(--ink); }
-.btn-icon:active { transform: scale(0.92); }
+.btn-icon:active { transform: scale(0.9); }
 
 /* =========================================================================
- * 表单
+ * 表单 — 白瓷描边输入，聚焦换朱砂光环
  * ========================================================================= */
 .field {
   width: 100%;
@@ -254,6 +255,9 @@ code, kbd, pre { font-family: var(--font-mono); }
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 9%, transparent);
 }
 textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
+/* 暗色：输入面略亮于瓷面卡片，凹槽感换成抬升感，避免和卡片融为一体。 */
+:root[data-theme="dark"] .field,
+:root[data-theme="dark"] .tagbox { background: var(--paper-hover); }
 
 .field-label {
   display: block;
@@ -271,7 +275,7 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
 }
 
 /* =========================================================================
- * 分段控件
+ * 分段控件 — 灰轨 + 白瓷滑片，滑片走弹簧曲线
  * ========================================================================= */
 .segmented {
   display: inline-flex;
@@ -292,8 +296,8 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
   text-align: center;
   border-radius: var(--r-sm);
   white-space: nowrap;
-  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease),
-    box-shadow var(--dur) var(--ease);
+  transition: background-color var(--dur-slow) var(--ease-soft), color var(--dur) var(--ease),
+    box-shadow var(--dur-slow) var(--ease-soft);
 }
 .segmented-item:hover { color: var(--ink); }
 .segmented-item.is-active {
@@ -303,12 +307,30 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
 }
 
 /* =========================================================================
- * 开关
+ * 滑动指示条 — 由 ui-kit.slidingThumb() 注入；选中态滑片平滑滑过标签项
+ * ========================================================================= */
+.tabs-thumb {
+  position: absolute;
+  z-index: 0;
+  border-radius: var(--r-sm);
+  background: var(--paper-raised);
+  box-shadow: var(--sh-sm);
+  pointer-events: none;
+  opacity: 0;
+  transition: top var(--dur-slow) var(--ease-soft),
+    left var(--dur-slow) var(--ease-soft),
+    width var(--dur-slow) var(--ease-soft),
+    height var(--dur-slow) var(--ease-soft),
+    opacity var(--dur) var(--ease);
+}
+
+/* =========================================================================
+ * 开关 — 朱砂轨道 + 弹簧位移 + 按压轻拉伸
  * ========================================================================= */
 .switch {
   position: relative;
   flex: none;
-  width: 36px; height: 22px;
+  width: 42px; height: 25px;
   border-radius: var(--r-pill);
   background: var(--line-strong);
   transition: background-color var(--dur) var(--ease), box-shadow var(--dur) var(--ease);
@@ -319,16 +341,18 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
 .switch-knob {
   position: absolute;
   top: 2px; left: 2px;
-  width: 18px; height: 18px;
+  width: 21px; height: 21px;
   background: #fff;
   border-radius: 50%;
-  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
-  transition: transform var(--dur) var(--ease-out);
+  box-shadow: 0 1px 3px rgb(0 0 0 / 0.25);
+  transition: transform 0.3s var(--ease-soft), width 0.18s var(--ease);
 }
-.switch[aria-checked="true"] .switch-knob { transform: translateX(14px); }
-.switch.is-sm { width: 30px; height: 18px; }
-.switch.is-sm .switch-knob { width: 14px; height: 14px; }
-.switch.is-sm[aria-checked="true"] .switch-knob { transform: translateX(12px); }
+.switch:active .switch-knob { width: 24px; }
+.switch:active[aria-checked="true"] .switch-knob { transform: translateX(13px); }
+.switch[aria-checked="true"] .switch-knob { transform: translateX(17px); }
+.switch.is-sm { width: 34px; height: 20px; }
+.switch.is-sm .switch-knob { width: 16px; height: 16px; }
+.switch.is-sm[aria-checked="true"] .switch-knob { transform: translateX(14px); }
 
 /* =========================================================================
  * 标签 / 徽标
@@ -348,6 +372,7 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
   line-height: 1.6;
   white-space: nowrap;
   max-width: 100%;
+  transition: background-color var(--dur) var(--ease), color var(--dur) var(--ease);
 }
 .chip.is-accent { background: var(--accent-soft); border-color: var(--accent-border); color: var(--accent-ink); }
 .chip.is-ok { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
@@ -451,6 +476,7 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
   text-align: center;
   gap: 8px;
   padding: 64px 24px;
+  animation: rise-in var(--dur-enter) var(--ease-out) both;
 }
 .empty-icon {
   display: flex;
@@ -511,6 +537,25 @@ textarea.field { min-height: 88px; resize: vertical; line-height: 1.8; }
   0% { background-position: 100% 50%; }
   100% { background-position: 0 50%; }
 }
+
+/* 通用入场：上浮 + 渐显（供消息卡 / 浮层内容复用） */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+
+/* =========================================================================
+ * 主题切换水波纹（View Transitions）
+ * 新主题快照从点击处以圆形裁剪加速漫开；旧快照静置在下层。
+ * 动画本体由 store.js → applyWithRipple() 驱动。
+ * ========================================================================= */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+::view-transition-old(root) { z-index: 1; }
+::view-transition-new(root) { z-index: 9999; }
 
 /* =========================================================================
  * 动效偏好

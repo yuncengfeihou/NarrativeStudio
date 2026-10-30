@@ -59,6 +59,10 @@ function closeAllOverlays() {
     n.remove();
   });
   lockCount = 0;
+  // loading 也是浮层：视图在 showLoading 后中途被路由切走时，unmount 不会补 hideLoading，
+  // 计数一旦泄漏，「处理中」就会常驻在每一页（只能刷新才能清掉）。所有权跟着路由走。
+  loadingCount = 0;
+  $('#loading')?.classList.remove('is-visible');
   document.body.style.overflow = '';
 }
 
@@ -220,8 +224,8 @@ export function openSheet(opts = {}) {
     sheet.classList.remove('is-open');
     lockScroll(false);
     document.removeEventListener('keydown', onKey);
-    setTimeout(() => { veil.remove(); sheet.remove(); }, 220);
-  }
+    setTimeout(() => { veil.remove(); sheet.remove(); }, 460);
+  };
 
   const onKey = (e) => { if (e.key === 'Escape') close(); };
   document.addEventListener('keydown', onKey);
@@ -258,7 +262,7 @@ export function openActionSheet(opts = {}) {
       sheet.classList.remove('is-open');
       lockScroll(false);
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => { veil.remove(); sheet.remove(); }, 220);
+      setTimeout(() => { veil.remove(); sheet.remove(); }, 400);
       resolve(result);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(null); };
@@ -309,7 +313,7 @@ export function confirmDialog({ title = '', message = '', confirmText = '确定'
       dialog.classList.remove('is-open');
       lockScroll(false);
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => { veil.remove(); dialog.remove(); }, 180);
+      setTimeout(() => { veil.remove(); dialog.remove(); }, 380);
       resolve(result);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(false); };
@@ -355,7 +359,7 @@ export function openPopover(anchor, items, opts = {}) {
       veil.classList.remove('is-open');
       pop.remove();
       document.removeEventListener('keydown', onKey);
-      setTimeout(() => veil.remove(), 160);
+      setTimeout(() => veil.remove(), 320);
       resolve(v);
     }
     const onKey = (e) => { if (e.key === 'Escape') close(null); };

@@ -5,7 +5,7 @@
  *
  *   世界卡（worlds + 三张投影表）
  *     worlds            card_json 是唯一真源（命题/宪章/卡司/辞书/时间线/锚点）
- *     codex_entries     类型化辞书：靠 links/tags 进场，不靠关键词触发
+ *     entities          统一实体表（人物 + 世界事实）：靠 links/tags 进场，不靠关键词触发
  *     timeline_events   past = 既定事实；future = 原著参考，默认不注入
  *     anchors           可玩时间点，每个带一份世界快照
  *
@@ -174,28 +174,30 @@ export function getDb() {
       ON thread_events(session_id, branch_id, turn_no);
 
     /* ══════════════════════════════════════════════════════════════════ */
-    /* v4：世界卡（类型化辞书 / 时间线 / 可玩时间点）                        */
+    /* v5：世界卡（统一实体 / 时间线 / 开局点）                              */
     /* ══════════════════════════════════════════════════════════════════ */
 
-    -- 辞书：类型化实体。靠 links/tags 进场，不靠关键词触发。
-    CREATE TABLE IF NOT EXISTS codex_entries (
+    -- 实体：人物与事实共表。靠 links/tags 进场，不靠关键词触发。
+    CREATE TABLE IF NOT EXISTS entities (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       world_id TEXT NOT NULL REFERENCES worlds(id) ON DELETE CASCADE,
-      codex_id TEXT NOT NULL,
+      entity_id TEXT NOT NULL,
       type TEXT NOT NULL DEFAULT 'custom',
       name TEXT NOT NULL,
       aliases_json TEXT NOT NULL DEFAULT '[]',
       tags_json TEXT NOT NULL DEFAULT '[]',
       summary TEXT NOT NULL DEFAULT '',
+      detail TEXT NOT NULL DEFAULT '',
       facets_json TEXT NOT NULL DEFAULT '{}',
       links_json TEXT NOT NULL DEFAULT '[]',
       reveal TEXT NOT NULL DEFAULT 'public',
       canon_from TEXT NOT NULL DEFAULT '',
-      detail TEXT NOT NULL DEFAULT '',
       pinned INTEGER NOT NULL DEFAULT 0,
+      muted INTEGER NOT NULL DEFAULT 0,
+      parent_id TEXT NOT NULL DEFAULT '',
       sort INTEGER NOT NULL DEFAULT 0
     );
-    CREATE INDEX IF NOT EXISTS idx_codex_world ON codex_entries(world_id, pinned DESC, sort ASC);
+    CREATE INDEX IF NOT EXISTS idx_entities_world ON entities(world_id, pinned DESC, sort ASC);
 
     -- 时间线：past 是既定事实，future 只是原著参考（默认不注入）。
     CREATE TABLE IF NOT EXISTS timeline_events (
@@ -241,12 +243,15 @@ export function getDb() {
     CREATE UNIQUE INDEX IF NOT EXISTS idx_branches ON branches(session_id, branch_id);
 
     -- 场次记录：从完整原文重写，不是摘要的摘要。
+    -- 这是长程记忆的载体：它取代「一份滚动摘要」，每场一行、只追加、永不互相改写。
+    -- key_detail / causal / hooks 是长程召回的关键：前者是可检索的具体细节，
+    -- 后者回答「这一场为什么接在上一场后面」。
     CREATE TABLE IF NOT EXISTS scenes (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       branch_id TEXT NOT NULL DEFAULT 'main',
       scene_id TEXT NOT NULL,
-      level INTEGER NOT NULL DEFAULT 1,
+      level INTEGER NOT NULL DEFAULT 1,          -- 1 = 场；2 = 幕（每 10 场聚合）；3 = 卷
       turn_from INTEGER NOT NULL,
       turn_to INTEGER NOT NULL,
       when_label TEXT NOT NULL DEFAULT '',
@@ -255,7 +260,11 @@ export function getDb() {
       cast_json TEXT NOT NULL DEFAULT '[]',
       question TEXT NOT NULL DEFAULT '',
       outcome TEXT NOT NULL DEFAULT '',
+      key_detail TEXT NOT NULL DEFAULT '',       -- 一个值得被记住的具体细节（数字/原话/物件）
+      causal TEXT NOT NULL DEFAULT '',           -- 与上一场的因果连接（为什么走到这里）
+      importance TEXT NOT NULL DEFAULT 'normal', -- major | normal | minor（决定渲染粒度）
       threads_json TEXT NOT NULL DEFAULT '[]',
+      hooks_json TEXT NOT NULL DEFAULT '[]',     -- 本场留下、尚未回收的钩子
       state_json TEXT NOT NULL DEFAULT '{}',
       token_count INTEGER NOT NULL DEFAULT 0,
       created_at INTEGER NOT NULL
@@ -304,10 +313,10 @@ export function getDb() {
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       branch_id TEXT NOT NULL DEFAULT 'main',
-      entity_kind TEXT NOT NULL,            -- cast | codex | player | world
+      entity_kind TEXT NOT NULL,            -- person | place | ... | player | world
       entity_id TEXT NOT NULL,
       path TEXT NOT NULL DEFAULT '',
-      op TEXT NOT NULL DEFAULT 'set',       -- set | add | remove | introduce
+      op TEXT NOT NULL DEFAULT 'set',       -- set | add | remove | introduce | delta
       value_json TEXT NOT NULL DEFAULT 'null',
       valid_from INTEGER NOT NULL DEFAULT 0,
       valid_to INTEGER,
@@ -348,20 +357,30 @@ export function getDb() {
     );
     CREATE INDEX IF NOT EXISTS idx_patches ON patches(session_id, branch_id, created_at DESC);
 
-    -- 前情提要：滚动摘要，分支级。covers_turn_to 及之前的回合在装配时不再逐字出现。
-    -- 原文永不删除：摘要只影响装配，细节仍可从 turns 检索/回溯。
-    CREATE TABLE IF NOT EXISTS summaries (
+    -- 旁路写入（史官/场记/校勘/世界呼吸/走向）的幂等回执。
+    -- 同一 (session, branch, effect_id) 只落一次：pending = 已认领未完成（可重试），
+    -- applied = 已落库（重复执行直接跳过），failed = 本次失败（可重试），
+    -- stale = 落库前守卫判定分支已失效（旧线整批丢弃，不回写）。
+    CREATE TABLE IF NOT EXISTS effect_receipts (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       session_id TEXT NOT NULL REFERENCES sessions(id) ON DELETE CASCADE,
       branch_id TEXT NOT NULL DEFAULT 'main',
-      covers_turn_to INTEGER NOT NULL,
-      text TEXT NOT NULL,
-      prev_id INTEGER,
-      token_count INTEGER NOT NULL DEFAULT 0,
+      turn_no INTEGER NOT NULL DEFAULT 0,
+      agent TEXT NOT NULL,
+      effect_id TEXT NOT NULL,
+      fingerprint TEXT NOT NULL DEFAULT '',
+      status TEXT NOT NULL DEFAULT 'pending',
+      attempt INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL,
-      UNIQUE(session_id, branch_id, covers_turn_to)
+      applied_at INTEGER,
+      UNIQUE(session_id, branch_id, effect_id)
     );
-    CREATE INDEX IF NOT EXISTS idx_summaries ON summaries(session_id, branch_id, covers_turn_to DESC);
+    CREATE INDEX IF NOT EXISTS idx_effect_receipts ON effect_receipts(session_id, branch_id, status);
+
+    -- 注意：summaries 表已删除。
+    -- 「一份滚动摘要」要求 1056:1 的压缩比，结构上不可能承载千轮，
+    -- 且每轮以上一份摘要为输入（摘要的摘要）违反「原文是唯一真相」。
+    -- 长程记忆改由 scenes（场次记录）+ turns（原文）承担。
 
     CREATE TABLE IF NOT EXISTS meta (
       key TEXT PRIMARY KEY,
@@ -373,7 +392,56 @@ export function getDb() {
     CREATE INDEX IF NOT EXISTS idx_threads_branch ON threads(session_id, branch_id, status, updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_sessions_world ON sessions(world_id, updated_at DESC);
   `);
+
+  // 历史检索索引（只给「模型主动发起的 recall_history」用，不参与自动注入）。
+  // trigram 分词让中文 ≥3 字子串可索引；<3 字（如两字人名）FTS5 不收，由 LIKE 兜底。
+  // 外部内容表 + 触发器保持与 turns 同步；旧库靠下面的 rebuild 自愈，不做 schema 迁移。
+  db.exec(`
+    CREATE VIRTUAL TABLE IF NOT EXISTS turns_fts USING fts5(
+      content,
+      content='turns',
+      content_rowid='id',
+      tokenize='trigram'
+    );
+    CREATE TRIGGER IF NOT EXISTS turns_fts_ai AFTER INSERT ON turns BEGIN
+      INSERT INTO turns_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS turns_fts_ad AFTER DELETE ON turns BEGIN
+      INSERT INTO turns_fts(turns_fts, rowid, content) VALUES ('delete', old.id, old.content);
+    END;
+    CREATE TRIGGER IF NOT EXISTS turns_fts_au AFTER UPDATE OF content ON turns BEGIN
+      INSERT INTO turns_fts(turns_fts, rowid, content) VALUES ('delete', old.id, old.content);
+      INSERT INTO turns_fts(rowid, content) VALUES (new.id, new.content);
+    END;
+  `);
+  const rows = db.prepare(`SELECT count(*) AS n FROM turns`).get().n;
+  const indexed = db.prepare(`SELECT count(*) AS n FROM turns_fts`).get().n;
+  if (rows !== indexed) db.exec(`INSERT INTO turns_fts(turns_fts) VALUES('rebuild')`);
+
   return db;
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* Meta（单键值：运行期模型配置等）                                       */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+/** 读一个 meta 值；没有该键返回 null（不补默认、不做迁移）。 */
+export function getMeta(key) {
+  const row = getDb().prepare(`SELECT value FROM meta WHERE key=?`).get(String(key));
+  return row ? row.value : null;
+}
+
+/** 写一个 meta 值（覆盖）。运行期配置的明文 apiKey 只存在这里，不进 GET 响应。 */
+export function setMeta(key, value) {
+  getDb().prepare(`
+    INSERT INTO meta (key, value) VALUES (?, ?)
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value
+  `).run(String(key), String(value));
+}
+
+/** 删除一个 meta 值；返回是否真的删掉了。 */
+export function deleteMeta(key) {
+  return getDb().prepare(`DELETE FROM meta WHERE key=?`).run(String(key)).changes > 0;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -500,6 +568,18 @@ export function listSessions({ worldId = null } = {}) {
   }));
 }
 
+/**
+ * 这张卡最近一局会话的 settings（只读，供「同卡再开一局」继承写法用）。
+ * 不返回整条会话：调用方只需要 settings，没必要把 card_snapshot 一起拉出来。
+ */
+export function getLatestSessionSettings(worldId) {
+  if (!worldId) return null;
+  const row = getDb().prepare(`
+    SELECT settings_json FROM sessions WHERE world_id=? ORDER BY updated_at DESC, created_at DESC LIMIT 1
+  `).get(worldId);
+  return row ? JSON.parse(row.settings_json || '{}') : null;
+}
+
 export function updateSession(id, { title, settings, status, worldId } = {}) {
   const s = getSession(id);
   if (!s) return null;
@@ -536,13 +616,28 @@ export function touchSession(id, turnCount) {
 }
 
 /** 累加会话级 token 遥测（每轮把本轮 usage 汇总进 sessions.usage_json）。 */
-export function accumulateUsage(sessionId, usage) {
+/**
+ * 累计会话级 usage。
+ *
+ * `usage.agent` 用于分路统计：narrator / archivist / scene-keeper / continuity /
+ * world-tick / branch / retrieval。旧实现只累计 narrator 一路，
+ * 于是「这一局花了多少 token」「缓存命中率多少」的分母是错的。
+ */
+export function accumulateUsage(sessionId, usage, agent = 'narrator') {
   if (!usage) return null;
   const s = getSession(sessionId);
   if (!s) return null;
   const prev = s.usage || {
     requests: 0, prompt_tokens: 0, completion_tokens: 0, cached_tokens: 0,
     reasoning_tokens: 0, total_ms: 0, first_token_ms: 0, output_chars: 0,
+  };
+  const byAgent = { ...(prev.by_agent || {}) };
+  const a = byAgent[agent] || { requests: 0, prompt_tokens: 0, completion_tokens: 0, cached_tokens: 0 };
+  byAgent[agent] = {
+    requests: a.requests + 1,
+    prompt_tokens: a.prompt_tokens + (usage.prompt_tokens || 0),
+    completion_tokens: a.completion_tokens + (usage.completion_tokens || 0),
+    cached_tokens: a.cached_tokens + (usage.cached_tokens || 0),
   };
   const next = {
     requests: prev.requests + 1,
@@ -553,6 +648,7 @@ export function accumulateUsage(sessionId, usage) {
     total_ms: prev.total_ms + (usage.duration_ms || 0),
     first_token_ms: prev.first_token_ms + (usage.ttft_ms || 0),
     output_chars: prev.output_chars + (usage.output_chars || 0),
+    by_agent: byAgent,
   };
   getDb().prepare(`UPDATE sessions SET usage_json=? WHERE id=?`).run(JSON.stringify(next), sessionId);
   return next;
@@ -585,6 +681,31 @@ export function addTurn(sessionId, turn) {
     Date.now(),
   );
   return { id: Number(info.lastInsertRowid), token_count: tokenCount };
+}
+
+/**
+ * 一次写入同一回合的多行（player + narrator），要么都写、要么都不写。
+ *
+ * 为什么需要：玩家行动过去在演绎之前就单独落库，于是上游 `terminated` / `fetch failed`
+ * 时库里留下一条没有正文的 player 行——「孤儿回合」。它进不了场次原文（场记只读 narrator 行），
+ * 却会作为一条没有回应的 user 消息留在库里，只能靠 `_work/longrun-drive.mjs --repair`
+ * 删行收拾。一回合本来就是一个整体：正文没产出的那一拍在账本上不该发生。
+ *
+ * 这里只让**新**回合原子化，不改已有行（beta 不做迁移）。
+ */
+export function addTurnPair(sessionId, turns = []) {
+  const list = (turns || []).filter(Boolean);
+  if (!list.length) return [];
+  const d = getDb();
+  d.exec('BEGIN');
+  try {
+    const out = list.map((t) => addTurn(sessionId, t));
+    d.exec('COMMIT');
+    return out;
+  } catch (err) {
+    try { d.exec('ROLLBACK'); } catch { /* 事务已回滚 */ }
+    throw err;
+  }
 }
 
 function decorateTurn(row) {
@@ -737,6 +858,14 @@ export function getRelations(sessionId, { branchId = null, limit = 60 } = {}) {
   return getDb().prepare(sql).all(...params);
 }
 
+/** 关系行数（同 `countAssertions`：只给截断可见化用）。 */
+export function countRelations(sessionId, { branchId = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM relations WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
 export function upsertThread(sessionId, t) {
   const now = Date.now();
   const branchId = t.branch_id || 'main';
@@ -795,8 +924,19 @@ export function getThreads(sessionId, { branchId = null, status = null, limit = 
   if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
   if (status) { sql += ` AND status=?`; params.push(status); }
   sql += ` ORDER BY status ASC, weight DESC, updated_at DESC LIMIT ?`;
+  // `limit = -1` = 不设上限（SQLite 的 LIMIT -1 就是这个意思）。
+  // 只给「必须看见全部」的调用方用（校勘的回收靶池）；渲染/提示词路径一律给正数。
   params.push(limit);
   return getDb().prepare(sql).all(...params);
+}
+
+/** 线索行数（同 `countAssertions`：只给截断可见化用）。 */
+export function countThreads(sessionId, { branchId = null, status = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM threads WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -805,7 +945,10 @@ export function getThreads(sessionId, { branchId = null, status = null, limit = 
 
 /**
  * 追加一条世界状态增量。set 会关闭同一 (entity, path) 的旧值；
- * add / remove / introduce 保留历史，由投影器按顺序应用。
+ * add / remove / introduce / delta 保留历史，由投影器按顺序应用。
+ *
+ * delta 为什么**不**关闭旧值：它是增量而不是新状态。历史必须能逐条回放成
+ * 「每次都加了什么」，关闭旧值会让重放只剩最后一条、无法审计「钱是怎么变少的」。
  */
 export function addWorldState(sessionId, delta) {
   const d = getDb();
@@ -813,7 +956,7 @@ export function addWorldState(sessionId, delta) {
   const kind = String(delta.entity_kind || '').trim();
   const entityId = String(delta.entity_id || '').trim();
   const path = String(delta.path || '').trim();
-  const op = ['set', 'add', 'remove', 'introduce'].includes(delta.op) ? delta.op : 'set';
+  const op = ['set', 'add', 'remove', 'introduce', 'delta'].includes(delta.op) ? delta.op : 'set';
   if (!kind || !entityId) return null;
   if (op !== 'introduce' && !path) return null;
   const turn = Number(delta.turn ?? delta.valid_from ?? 0) || 0;
@@ -869,29 +1012,30 @@ export function saveWorld(world) {
   const card = world.card || {};
   upsertWorld(world);
   const w = getWorld(world.id);
-  replaceCodex(w.id, card.codex || []);
+  replaceEntities(w.id, card.entities || []);
   replaceTimeline(w.id, card.timeline || []);
   replaceAnchors(w.id, card.anchors || []);
   return w;
 }
 
-function replaceCodex(worldId, entries = []) {
+function replaceEntities(worldId, entries = []) {
   const d = getDb();
   d.exec('BEGIN');
   try {
-    d.prepare(`DELETE FROM codex_entries WHERE world_id=?`).run(worldId);
+    d.prepare(`DELETE FROM entities WHERE world_id=?`).run(worldId);
     const stmt = d.prepare(`
-      INSERT INTO codex_entries (world_id, codex_id, type, name, aliases_json, tags_json, summary,
-        facets_json, links_json, reveal, canon_from, detail, pinned, sort)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      INSERT INTO entities (world_id, entity_id, type, name, aliases_json, tags_json, summary,
+        detail, facets_json, links_json, reveal, canon_from, pinned, muted, parent_id, sort)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     entries.forEach((e, i) => {
       if (!e?.name && !e?.summary) return;
       stmt.run(
         worldId, String(e.id || ''), String(e.type || 'custom'), String(e.name || ''),
-        jsonOf(e.aliases), jsonOf(e.tags), String(e.summary || ''),
+        jsonOf(e.aliases), jsonOf(e.tags), String(e.summary || ''), String(e.detail || ''),
         jsonOf(e.facets || {}), jsonOf(e.links), String(e.reveal || 'public'),
-        String(e.canon_from || ''), String(e.detail || ''), e.pinned ? 1 : 0, i,
+        String(e.canon_from || ''), e.pinned ? 1 : 0, e.muted ? 1 : 0,
+        String(e.parent_id || ''), i,
       );
     });
     d.exec('COMMIT');
@@ -899,25 +1043,27 @@ function replaceCodex(worldId, entries = []) {
     d.exec('ROLLBACK');
     throw err;
   }
-  return getCodex(worldId);
+  return getEntities(worldId);
 }
 
-export function getCodex(worldId) {
-  return getDb().prepare(`SELECT * FROM codex_entries WHERE world_id=? ORDER BY pinned DESC, sort ASC, id ASC`)
+export function getEntities(worldId) {
+  return getDb().prepare(`SELECT * FROM entities WHERE world_id=? ORDER BY pinned DESC, sort ASC, id ASC`)
     .all(worldId)
     .map((r) => ({
       ...r,
+      id: r.entity_id,
       aliases: JSON.parse(r.aliases_json || '[]'),
       tags: JSON.parse(r.tags_json || '[]'),
       facets: JSON.parse(r.facets_json || '{}'),
       links: JSON.parse(r.links_json || '[]'),
       pinned: !!r.pinned,
+      muted: !!r.muted,
     }));
 }
 
-export function setCodexPinned(worldId, codexId, pinned) {
-  const info = getDb().prepare(`UPDATE codex_entries SET pinned=? WHERE world_id=? AND codex_id=?`)
-    .run(pinned ? 1 : 0, worldId, codexId);
+export function setEntityPinned(worldId, entityId, pinned) {
+  const info = getDb().prepare(`UPDATE entities SET pinned=? WHERE world_id=? AND entity_id=?`)
+    .run(pinned ? 1 : 0, worldId, entityId);
   if (Number(info.changes) > 0) {
     // 钉选属于模板变更：已开的会话继续用旧快照，新会话才看到新版本。
     getDb().prepare(`UPDATE worlds SET version=version+1, updated_at=? WHERE id=?`).run(Date.now(), worldId);
@@ -991,6 +1137,48 @@ export function getBranch(sessionId, branchId) {
 
 export function listBranches(sessionId) {
   return getDb().prepare(`SELECT * FROM branches WHERE session_id=? ORDER BY id ASC`).all(sessionId);
+}
+
+/**
+ * 当前分支可见的回合数（按 turn_no 去重，含祖先继承部分）。
+ *
+ * `sessions.turn_count` 是**缓存**，`touchSession()` 每写一拍就刷新一次；
+ * 但 fork / checkout 之后当前线换了一条，缓存还停在旧线的数字上——
+ * 界面于是显示「90 轮」，实际这条线只能看见 8 轮。派生值必须能重算。
+ */
+export function countVisibleTurns(sessionId, branchId) {
+  const branch = getBranch(sessionId, branchId);
+  const forkTurn = branch ? branch.fork_turn : Number.MAX_SAFE_INTEGER;
+  const rows = getTurnsForBranch(sessionId, branchId, forkTurn, { kinds: ['player', 'narrator'] });
+  return new Set(rows.map((r) => r.turn_no)).size;
+}
+
+/**
+ * 把会话切到另一条已在的世界线（不新建分支）。
+ *
+ * 与 `forkSession()` 的区别：fork 是「从第 N 轮开一条新线」，checkout 是
+ * 「在已有的线之间切换」。界面上写着「旧线随时可以回去看」，在此之前
+ * 只有 `forkSession` 会调 `setSessionBranch`，没有任何入口真的切回去过。
+ *
+ * 切回一条 `abandoned` 的线时把它重新标成 `active`：它又变成当前线了，
+ * 再叫「已废弃」会让人以为这条线不能继续写。被顶下去的那条线标 `abandoned`。
+ */
+export function checkoutBranch(sessionId, branchId) {
+  const target = getBranch(sessionId, branchId);
+  if (!target) throw new Error(`branch not found: ${branchId}`);
+  const current = getSession(sessionId);
+  const currentId = current?.branch_id || 'main';
+  if (currentId === branchId) {
+    return { branch_id: branchId, switched: false, from: currentId };
+  }
+  // 先把当前线让出去再激活目标线，避免两条线同时是 active。
+  if (currentId) setBranchStatus(sessionId, currentId, 'abandoned');
+  setBranchStatus(sessionId, branchId, 'active');
+  setSessionBranch(sessionId, branchId);
+  // turn_count 是缓存：换了线就必须按新线重算，否则界面上显示的是旧线的轮数。
+  const visible = countVisibleTurns(sessionId, branchId);
+  touchSession(sessionId, visible);
+  return { branch_id: branchId, switched: true, from: currentId, turn_count: visible };
 }
 
 export function setBranchStatus(sessionId, branchId, status) {
@@ -1130,23 +1318,33 @@ export function copyBranchState(sessionId, { fromBranch, toBranch, forkTurn = 0 
       `).run(to, sessionId, from, turn);
     }
 
+    // 复制时把 valid_to 裁到分叉点：旧线在分叉之后才发生的失效，在新线上从未发生。
+    // 不裁的话，新分支往回走一步就多出一批「未来才会失效」的状态，
+    // atTurn 查询会返回空集——比没有记忆更糟，因为它自相矛盾。
     d.prepare(`
       INSERT INTO character_states (session_id, branch_id, who, field, value, valid_from, valid_to, updated_turn, created_at)
-      SELECT session_id, ?, who, field, value, valid_from, valid_to, updated_turn, created_at
+      SELECT session_id, ?, who, field, value, valid_from,
+        CASE WHEN valid_to IS NOT NULL AND valid_to > ? THEN NULL ELSE valid_to END,
+        updated_turn, created_at
       FROM character_states
       WHERE session_id=? AND branch_id=? AND valid_from<=?
         AND (valid_to IS NULL OR valid_to>=?)
-    `).run(to, sessionId, from, turn, turn);
+    `).run(to, turn, sessionId, from, turn, turn);
 
+    // 断言同理：旧线在分叉点之后才失效的断言，在新线上应当仍然有效。
+    // status='invalidated' 但 valid_to > forkTurn 的，重置回 active 并清空 valid_to。
     d.prepare(`
       INSERT INTO assertions (session_id, branch_id, subject, predicate, object, valid_from, valid_to,
         asserted_turn, source_turn, confidence, visibility, status, superseded_by, evidence, created_at)
-      SELECT session_id, ?, subject, predicate, object, valid_from, valid_to,
-        asserted_turn, source_turn, confidence, visibility, status, NULL, evidence, created_at
+      SELECT session_id, ?, subject, predicate, object, valid_from,
+        CASE WHEN valid_to IS NOT NULL AND valid_to > ? THEN NULL ELSE valid_to END,
+        asserted_turn, source_turn, confidence, visibility,
+        CASE WHEN status='invalidated' AND (valid_to IS NULL OR valid_to > ?) THEN 'active' ELSE status END,
+        NULL, evidence, created_at
       FROM assertions
       WHERE session_id=? AND branch_id=? AND valid_from<=?
         AND (valid_to IS NULL OR valid_to>?) AND status<>'retracted'
-    `).run(to, sessionId, from, turn, turn);
+    `).run(to, turn, turn, sessionId, from, turn, turn);
 
     d.prepare(`
       INSERT INTO voices (session_id, branch_id, who, text, turn_no, kind, pinned, created_at)
@@ -1154,29 +1352,37 @@ export function copyBranchState(sessionId, { fromBranch, toBranch, forkTurn = 0 
       FROM voices WHERE session_id=? AND branch_id=? AND turn_no<=?
     `).run(to, sessionId, from, turn);
 
+    // 列清单必须与 CREATE TABLE 对齐：漏列的后果不是「少一个字段」，而是
+    // importance 变空 → fork 之后所有历史大事件在时间轴上降级成 normal，
+    // key_detail / causal 变空 → 场次索引渲染掉档。曾经就漏过这四列。
     d.prepare(`
       INSERT INTO scenes (session_id, branch_id, scene_id, level, turn_from, turn_to, when_label, place,
-        place_id, cast_json, question, outcome, threads_json, state_json, token_count, created_at)
+        place_id, cast_json, question, outcome, key_detail, causal, importance,
+        threads_json, hooks_json, state_json, token_count, created_at)
       SELECT session_id, ?, scene_id, level, turn_from, turn_to, when_label, place,
-        place_id, cast_json, question, outcome, threads_json, state_json, token_count, created_at
+        place_id, cast_json, question, outcome, key_detail, causal, importance,
+        threads_json, hooks_json, state_json, token_count, created_at
       FROM scenes WHERE session_id=? AND branch_id=? AND turn_to<=?
     `).run(to, sessionId, from, turn);
 
+    // world_state 同理：被复制行的 valid_to 若落在分叉点之后，就是旧线的未来，必须抹掉。
     d.prepare(`
       INSERT INTO world_state (session_id, branch_id, entity_kind, entity_id, path, op,
         value_json, valid_from, valid_to, source, evidence, created_at)
       SELECT session_id, ?, entity_kind, entity_id, path, op,
-        value_json, valid_from, valid_to, source, evidence, created_at
+        value_json, valid_from,
+        CASE WHEN valid_to IS NOT NULL AND valid_to > ? THEN NULL ELSE valid_to END,
+        source, evidence, created_at
       FROM world_state WHERE session_id=? AND branch_id=? AND valid_from<=?
-    `).run(to, sessionId, from, turn);
+        AND (valid_to IS NULL OR valid_to>?)
+    `).run(to, turn, sessionId, from, turn, turn);
 
-    // 摘要只继承覆盖到分叉点为止的那部分；分叉之后写下的摘要不能被新线看到。
+    // 幂等回执：分叉点之前已 applied 的效果在新分支视为已落库，避免重放；
+    // pending/failed/stale 是旧线在途或已丢弃的回执，不带过去（新线可以从自己的状态重跑）。
     d.prepare(`
-      INSERT INTO summaries (session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
-      SELECT session_id, ?, covers_turn_to, text, NULL, token_count, created_at
-      FROM summaries WHERE session_id=? AND branch_id=? AND covers_turn_to<=?
-      ON CONFLICT(session_id, branch_id, covers_turn_to) DO UPDATE SET
-        text=excluded.text, token_count=excluded.token_count, created_at=excluded.created_at
+      INSERT INTO effect_receipts (session_id, branch_id, turn_no, agent, effect_id, fingerprint, status, attempt, created_at, applied_at)
+      SELECT session_id, ?, turn_no, agent, effect_id, fingerprint, status, attempt, created_at, applied_at
+      FROM effect_receipts WHERE session_id=? AND branch_id=? AND status='applied' AND turn_no<=?
     `).run(to, sessionId, from, turn);
 
     d.exec('COMMIT');
@@ -1195,28 +1401,35 @@ export function addScene(sessionId, scene) {
   const d = getDb();
   const existing = d.prepare(`SELECT id FROM scenes WHERE session_id=? AND branch_id=? AND scene_id=?`)
     .get(sessionId, scene.branch_id || 'main', scene.scene_id);
+  const tokenCount = estimateTokens([
+    scene.question, scene.outcome, scene.key_detail, scene.causal,
+  ].filter(Boolean).join(''));
   if (existing) {
     d.prepare(`
-      UPDATE scenes SET turn_to=?, question=?, outcome=?, cast_json=?, threads_json=?, state_json=?, token_count=?
+      UPDATE scenes SET turn_to=?, question=?, outcome=?, key_detail=?, causal=?, importance=?,
+        cast_json=?, threads_json=?, hooks_json=?, state_json=?, token_count=?
       WHERE id=?
     `).run(
       scene.turn_to, scene.question || '', scene.outcome || '',
+      scene.key_detail || '', scene.causal || '', scene.importance || 'normal',
       JSON.stringify(scene.cast || []), JSON.stringify(scene.threads || []),
-      JSON.stringify(scene.state || {}),
-      estimateTokens(`${scene.question || ''}${scene.outcome || ''}`), existing.id,
+      JSON.stringify(scene.hooks || []), JSON.stringify(scene.state || {}),
+      tokenCount, existing.id,
     );
     return existing.id;
   }
   const info = d.prepare(`
     INSERT INTO scenes (session_id, branch_id, scene_id, level, turn_from, turn_to, when_label, place, place_id,
-      cast_json, question, outcome, threads_json, state_json, token_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      cast_json, question, outcome, key_detail, causal, importance, threads_json, hooks_json, state_json,
+      token_count, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     sessionId, scene.branch_id || 'main', scene.scene_id, scene.level || 1,
     scene.turn_from, scene.turn_to, scene.when_label || '', scene.place || '', scene.place_id || '',
     JSON.stringify(scene.cast || []), scene.question || '', scene.outcome || '',
-    JSON.stringify(scene.threads || []), JSON.stringify(scene.state || {}),
-    estimateTokens(`${scene.question || ''}${scene.outcome || ''}`), Date.now(),
+    scene.key_detail || '', scene.causal || '', scene.importance || 'normal',
+    JSON.stringify(scene.threads || []), JSON.stringify(scene.hooks || []),
+    JSON.stringify(scene.state || {}), tokenCount, Date.now(),
   );
   return Number(info.lastInsertRowid);
 }
@@ -1227,6 +1440,7 @@ function decorateScene(row) {
     ...row,
     cast: JSON.parse(row.cast_json || '[]'),
     threads: JSON.parse(row.threads_json || '[]'),
+    hooks: JSON.parse(row.hooks_json || '[]'),
     state: JSON.parse(row.state_json || '{}'),
   };
 }
@@ -1261,13 +1475,30 @@ export function latestScene(sessionId, branchId = null) {
 /* v4：断言（带有效期，冲突失效不删除）                                     */
 /* ══════════════════════════════════════════════════════════════════════ */
 
+/**
+ * 分支必须显式给出，缺失直接抛错。
+ *
+ * 历史事故：调用方传 camelCase `branchId`，这里读 `branch_id || 'main'`，
+ * 于是断言/原声/审计三张表全部静默写进废弃分支，模型永远读不到自己刚写的记忆，
+ * 且「冲突失效不删除」因为查写不在同一分支而从未触发过。
+ * 静默兜底比报错危险得多——宁可启动即失败。
+ */
+function requireBranchId(source, where) {
+  const id = source?.branch_id ?? source?.branchId;
+  if (typeof id !== 'string' || !id.trim()) {
+    throw new Error(`${where}: branch_id is required (got ${JSON.stringify(source?.branch_id ?? source?.branchId)})`);
+  }
+  return id;
+}
+
 export function addAssertion(sessionId, a) {
+  const branchId = requireBranchId(a, 'addAssertion');
   const info = getDb().prepare(`
     INSERT INTO assertions (session_id, branch_id, subject, predicate, object, valid_from, valid_to,
       asserted_turn, source_turn, confidence, visibility, status, superseded_by, evidence, created_at)
     VALUES (?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, 'active', NULL, ?, ?)
   `).run(
-    sessionId, a.branch_id || 'main', String(a.subject || ''), String(a.predicate || ''),
+    sessionId, branchId, String(a.subject || ''), String(a.predicate || ''),
     String(a.object || ''), Number(a.valid_from) || 0, Number(a.asserted_turn) || 0,
     Number(a.source_turn) || 0, Number.isFinite(Number(a.confidence)) ? Number(a.confidence) : 0.9,
     String(a.visibility || 'public'), String(a.evidence || ''), Date.now(),
@@ -1311,6 +1542,33 @@ export function getAssertions(sessionId, {
   return getDb().prepare(sql).all(...params);
 }
 
+/**
+ * 断言行数（与 `getAssertions` 同口径但去掉 limit）。
+ *
+ * **只给「截断可见化」用**：装配层给 `getAssertions` 的 300 条是 SQL 层截断，
+ * 被挡在外面的行根本进不了进程，`meta.facts_many_dropped` 只能统计 300 之内的再丢弃。
+ * 于是「断言长到看不见」这件事在报告里永远显示为健康（O-长跑实测）。有了这个计数，
+ * 装配层才能说「我看见了 300 条，库里共有 N 条」。
+ *
+ * **必须传 `atTurn` 才是同一口径**：装配层用的是 `atTurn` 回溯（按有效期窗口筛，
+ * 很久以前成立、当拍已失效的断言也算在窗口里），与「只数 status='active'」不是一回事。
+ * 只数 active 会让 total 小于 loaded——报告上表现为「看见的比库里还多」，判据自相矛盾。
+ * 不传 atTurn 时退回 active 口径（历史调用方/测试用）。
+ */
+export function countAssertions(sessionId, { branchId = null, atTurn = null, includeInvalid = false } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM assertions WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (atTurn != null) {
+    // 与 getAssertions 的 atTurn 分支逐字同口径：有效期窗口 + 排除 retracted。
+    sql += ` AND valid_from<=? AND (valid_to IS NULL OR valid_to>?) AND status<>'retracted'`;
+    params.push(atTurn, atTurn);
+  } else if (!includeInvalid) {
+    sql += ` AND status='active'`;
+  }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
 /** 找出与待写入断言冲突的旧断言：同主同谓、对象不同、有效期重叠。 */
 export function findConflictingAssertions(sessionId, { branchId, subject, predicate, object, validFrom }) {
   if (!subject || !predicate || !object) return [];
@@ -1348,7 +1606,7 @@ export function getCharStates(sessionId, { branchId = null, who = null, atTurn =
   if (who) { sql += ` AND who=?`; params.push(who); }
   if (atTurn != null) sql += ` AND valid_from<=? AND (valid_to IS NULL OR valid_to>=?)`;
   if (atTurn != null) params.push(atTurn, atTurn);
-  sql += ` ORDER BY who ASC, field ASC, valid_from DESC`;
+  sql += ` ORDER BY who ASC, field ASC, valid_from DESC, id DESC`;
   return getDb().prepare(sql).all(...params);
 }
 
@@ -1368,11 +1626,12 @@ export function getCharStateMap(sessionId, { branchId = null, atTurn = null } = 
 /* ══════════════════════════════════════════════════════════════════════ */
 
 export function addVoice(sessionId, v) {
+  const branchId = requireBranchId(v, 'addVoice');
   const info = getDb().prepare(`
     INSERT INTO voices (session_id, branch_id, who, text, turn_no, kind, pinned, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    sessionId, v.branch_id || 'main', String(v.who || ''), String(v.text || ''),
+    sessionId, branchId, String(v.who || ''), String(v.text || ''),
     Number(v.turn_no) || 0, String(v.kind || 'line'), v.pinned ? 1 : 0, Date.now(),
   );
   return Number(info.lastInsertRowid);
@@ -1389,6 +1648,50 @@ export function getVoices(sessionId, { branchId = null, who = null, limit = 40, 
   return getDb().prepare(sql).all(...params);
 }
 
+/**
+ * 原声的「按人取最近 N 条」版本。
+ *
+ * D23：旧实现是 `getVoices(limit: 400)` 再在内存里按人切前 N 条——那 400 是**跨所有人的
+ * 全局窗口**，长跑会顶穿：实测 d7a6f899 每拍新增 4.88 行，第 82 拍就填满 400 行，
+ * 之后窗口只保留「最近 82 拍里说过话的人」，久没开口的角色（谢沐 t7、陆可 t31）
+ * 整段掉出窗口、声线永久消失，而这件事在任何 meta 里都看不见。
+ *
+ * 现在用窗口函数在 SQL 里按人分区取前 N 条：**每人各自最近 N 条，与总行数无关**。
+ * `perWho` 是唯一的上限，语义与调用方 `voices[who].slice(0, 2)` 的渲染上限一致。
+ * 保留 `pinned` 优先（作者钉选的台词必须能进）。
+ */
+export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
+  const n = Math.max(1, Number(perWho) || 3);
+  const sql = `
+    SELECT who, text, turn_no, pinned FROM (
+      SELECT who, text, turn_no, pinned,
+             ROW_NUMBER() OVER (PARTITION BY who ORDER BY pinned DESC, turn_no DESC, id DESC) AS rn
+        FROM voices
+       WHERE session_id=${branchId ? '?' : '?'}${branchId ? ' AND branch_id=?' : ''}
+    ) WHERE rn <= ?
+    ORDER BY who ASC, rn ASC
+  `;
+  const params = [sessionId];
+  if (branchId) params.push(branchId);
+  params.push(n);
+  const rows = getDb().prepare(sql).all(...params);
+  const out = {};
+  for (const r of rows) {
+    if (!r.who) continue;
+    out[r.who] = out[r.who] || [];
+    out[r.who].push({ text: r.text, turn_no: Number(r.turn_no) || 0, pinned: !!r.pinned });
+  }
+  return out;
+}
+
+/** 台词样本总数（`getVoices` 带 limit，面板需要知道列表之外还有多少）。 */
+export function countVoices(sessionId, { branchId = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM voices WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
 export function setVoicePinned(sessionId, id, pinned) {
   getDb().prepare(`UPDATE voices SET pinned=? WHERE session_id=? AND id=?`).run(pinned ? 1 : 0, sessionId, id);
 }
@@ -1397,28 +1700,17 @@ export function deleteVoice(sessionId, id) {
   return Number(getDb().prepare(`DELETE FROM voices WHERE session_id=? AND id=?`).run(sessionId, id).changes) > 0;
 }
 
-/** 每个 who 取最近 n 条原声，组装成 {who: [text]}。 */
-export function getVoiceMap(sessionId, { branchId = null, perWho = 3 } = {}) {
-  const rows = getVoices(sessionId, { branchId, limit: 400 });
-  const out = {};
-  for (const r of rows) {
-    if (!r.who) continue;
-    out[r.who] = out[r.who] || [];
-    if (out[r.who].length < perWho) out[r.who].push(r.text);
-  }
-  return out;
-}
-
 /* ══════════════════════════════════════════════════════════════════════ */
 /* v4：提案审计                                                           */
 /* ══════════════════════════════════════════════════════════════════════ */
 
 export function addPatch(sessionId, p) {
+  const branchId = requireBranchId(p, 'addPatch');
   const info = getDb().prepare(`
     INSERT INTO patches (session_id, branch_id, agent, kind, payload_json, evidence, status, severity, turn_no, applied_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
-    sessionId, p.branch_id || 'main', String(p.agent || ''), String(p.kind || ''),
+    sessionId, branchId, String(p.agent || ''), String(p.kind || ''),
     JSON.stringify(p.payload ?? {}), String(p.evidence || ''), String(p.status || 'proposed'),
     String(p.severity || 'info'), Number(p.turn_no) || 0,
     p.status === 'applied' ? Date.now() : null, Date.now(),
@@ -1426,19 +1718,129 @@ export function addPatch(sessionId, p) {
   return Number(info.lastInsertRowid);
 }
 
-export function listPatches(sessionId, { branchId = null, status = null, limit = 50 } = {}) {
+/**
+ * 列出提案，新的在前。
+ *
+ * `kind` 用于「窗口式取数」：不同 kind 的产出速率差两个数量级，混在一起的固定窗口
+ * 会被高频类挤满（实测幕外流言 24 条窗口里只剩 6 条是真流言），
+ * 让真正的消费者只能看到最旧的一小撮。调用方要么给 kind，
+ * 要么自己接受「翻到哪条算哪条」。
+ */
+export function listPatches(sessionId, { branchId = null, status = null, kind = null, limit = 50 } = {}) {
   let sql = `SELECT * FROM patches WHERE session_id=?`;
   const params = [sessionId];
   if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
   if (status) { sql += ` AND status=?`; params.push(status); }
+  if (kind) { sql += ` AND kind=?`; params.push(kind); }
   sql += ` ORDER BY id DESC LIMIT ?`;
   params.push(limit);
   return getDb().prepare(sql).all(...params).map((r) => ({ ...r, payload: JSON.parse(r.payload_json || '{}') }));
 }
 
+/** 计数（面板要知道「显示 100 条」之外还有多少，不要静默截断）。 */
+export function countPatches(sessionId, { branchId = null, status = null, kind = null } = {}) {
+  let sql = `SELECT COUNT(*) AS c FROM patches WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  if (kind) { sql += ` AND kind=?`; params.push(kind); }
+  return Number(getDb().prepare(sql).get(...params)?.c) || 0;
+}
+
+/**
+ * 按 kind 分组计数。
+ * 面板要按类分堆显示（矛盾 / 知识越界 / 越界目标 …）：混在一起时数量最大的那一类
+ * 会把真正需要人工处置的少数几条挤出可视范围。
+ * 分组计数让面板能说「这一类共 N 条，显示最近 M 条」。
+ */
+export function patchKindCounts(sessionId, { branchId = null, status = null } = {}) {
+  let sql = `SELECT kind, COUNT(*) AS c FROM patches WHERE session_id=?`;
+  const params = [sessionId];
+  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  sql += ` GROUP BY kind`;
+  const out = {};
+  for (const row of getDb().prepare(sql).all(...params)) out[row.kind] = Number(row.c) || 0;
+  return out;
+}
+
 export function setPatchStatus(sessionId, id, status) {
   getDb().prepare(`UPDATE patches SET status=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END WHERE session_id=? AND id=?`)
     .run(status, status, Date.now(), sessionId, id);
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 幂等回执（旁路写入）                                                    */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+const EFFECT_STATUSES = new Set(['pending', 'applied', 'failed', 'stale']);
+
+function decorateEffectReceipt(row) {
+  return row ? { ...row } : null;
+}
+
+export function getEffectReceipt(sessionId, effectId, { branchId = null } = {}) {
+  const branch = branchId || 'main';
+  const row = getDb().prepare(
+    `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=? AND effect_id=?`,
+  ).get(sessionId, branch, effectId);
+  return decorateEffectReceipt(row);
+}
+
+export function listEffectReceipts(sessionId, { branchId = null, status = null, limit = 100 } = {}) {
+  const branch = branchId || 'main';
+  let sql = `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=?`;
+  const params = [sessionId, branch];
+  if (status) { sql += ` AND status=?`; params.push(status); }
+  sql += ` ORDER BY id DESC LIMIT ?`;
+  params.push(limit);
+  return getDb().prepare(sql).all(...params).map(decorateEffectReceipt);
+}
+
+/**
+ * 认领一个旁路效果。返回 { claimed, status, conflict, receipt }：
+ * - claimed=true：调用方应当执行，并以 applied/failed/stale 落回回执；
+ * - applied/stale：已终结，直接跳过（stale 只属于旧分支，不在新线重放）；
+ * - conflict：同一 effect_id 但输入指纹不同——这是「同一效果换了输入」的 bug，
+ *   不执行也不静默覆盖，交给调用方记录。
+ */
+export function claimEffect({ sessionId, branchId = null, turnNo = 0, agent = '', effectId, fingerprint = '' }) {
+  const branch = branchId || 'main';
+  const fp = String(fingerprint || '');
+  const d = getDb();
+  const existing = d.prepare(
+    `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=? AND effect_id=?`,
+  ).get(sessionId, branch, effectId);
+  if (!existing) {
+    d.prepare(`
+      INSERT INTO effect_receipts (session_id, branch_id, turn_no, agent, effect_id, fingerprint, status, attempt, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'pending', 1, ?)
+    `).run(sessionId, branch, Number(turnNo) || 0, String(agent || ''), effectId, fp, Date.now());
+    return { claimed: true, status: 'pending', conflict: false, receipt: getEffectReceipt(sessionId, effectId, { branchId: branch }) };
+  }
+  // 同一 effect_id 换了输入指纹就是 bug：无论当前状态如何都先报冲突，不静默覆盖。
+  if (fp && existing.fingerprint && fp !== existing.fingerprint) {
+    return { claimed: false, status: existing.status, conflict: true, receipt: decorateEffectReceipt(existing) };
+  }
+  if (existing.status === 'applied' || existing.status === 'stale') {
+    return { claimed: false, status: existing.status, conflict: false, receipt: decorateEffectReceipt(existing) };
+  }
+  // pending / failed：可重试。
+  d.prepare(`UPDATE effect_receipts SET attempt=attempt+1, fingerprint=?, turn_no=? WHERE id=?`)
+    .run(fp || existing.fingerprint, Number(turnNo) || existing.turn_no, existing.id);
+  return { claimed: true, status: 'pending', conflict: false, receipt: getEffectReceipt(sessionId, effectId, { branchId: branch }) };
+}
+
+/** 落回执。status: applied / failed / stale；pending 只由 claimEffect 产生。 */
+export function settleEffect(sessionId, effectId, { branchId = null, status, turnNo = null, agent = null } = {}) {
+  const branch = branchId || 'main';
+  if (!EFFECT_STATUSES.has(status)) throw new Error(`settleEffect: 非法状态 ${status}`);
+  getDb().prepare(`
+    UPDATE effect_receipts SET status=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END,
+      turn_no=COALESCE(?, turn_no), agent=COALESCE(?, agent)
+    WHERE session_id=? AND branch_id=? AND effect_id=?
+  `).run(status, status, Date.now(), turnNo == null ? null : Number(turnNo), agent, sessionId, branch, effectId);
+  return getEffectReceipt(sessionId, effectId, { branchId: branch });
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
@@ -1449,66 +1851,6 @@ export function setPatchStatus(sessionId, id, status) {
  * 取某分支可见的回合：分支自己的回合 + 分叉点之前继承来的回合。
  * 回合编号全局递增，回rollback只是换分支，不是删历史。
  */
-/* ══════════════════════════════════════════════════════════════════════ */
-/* v4：前情提要（滚动摘要）                                                */
-/* ══════════════════════════════════════════════════════════════════════ */
-
-/**
- * 写入一份摘要。同一分支/同一覆盖边界重复写入时覆盖（重压安全）。
- * 不删除旧摘要：它们保留在表里，作为「当时怎么概括的」审计记录。
- */
-export function addSummary(sessionId, { branchId = 'main', coversTurnTo, text, prevId = null, tokenCount = null }) {
-  const covers = Number(coversTurnTo);
-  if (!Number.isFinite(covers) || covers < 1) throw new Error('summary coversTurnTo must be >= 1');
-  const body = String(text || '').trim();
-  if (!body) throw new Error('summary text is empty');
-  const tokens = tokenCount ?? estimateTokens(body);
-  const d = getDb();
-  d.prepare(`
-    INSERT INTO summaries (session_id, branch_id, covers_turn_to, text, prev_id, token_count, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-    ON CONFLICT(session_id, branch_id, covers_turn_to) DO UPDATE SET
-      text=excluded.text, prev_id=excluded.prev_id, token_count=excluded.token_count, created_at=excluded.created_at
-  `).run(sessionId, branchId, covers, body, prevId ?? null, tokens, Date.now());
-  const row = d.prepare(`SELECT * FROM summaries WHERE session_id=? AND branch_id=? AND covers_turn_to=?`)
-    .get(sessionId, branchId, covers);
-  return row ? decorateSummary(row) : null;
-}
-
-function decorateSummary(row) {
-  return {
-    id: row.id,
-    session_id: row.session_id,
-    branch_id: row.branch_id,
-    covers_turn_to: row.covers_turn_to,
-    text: row.text,
-    prev_id: row.prev_id,
-    token_count: row.token_count,
-    created_at: row.created_at,
-  };
-}
-
-/**
- * 某一轮生效的摘要 = 覆盖边界不超过该轮的最新一份。
- * atTurn 省略时取最新（UI 查看用）；装配必须传当前回合。
- */
-export function getActiveSummary(sessionId, { branchId = 'main', atTurn = null } = {}) {
-  const limit = Number.isInteger(atTurn) ? atTurn : Number.MAX_SAFE_INTEGER;
-  const row = getDb().prepare(`
-    SELECT * FROM summaries
-    WHERE session_id=? AND branch_id=? AND covers_turn_to<=?
-    ORDER BY covers_turn_to DESC, id DESC LIMIT 1
-  `).get(sessionId, branchId, limit);
-  return row ? decorateSummary(row) : null;
-}
-
-/** 摘要历史（记忆面板/调试用）。 */
-export function getSummaries(sessionId, { branchId = 'main', limit = 20 } = {}) {
-  return getDb().prepare(`
-    SELECT * FROM summaries WHERE session_id=? AND branch_id=?
-    ORDER BY covers_turn_to DESC, id DESC LIMIT ?
-  `).all(sessionId, branchId, limit).map(decorateSummary);
-}
 
 /**
  * 当前分支 → 祖先链，每条边带上「祖先可继承到哪一轮」的上限。
@@ -1589,25 +1931,93 @@ export function getRecentTextForBranch(sessionId, branchId, forkTurn, turnsBack 
 }
 
 /**
- * 在回合原文里做子串检索。中文没有词边界，LIKE 子串比分词更可靠。
- * @returns {Array<{turn_no, kind, snippet}>}
+ * 在回合原文里做子串检索（只给模型主动发起的 recall_history 用）。
+ *
+ * - ≥3 个字符走 trigram 全文索引；<3 字退回 LIKE（中文两字人名很常见，FTS5 trigram 不收）。
+ * - 分支可见性与 getTurnsForBranch 同一套规则：不能只看 branch_id 相等，
+ *   否则分叉后搜不到继承的父分支原文，却可能搜到兄弟分支的回合。
+ * - atTurn 用来冻结「检索时点」，不把本拍之后的原文带进来。
+ *
+ * @returns {{hits:Array<{turn_no, kind, snippet, token_count}>, engine:'fts5'|'like'|'none'}}
  */
-export function searchTurns(sessionId, query, { branchId = null, limit = 8, kinds = ['player', 'narrator'] } = {}) {
+/**
+ * 按关键词检索回合原文（供 recall_history / 资料员历史通道使用）。
+ *
+ * `excludeFrom` 是**已经在上下文里逐字可见的那一段的起点**：检索跳过 `turn_no >= excludeFrom`
+ * 的回合。不设它的时候，模型很容易拿「这一拍刚说的话」当查询词，搜回来的就是它已经
+ * 看得见的东西——50 轮实测 20 条历史查询里 15 条是本拍玩家动作的子串，跨距长的查询全部落空。
+ * 它和 `atTurn` 不是一回事：`atTurn` 是「世界线走到哪」（分支可见性），
+ * `excludeFrom` 是「哪几拍不必再查」（上下文已经给了）。
+ */
+export function searchTurnsDetailed(sessionId, query, {
+  branchId = null,
+  forkTurn = null,
+  atTurn = Number.MAX_SAFE_INTEGER,
+  excludeFrom = null,
+  limit = 8,
+  kinds = ['player', 'narrator'],
+} = {}) {
   const q = String(query || '').trim();
-  if (!q) return [];
-  const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
-  let sql = `SELECT turn_no, kind, content, token_count FROM turns
-             WHERE session_id=? AND kind IN (${kinds.map(() => '?').join(',')}) AND content LIKE ? ESCAPE '\\'`;
-  const params = [sessionId, ...kinds, like];
-  if (branchId) { sql += ` AND branch_id=?`; params.push(branchId); }
-  sql += ` ORDER BY turn_no DESC, id DESC LIMIT ?`;
-  params.push(limit);
-  return getDb().prepare(sql).all(...params).map((r) => ({
-    turn_no: r.turn_no,
-    kind: r.kind,
-    snippet: truncate(r.content, 400),
-    token_count: r.token_count,
-  }));
+  if (!q) return { hits: [], engine: 'none' };
+  const db = getDb();
+  const kindSql = kinds.map(() => '?').join(',');
+  const cap = Math.max(limit * 4, limit); // 先多取候选，分支过滤后再截断
+  const upper = Number.isInteger(excludeFrom) && excludeFrom > 0
+    ? Math.min(atTurn, excludeFrom - 1)
+    : atTurn;
+  let rows = [];
+  let engine = 'like';
+
+  if ([...q].length >= 3) {
+    try {
+      const match = `"${q.replace(/"/g, '""')}"`;
+      rows = db.prepare(`
+        SELECT t.turn_no, t.kind, t.content, t.token_count, t.branch_id
+        FROM turns_fts f JOIN turns t ON t.id = f.rowid
+        WHERE turns_fts MATCH ? AND t.session_id=? AND t.kind IN (${kindSql}) AND t.turn_no<=?
+        ORDER BY t.turn_no DESC, t.id DESC LIMIT ?
+      `).all(match, sessionId, ...kinds, upper, cap);
+      if (rows.length) engine = 'fts5';
+    } catch { rows = []; }
+  }
+
+  if (!rows.length) {
+    const like = `%${q.replace(/[%_]/g, (m) => `\\${m}`)}%`;
+    rows = db.prepare(`
+      SELECT turn_no, kind, content, token_count, branch_id FROM turns
+      WHERE session_id=? AND kind IN (${kindSql}) AND turn_no<=? AND content LIKE ? ESCAPE '\\'
+      ORDER BY turn_no DESC, id DESC LIMIT ?
+    `).all(sessionId, ...kinds, upper, like, cap);
+  }
+
+  const chain = branchId ? branchChain(sessionId, branchId) : null;
+  const limits = chain ? new Map(chain.map((c) => [c.branch_id, c.limit])) : null;
+  const visible = rows.filter((r) => {
+    if (!limits) {
+      // 没有分支记录（旧会话/纯回合测试）：退回「自己的 + 编号不大于分叉点」。
+      if (!branchId) return true;
+      return r.branch_id === branchId || (forkTurn != null && r.turn_no <= forkTurn);
+    }
+    const lim = limits.get(r.branch_id);
+    // 兄弟分支的回合不在可见链里：undefined 必须当作不可见（不能靠 == null 放过）。
+    if (!limits.has(r.branch_id)) return false;
+    return lim == null || r.turn_no <= lim;
+  });
+
+  return {
+    engine,
+    hits: visible.slice(0, limit).map((r) => ({
+      turn_no: r.turn_no,
+      kind: r.kind,
+      snippet: truncate(r.content, 400),
+      token_count: r.token_count,
+    })),
+  };
+}
+
+/** 只要命中片段时用这个；engine 只对 recall_history 的 meta 有用。 */
+export function searchTurns(sessionId, query, opts = {}) {
+  return searchTurnsDetailed(sessionId, query, opts).hits;
 }
 
 /** 在断言里按主/谓/对象文本检索。 */
