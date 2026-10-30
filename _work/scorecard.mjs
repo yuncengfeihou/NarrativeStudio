@@ -82,6 +82,14 @@ const repScore = repP90 === null ? null
 const gram3P90 = num(r.memory.gram3?.stats?.p90);
 const gram3Score = gram3P90 === null ? null
   : piecewise(gram3P90 * 100, [[0, 100], [30, 90], [45, 75], [55, 55], [70, 30]]);
+// 最长连续照搬：2026-10-30 起这是重复维度的**主判据**，局部 5-gram 率退为参考值。
+// 理由写在 longrun-report.mjs 的 TH 里：45 拍以上 p90 的 95% 置信区间跨过阈值本身
+// （10.6%–19.4%，阈值 12%），且对「整段原样重演」几乎不敏感（394 字照搬 p90 只有 6%）。
+// 打分用全局最长那一拍而不是 p90：抄没抄是存在性问题，分位数会把一次重演摊薄。
+const rl = r.memory.repeat_longest;
+const rlWorst = num(rl?.worst?.len);
+const rlScore = rlWorst === null ? null
+  : piecewise(rlWorst, [[0, 100], [30, 96], [45, 88], [60, 70], [80, 45], [100, 28], [200, 10], [400, 5]]);
 const endings = r.quality.endings;
 const endingScore = num(endings?.formulaic_rate) === null ? null
   : 100 - 100 * clamp(num(endings.formulaic_rate) / 0.25, 0, 1) * 0.85;
@@ -96,8 +104,11 @@ const quality = blend([
   { key: '正文均长', weight: 2.0, score: lenScore, raw: len.mean, unit: '字/拍', note: '600 字以下偏薄，1450 上下最好（本卡实测区间）' },
   { key: '最短一拍', weight: 0.8, score: lenFloor, raw: len.min, unit: '字', note: '有 300 字以下的一拍就是「敷衍了一拍」' },
   { key: '长度离群', weight: 0.8, score: outlier, raw: len.len_outlier_ratio, unit: 'max/p50', note: '单拍暴涨超过 3 倍会让节奏断掉' },
-  { key: '局部重复均值', weight: 1.4, score: repMean === null ? null : piecewise(repMean * 100, [[0, 100], [4, 95], [6, 85], [9, 70], [14, 45]]), raw: repMean === null ? null : Math.round(repMean * 1000) / 10, unit: '%', note: '5-gram vs 前 3 轮' },
-  { key: '局部重复 p90', weight: 1.4, score: repScore, raw: repP90 === null ? null : Math.round(repP90 * 1000) / 10, unit: '%', note: '尖峰比均值更能说明「有一拍在套模板」' },
+  { key: '局部重复均值', weight: 1.0, score: repMean === null ? null : piecewise(repMean * 100, [[0, 100], [4, 95], [6, 85], [9, 70], [14, 45]]), raw: repMean === null ? null : Math.round(repMean * 1000) / 10, unit: '%', note: '5-gram vs 前 3 轮；45 拍以上置信区间跨阈值，只作参考' },
+  { key: '局部重复 p90', weight: 1.0, score: repScore, raw: repP90 === null ? null : Math.round(repP90 * 1000) / 10, unit: '%', note: '分位数看不见整段重演（394 字照搬只到 29%），已降为参考' },
+  // 权重 2.0 与「正文均长」同档：照搬是正文质量的直接对立面——
+  // 一段原样重演意味着这一拍没写新内容，比「平均多 200 字」严重得多。
+  { key: '最长连续照搬', weight: 2.0, score: rlScore, raw: rlWorst, unit: '字', note: '逐拍与前 3 拍的最长公共子串；≥100 字 = 正文 1/3 原样照搬' },
   { key: '累积 3-gram', weight: 0.6, score: gram3Score, raw: gram3P90 === null ? null : Math.round(gram3P90 * 1000) / 10, unit: '%', note: '随轮数必然上涨，只作参考' },
   { key: '结尾公式化', weight: 1.0, score: endingScore, raw: endings?.formulaic_rate === undefined ? null : Math.round(endings.formulaic_rate * 1000) / 10, unit: '%', note: '「必须…了 / 该…了」型收尾' },
   { key: '走向 tone 覆盖', weight: 1.0, score: toneScore, raw: tones, unit: '种', note: '全局能给出几种不同气质的选项' },
@@ -118,13 +129,32 @@ const lifeKnown = lifeDist.reduce((s, d) => s + d.n, 0);
 const lifeUsed = new Set(lifeDist.filter((d) => d.n > 0).map((d) => d.value)).size;
 const lifeScore = lifeKnown ? piecewise(lifeUsed, [[1, 60], [2, 85], [3, 100]]) : null;
 const lifeCheck = r.checks.find((c) => c.id === 'life_state_consistency');
-const lifeCheckScore = lifeCheck ? { PASS: 100, WARN: 70, FAIL: 25, INFO: null }[lifeCheck.status] ?? null : null;
+// 三态映射（PASS/WARN/FAIL → 100/70/25）不能再用：第三档「正文提及但不在场」
+// （回忆/对白/否定式）已降为 INFO，而 INFO 在这里会落到 null——blend() 会把这一项
+// **连同 2.0 的权重一起剔掉**再重算权重（见 :60-66），于是「有 4 例正常叙述」的局
+// 反而比它自己实际表现得分更高，而且总分看起来还更可信。权重最重的项不该能被「无数据」跳过。
+// 所以改读报告里实际量到的计数：0 例真缺陷才是 100，正文提及一例都不扣（它不是缺陷）。
+const lifeRows = r.memory.offstage_mentioned?.rows || [];
+const lifeFatalN = lifeRows.filter((x) => (x.in_present || []).length > 0).length;
+const lifeReviveN = lifeRows.filter((x) => (x.in_present || []).length === 0
+  && (x.named_by_player || []).length > 0).length;
+const lifeOffstageN = lifeRows.length - lifeFatalN - lifeReviveN;
+const lifeCheckScore = !lifeCheck
+  ? null
+  : lifeFatalN > 0 ? piecewise(lifeFatalN, [[1, 25], [3, 10]])
+    : lifeReviveN > 0 ? piecewise(lifeReviveN, [[1, 40], [3, 20]])
+      : 100;
 const orphanChk = r.checks.find((c) => c.id === 'orphan_player_turns');
 const orphanScore = orphanChk ? { PASS: 100, WARN: 60, FAIL: 20 }[orphanChk.status] ?? null : null;
 const emptyChk = r.checks.find((c) => c.id === 'empty_narration');
 const emptyScore = emptyChk ? { PASS: 100, WARN: 60, FAIL: 20 }[emptyChk.status] ?? null : null;
 const cont = r.memory.continuity;
-const contOpen = num(cont?.major_open);
+// 读**窄化后**的挂 open 数（只算 contradiction / state_jump），与报告判据同口径。
+// 读 `major_open`（全部 kind）会把 alias 的「按设计等人工裁决」折成「报出来没人处理」，
+// 而 alias 处置完本来就不需要动作——同一件事在判据里已经修正过，打分卡不能留旧口径。
+// 回退到 major_open 只为兼容更早的 JSON 产物，不是长期路径。
+const contOpen = num(cont?.major_open_absorb ?? cont?.major_open);
+const contOpenOther = num(cont?.major_open_other) ?? 0;
 const contScore = contOpen === null ? null : piecewise(contOpen, [[0, 100], [1, 85], [2, 70], [4, 45], [8, 20]]);
 const contFixRate = (() => {
   const rows = cont?.rows || [];
@@ -154,10 +184,10 @@ const memory = blend([
   { key: '生死状态被用到', weight: 1.0, score: lifeScore, raw: lifeUsed, unit: '种取值', note: '三种取值都在用 = 这套机制是活的' },
   // 这条读的是报告里合并后的判定：D32 的两表分裂与 D34 的「同名条目吞掉人物」都会落在这里，
   // 所以叫「离场角色不得再上场」而不是「D32 双表一致」——判据只有一个，成因有两种。
-  { key: '离场角色不得再上场', weight: 2.0, score: lifeCheckScore, raw: lifeCheck?.status, unit: '', note: 'D32 两表分裂 / D34 同名条目吞掉人物，都会让已离场的人继续在场' },
+  { key: '离场角色不得再上场', weight: 2.0, score: lifeCheckScore, raw: lifeCheck ? `${lifeFatalN}+${lifeReviveN}/${lifeRows.length}例` : null, unit: '', note: `在场/点名(FAIL 档)/正文提及(非缺陷) = ${lifeFatalN}/${lifeReviveN}/${lifeOffstageN}；D32 两表分裂 / D34 同名条目吞掉人物都会落在这里` },
   { key: '孤儿回合', weight: 1.5, score: orphanScore, raw: orphanChk?.status, unit: '', note: '玩家行动落库但正文没产出' },
   { key: '空正文落库', weight: 1.5, score: emptyScore, raw: emptyChk?.status, unit: '', note: 'D31 之后应当为 0' },
-  { key: '校勘 major 挂 open', weight: 1.2, score: contScore, raw: contOpen, unit: '条', note: '报出来却没人处理的不一致' },
+  { key: '校勘 major 挂 open', weight: 1.2, score: contScore, raw: contOpen === null ? null : `${contOpen}（另有 ${contOpenOther} 条 alias 类待人工）`, unit: '条', note: '报出来却没人处理的不一致；只算 contradiction / state_jump' },
   { key: '校勘 fix 执行率', weight: 1.0, score: contFixScore, raw: contFixRate === null ? null : Math.round(contFixRate * 100), unit: '%', note: 'D12/D29 之后应当接近 100%' },
   { key: '目标声明拦下', weight: 0.8, score: targetScore, raw: targetRej, unit: '条', note: '被合法目标校验挡住的写入' },
   { key: '数值增量被拒', weight: 0.8, score: rejectedScore, raw: rejected, unit: '条', note: 'D11 之后应当为 0' },
@@ -234,6 +264,10 @@ const prefixRate = num(cache?.prefix_shared_rate?.mean);
 const prefixScore = prefixRate === null ? null : piecewise(prefixRate * 100, [[20, 40], [40, 75], [55, 100], [70, 100], [85, 85]]);
 const upRate = num(cache?.upstream?.session_rate);
 const upScore = upRate === null ? null : piecewise(upRate * 100, [[0, 50], [10, 70], [20, 85], [35, 100], [60, 95]]);
+// 注：`cache_upstream_hit` 那条判据（扣结构回退后的 0 命中剩余拍数）**故意不进打分卡**。
+// 它测的是上游路由抽签，不是我们的结构；把它折进「稳定性」会让分数随供应商抖动。
+// 它已由上面的 `upRate`（真实命中率）作为连续量体现，不需要再加一条三态项。
+// 真要加时记住：它现在有 INFO 档，INFO 映射成 null 会被 blend() 连权重一起剔掉。
 const cacheChk = r.checks.find((c) => c.id === 'cache_prefix_reuse');
 const cacheChkScore = cacheChk ? { PASS: 100, WARN: 70, FAIL: 30 }[cacheChk.status] ?? null : null;
 const degradedChk = r.checks.find((c) => c.id === 'degraded_rate');
@@ -318,9 +352,9 @@ console.log(`\n──── 原始指标速览 ────`);
 console.log(`正文      ${len.total} 字 / ${len.n} 拍｜均 ${Math.round(len.mean)}｜p50 ${len.p50}｜min ${len.min}｜max ${len.max}`);
 // 比率在报告里是 0–1，这里要 ×100 再打印：否则 7.6% 会显示成「0.1%」，与上面明细行自相矛盾。
 const pct1 = (x) => (x === null || x === undefined ? '—' : (Math.round(x * 1000) / 10).toFixed(1));
-console.log(`重复      局部 5-gram 均 ${pct1(repMean)}% / p90 ${pct1(repP90)}%｜3-gram p90 ${pct1(gram3P90)}%`);
+console.log(`重复      局部 5-gram 均 ${pct1(repMean)}% / p90 ${pct1(repP90)}%｜3-gram p90 ${pct1(gram3P90)}%｜最长照搬 ${rlWorst === null ? '—' : `${rlWorst} 字`}${rl?.worst ? `（t${rl.worst.from}→t${rl.worst.turn_no}）` : ''}`);
 console.log(`记忆      断言 ${r.memory.assertions?.map((a) => `${a.status}=${a.n}`).join(' ')}｜线索 ${r.memory.threads?.map((t) => `${t.status}=${t.n}`).join(' ')}｜场次 ${r.scale.scenes?.count}`);
-console.log(`一致性    校勘 ${cont?.total} 条（major ${cont?.major}｜挂 open ${cont?.major_open}）｜目标拦下 ${r.memory.skipped_targets?.items}｜孤儿 ${orphanChk?.detail?.slice(0, 30) ?? '—'}`);
+console.log(`一致性    校勘 ${cont?.total} 条（major ${cont?.major}｜挂 open ${cont?.major_open}，其中 contradiction/state_jump ${cont?.major_open_absorb ?? '—'}）｜目标拦下 ${r.memory.skipped_targets?.items}｜孤儿 ${orphanChk?.detail?.slice(0, 30) ?? '—'}`);
 console.log(`上下文    斜率 ${Math.round(slope ?? 0)} tok/轮｜峰值 ${peak}｜索引 ${(indexFull ?? 0) * 100 | 0}% 轮完整｜覆盖 ${mentionHit ?? '—'}/310`);
 console.log(`缓存      前缀共享 ${Math.round((prefixRate ?? 0) * 1000) / 10}%｜上游命中 ${Math.round((upRate ?? 0) * 1000) / 10}%｜真改写 ${rewrite}`);
 console.log(`用量      ${usage?.session?.requests} 请求｜prompt ${usage?.session?.prompt_tokens}｜completion ${usage?.session?.completion_tokens}｜墙钟 ${Math.round((usage?.session?.total_ms ?? 0) / 1000)}s`);
@@ -334,7 +368,9 @@ const payload = {
   sample: r.sample,
   dimensions: Object.fromEntries(dims.map(([n, d]) => [n, { score: d.score, items: d.items }])),
   raw: {
-    chars: len, repeat_local: rep, gram3_p90: gram3P90, continuity: { total: cont?.total, major: cont?.major, major_open: cont?.major_open },
+    chars: len, repeat_local: rep, repeat_longest: rl, gram3_p90: gram3P90,
+    continuity: { total: cont?.total, major: cont?.major, major_open: cont?.major_open, major_open_absorb: cont?.major_open_absorb ?? null, major_open_other: cont?.major_open_other ?? null },
+    offstage_mentioned: { n: lifeRows.length, fatal: lifeFatalN, revive_missing: lifeReviveN },
     assertions: r.memory.assertions, threads: r.memory.threads, scenes: r.scale.scenes?.count,
     budget: { slope, peak, plan, index_full_rate: indexFull, degraded_turns: degraded.length },
     mention: { hit: mentionHit, total: mention?.total, tiers: mention?.tiers },

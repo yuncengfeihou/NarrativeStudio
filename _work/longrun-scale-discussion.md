@@ -1,7 +1,8 @@
 # 长轮次记忆：讨论清单（D1–D34 已全部落地；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回，D34 让投影按实体真实类型取白名单）
 
 > 用途：把「几十轮就有这么多问题、几百轮怎么办」这个讨论拆成可逐条拍板的决策项。
-> **状态（2026-10-30）**：**D1–D34 已全部落地**。D1–D8 经 50 轮真实会话验证；
+> **状态（2026-10-30）**：**D1–D34 已全部落地**（D34 的 45 拍复验局是空过，
+> 尚无正面命中证据，见 §3 D34「待验」）。D1–D8 经 50 轮真实会话验证；
 > D9–D15 是那 50 轮与第二轮验证长跑现场发现的缺陷（D10/D11/D12/D15 是真实 bug，
 > 不是设计取舍），已按推荐方案全部实现并测通。**D19–D22 都是报告判据自身的缺陷**
 > （D19 分类名错、D20 层级错、D21 对象错、D22 曾被怀疑缺信号）——它们不改变运行时行为，
@@ -1029,7 +1030,7 @@ importance 分级（major:normal:minor = 1:1:1）
 
 ---
 
-## 4. 建议的顺序（D1–D34 已全部落地；D34 的修复尚待下一局长跑复验）
+## 4. 建议的顺序（D1–D34 已全部落地；D34 已跑过一局复验，但该局是**空过**，缺正面命中证据）
 
 ```
 第 0 步（已做完）：
@@ -1097,7 +1098,7 @@ D3 那种「改取数逻辑」才需要数据支撑。
 
 ## 5. 拍板结果
 
-**D1–D33 全部已定并已落地，没有待拍板项**（D5 遗留的 seeds 槽位于 m10518 拍板为「不改上限 8、只改可见性」并已落地；D26 方案 A 已做完同剧本双局长跑、维持会话级开关；D1–D8 经 50 轮真实会话验证；D9–D13 于 m03366 按推荐方案落地；D14/D15/D17 在验证长跑现场发现并当拍落地；D16 是 D1 修法自带的回归，逐拍读 coverage 时发现；D19 是**报告自己的断点分类口径错了**，用三局前后对照验出来的；D20 是同一形状的第二次发作——时间推进按场次级采样，量不到场内推进）。
+**D1–D34 全部已定并已落地，没有待拍板项**（D5 遗留的 seeds 槽位于 m10518 拍板为「不改上限 8、只改可见性」并已落地；D26 方案 A 已做完同剧本双局长跑、维持会话级开关；D1–D8 经 50 轮真实会话验证；D9–D13 于 m03366 按推荐方案落地；D14/D15/D17 在验证长跑现场发现并当拍落地；D16 是 D1 修法自带的回归，逐拍读 coverage 时发现；D19 是**报告自己的断点分类口径错了**，用三局前后对照验出来的；D20 是同一形状的第二次发作——时间推进按场次级采样，量不到场内推进；D34 已落地并跑过一局 45 拍复验，**但该局 D34 判据是空过**——局内 50 条 `introduce` 里零个「卡内非人物条目被 declare 成 person」的形状，`entity_promoted` / `dropped_delta` 均 0 条，判据 PASS 不等于修复生效，见 §3 D34「待验」）。
 
 | 决策 | 结论 | 出处 |
 |---|---|---|
@@ -3779,6 +3780,36 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 **测试**：`tests/test-memory.js` 新增 `=== D34：…===` 整块 29 条断言（不 introduce 不升级 / 升级且骨架齐全 /
 四条运行态全落地 / 仍是 concept 时被挡且留痕 / 普通人物照旧 / 只升不降 / player 路径被挡也留痕）。
 
+#### 待验：45 拍局是「空过」，不是正面命中（2026-10-30 复核）
+
+45 拍复验局 `91314aeb` 的 D34 判据记 PASS，但**那是按设计不会触发的空过**：
+
+- 该局 `world_state` 共 **50 条 `op='introduce'` 增量**，逐条比对卡快照的 `entities[]`，只有 **1 条命中卡内已有条目**（`兔子书包`，模板类型同为 `item`），**零个「卡内非人物条目被 declare 成 person」的形状**。
+- 该局 patches：`entity_promoted` **0 条**、`dropped_delta` **0 条**——两条新留痕通道一次也没被触发（它们只在真撞名时才写）。
+- 现有卡 `presets/*.json` 的 310 个实体里只有 1 个会撞（`宫男`），本局剧情没走到它。
+
+所以 D34 目前的证据只有：**`tests/test-memory.js` 的 29 条单测 + 110 拍旧库 `a3363ce8` 的回溯复算**（8 条丢弃归零）。
+「判据 PASS」在这里只说明「本局没出现该形状」，**不说明修复生效**——这是同族第六次踩的同一个坑：
+**判据量不到的形状，会让报告给它发合格证**（D30 给自愈发缺陷、D32 给缺陷发合格证、D34 这条给未激活的修复发 PASS）。
+要拿到正面证据，需要**造一个必然撞名的场景**（测试内临时建卡，用假上游驱动一拍 archivist 输出，
+声明「卡里已有 concept 的名字」为 person 的 `introduce` + 一批 `mood`/`life_state` 写入），
+断言三条：类型升级成 person、`entity_promoted` 留痕、被挡路径进 `dropped_delta` 而非静默丢。
+
+**已补（2026-10-30 同日）**：
+- `tests/test-memory.js` 新增 **D34 端到端块（21 条）**——进程内假上游（替换 `globalThis.fetch`，
+  分派键是 `body.response_format?.type==='json_object'` 与 `body.stream===true`，不认提示词首行）
+  驱动两拍真实 `runTurn`，**跨拍**构造（t1 只 introduce 撞名 person，t2 只写四条运行态——
+  同拍构造会因为 states 先于 changes 写而必然丢首拍）。正向断言 `entity_promoted` 恰好 1 条且
+  `from='concept'`、末态四字段落地；反向同拍构造断言 `dropped_delta` 1 条且 `payload.entity_type='concept'`。
+  两拍 116ms、不需要 `STEPFUN_API_KEY`。**这把「投影对了但 patch 没落库」这条断链也覆盖上了。**
+- 报告侧 `dropped_delta_silent` 现在**无条件**打印「撞名且类型不同的 introduce = N 行」，
+  N=0 时文案写明「该形状本局未出现，PASS 不代表修复被验证」，且判 **INFO 不判 PASS**——
+  「量不到」和「量到 0」不许说成同一件事。
+- 同批还暴露出**同族第七次**：`sanitizeChange` 的 `return null` 让 `changes` 通道的越界写入
+  **连 `world_state` 行都没有**，比 D34 更彻底（D34 是「写进去了、投影期被挡」）。已作为 **D35**
+  单独立项落地（丢弃返回 `{rejected:true, reason,…}` 并落 `patches(kind='rejected_change')`），
+  细节记在 AGENTS.md §5.3。
+
 **教训（同族第五条）**：**「静默丢弃」和「拒绝写入」是两件事**。`sanitizeChange` 会 `return null`（可数可看），
 而 `applyDelta` 里 `if (!allowed.has(path)) return;` 什么都不留——同一条写入到底是被拒了还是没到装配层，
 从数据上分辨不出来。凡「按白名单过滤」处都要问：被滤掉的那部分谁看得见。
@@ -3846,3 +3877,5 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 | 2026-10-30 | **D34 落地**：卡内 `concept` 条目与运行期同名 `introduce` 人物撞 id/name → 投影 `type` 停在 `concept` → 人物运行态（`life_state`/`mood`/`goal`/`location`）被 `pathsFor()` 静默丢弃。修法三步：白名单按实体真实类型取、`promoteToPerson()` 把同名条目在投影里升级成人物、`dropped_deltas` 让被挡的写入留痕（`patches(kind='dropped_delta')`）。真库回放 110 拍局：8 条丢弃归零、宫男 life/mood/location 全部落地；test-memory 新增 29 条（489 passed），全量 5 套件绿。同时把 D32 的报告判据与 `_work/d32-check.mjs` 的 id/name 归一修好（第一版报出 4 行假分裂，真分裂 0） |
 | 2026-10-30 | **45 拍复验局 `91314aeb`（2.86h / 46 拍 / 零降级 / VERDICT WARN，PASS 28 · WARN 5 · FAIL 0）**：D34 判据 PASS（白名单丢弃 0 条）；D10 两路共回程 7 次（named_by_player 3 · onstage_state 4，按人去重后第二路唯一贡献 2/5），gorge 窗口内漏回程 0 拍；D26-B 场记单省 26.1%（1574 tok/拍，累计 72384）；D32 两表按名字归一零分裂；校勘 fix 3/3；孤儿 0；空正文 0（t22/t41 首次为空、关推理重试救回）。WARN 5：上游缓存 12.8%、校勘 major 挂 open 1 条、局部重复 p90 13.4%、越 FAIL 线 2/45、离场后仍被提名 4 例（全是玩家没点名的正文顺带提及）。 |
 | 2026-10-30 | **D10 回程第二路落地**：新增 `reviveOnstageGone()`——史官这一拍把某人写成在场（`location`/`condition`/`mood`/`goal`/`status` 或账本 `present`）就写回 `alive`，`patches(kind='life_state_revived', reason='onstage_state', via=<字段>)`。`applyArchivistUpdate()` 返回值新增 `applied.onstage`（本拍真实写入的 who/field/life_state，只供回程与审计，不进提示词）。为什么加：110 拍实测 11 个 `gone` 的人里 9 个之后又被写成在场，但只有 2 个被玩家点过名——第一路只认玩家点名，覆盖不到「他自己回到镜头里」。报告侧同步：回程之后的在场不再算「离场仍上场」（同一事实不判两次）。测试：test-memory 新增 11 条断言（在场态回程 / present 触发 / dead 不复活 / 同拍自声明不翻案 / 非在场类字段不触发），500 passed；全量 6 套件全绿。 |
+| 2026-10-30 | **D35 落地**：`sanitizeChange` 过去 13 处 `return null` —— `changes` 通道的越界写入**连 `world_state` 行都没有**，无 patch、无计数，状态悄悄停在错值上而报告全绿（同族第七次）。现在丢弃返回 `{rejected:true, reason, op, kind, entity_id, path, entity_kind?, entity_type?}`，11 个固定 reason 码；`applyArchivistUpdate` 出 `applied.rejected_changes={count,by_reason,items}` 并落**一条** `patches(kind='rejected_change', status='failed', severity='warn')`。**与 `dropped_delta` 不许合并**（连门都没进 vs 进门后被挡）。报告新增判据 `rejected_change_visible`（>0 判 WARN、=0 判 INFO——「量不到」与「量到 0」不许说成同一件事，空过可见）。测试：test-memory 新增 39 条（11 个码逐个 + 成功形状冻结 + 预扫守卫），586 passed。 |
+| 2026-10-30 | **D36 落地 + 五条 WARN 判据重修**：①alias 类提案落 `noted`/`manual_only`/`alias_merge_needs_human`（不再冒充「等我裁决」）；新增 `POST /api/sessions/:id/patches/:id/apply` 与 `server/memory/patch-apply.js`，规范名只由卡快照 `buildAliasIndex` 定、只合并「一个在卡一个不在」、只写 `aliases add`，幽灵实体不删但报进 `runtime_duplicates`。②重复率改判 `repeat_longest`（≥100 FAIL / 60–99 WARN），5-gram p90 降 INFO——实测**排序与危害相反**（d7a6f899 394 字照搬却判 PASS、91314aeb 74 字却判 WARN）。③缓存判据改「连续 ≥5 拍 0 命中且扣掉结构回退后仍 ≥3 拍」，输出 `capture_rate`/`zero_runs`/`hit_capture_p10`。④离场第三档改名 `offstage_mentioned` 判 INFO（`lintState` 根本不接收正文，靠语气分辨「提及 vs 上场」就是堆叠识别器）。⑤D34 判据补「撞名形状 N 行」无条件输出 + PASS 改两级；端到端两拍假上游测试补齐。⑥absentees 键不再用模型声明的 kind（宫男 `concept/宫男` 匹配不上 `::person` → 场记单少一人）。全量 586/541/260/59/183 全绿，check-imports 与 deadcode-scan 均干净。 |

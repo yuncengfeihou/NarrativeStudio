@@ -158,20 +158,3 @@ export function graphAncestors(graph, id) {
   }
   return out;
 }
-
-/** 直接子节点。 */
-export function graphChildren(graph, id) {
-  const target = graph.resolve ? graph.resolve(id) : id;
-  const out = [];
-  for (const node of graph.entities.values()) {
-    if (!node.parent_id) continue;
-    if (graph.resolve(node.parent_id) === target) out.push(node.id);
-  }
-  return out;
-}
-
-/** 卡里是否存在包含关系（决定世界索引是否用树）。 */
-export function hasContainment(graph) {
-  for (const node of graph.entities.values()) if (node.parent_id) return true;
-  return false;
-}

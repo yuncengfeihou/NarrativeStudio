@@ -1747,6 +1747,11 @@ export function countPatches(sessionId, { branchId = null, status = null, kind =
   return Number(getDb().prepare(sql).get(...params)?.c) || 0;
 }
 
+export function getPatch(sessionId, id) {
+  const row = getDb().prepare(`SELECT * FROM patches WHERE session_id=? AND id=?`).get(sessionId, Number(id));
+  return row ? { ...row, payload: JSON.parse(row.payload_json || '{}') } : null;
+}
+
 /**
  * 按 kind 分组计数。
  * 面板要按类分堆显示（矛盾 / 知识越界 / 越界目标 …）：混在一起时数量最大的那一类
@@ -1764,8 +1769,22 @@ export function patchKindCounts(sessionId, { branchId = null, status = null } = 
   return out;
 }
 
-export function setPatchStatus(sessionId, id, status) {
-  getDb().prepare(`UPDATE patches SET status=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END WHERE session_id=? AND id=?`)
+/**
+ * 改提案状态。
+ *
+ * `payload` 可选：人工处置（如 `/patches/:id/apply` 的别名合并）要把「为什么成/为什么不成」
+ * 写回同一条提案。`patches` 表没有 fix_result 列，原因一直存在 payload_json 里
+ * （见 `applyContinuityFixes` 的 `reject()`），这里给一个受控的写入口，避免调用方
+ * 绕过 store 直接拼 SQL（红线 7）。
+ */
+export function setPatchStatus(sessionId, id, status, { payload = null } = {}) {
+  const d = getDb();
+  if (payload) {
+    d.prepare(`UPDATE patches SET status=?, payload_json=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END WHERE session_id=? AND id=?`)
+      .run(status, JSON.stringify(payload), status, Date.now(), sessionId, id);
+    return;
+  }
+  d.prepare(`UPDATE patches SET status=?, applied_at=CASE WHEN ?='applied' THEN ? ELSE applied_at END WHERE session_id=? AND id=?`)
     .run(status, status, Date.now(), sessionId, id);
 }
 
@@ -1785,16 +1804,6 @@ export function getEffectReceipt(sessionId, effectId, { branchId = null } = {}) 
     `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=? AND effect_id=?`,
   ).get(sessionId, branch, effectId);
   return decorateEffectReceipt(row);
-}
-
-export function listEffectReceipts(sessionId, { branchId = null, status = null, limit = 100 } = {}) {
-  const branch = branchId || 'main';
-  let sql = `SELECT * FROM effect_receipts WHERE session_id=? AND branch_id=?`;
-  const params = [sessionId, branch];
-  if (status) { sql += ` AND status=?`; params.push(status); }
-  sql += ` ORDER BY id DESC LIMIT ?`;
-  params.push(limit);
-  return getDb().prepare(sql).all(...params).map(decorateEffectReceipt);
 }
 
 /**

@@ -320,8 +320,14 @@ export async function openMemoryPanel(sessionId, opts = {}) {
       // `failed`（D31：模型给出的修复提案形态不对、或那类通道根本没实现）是终态，
       // 再点「接受」也不会执行——只有 `open` 才是等人裁决。把它当 pending 会给出
       // 两个按了没反应的按钮，比不显示更坏。
-      const pending = p.status !== 'applied' && p.status !== 'dismissed' && p.status !== 'failed';
       const terminalFail = p.status === 'failed';
+      // `noted`（alias 类）不是「等你裁决」，是「系统按设计不动、要你亲手合并」：
+      // 它同样该给按钮，但按钮必须真的改世界（POST …/patches/:id/apply），
+      // 而不是 /resolve 那条只改状态的老路——那条对实体零效果，点了等于骗人。
+      const noted = p.status === 'noted';
+      const pending = !terminalFail && p.status !== 'applied' && p.status !== 'dismissed';
+      const canAutoApply = p.kind === 'alias' && (noted || pending);
+      const statusLabel = terminalFail ? '未执行' : (noted ? '待人工合并' : p.status);
       patchList.appendChild(el('div', { class: 'mem-patch' + (pending ? ' is-pending' : '') + (terminalFail ? ' is-failed' : '') },
         el('span.mem-patch-kind', {}, PATCH_KIND_LABEL[p.kind] || p.kind),
         el('span.mem-patch-sev', {}, SEVERITY_LABEL[p.severity] || p.severity),
@@ -329,10 +335,25 @@ export async function openMemoryPanel(sessionId, opts = {}) {
         // 各类提案把话放在不同字段，统一走 patchClaim 归一，不要把 JSON 铺在界面上。
         el('span.mem-patch-claim', {}, truncate(patchClaim(p), 140)),
         p.evidence ? el('span.mem-patch-ev', {}, truncate(p.evidence, 120)) : null,
-        el('span.mem-patch-status', {}, terminalFail ? '未执行' : p.status),
+        el('span.mem-patch-status', {}, statusLabel),
         terminalFail ? el('span.mem-patch-note', {}, FAIL_REASON_LABEL[patchFailReason(p)] || '这条修复无法自动执行') : null,
-        pending ? el('div.mem-patch-actions', {},
-          el('button.btn-sm', {
+        noted ? el('span.mem-patch-note', {}, '系统只记录、不自动合并：点「合并别名」按卡里的名字确定规范名') : null,
+        (pending || noted) ? el('div.mem-patch-actions', {},
+          canAutoApply ? el('button.btn-sm', {
+            onclick: async () => {
+              try {
+                const r = await api.applyPatch(sessionId, p.id);
+                const kept = r?.fix_result?.canonical?.name || '';
+                const dups = r?.fix_result?.runtime_duplicates || [];
+                toast(kept ? `已合并为「${kept}」${dups.length ? `（运行期同名：${dups.join('、')}）` : ''}` : '已合并');
+              } catch (err) {
+                // 400 的 reason 是「为什么不能自动合并」，必须让作者看见：
+                // 静默失败会让人以为点过了、世界已经改了。
+                toast(`无法自动合并：${err?.message || '未知原因'}`);
+              }
+              await refresh();
+            },
+          }, '合并别名') : el('button.btn-sm', {
             onclick: async () => {
               await api.resolvePatch(sessionId, p.id, 'applied');
               toast('已接受');

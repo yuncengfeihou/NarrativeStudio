@@ -18,10 +18,11 @@ import {
   addAssertion, addNote, countVisibleTurns, deleteNote, deleteSession, deleteVoice, getAssertions,
   getBranch, getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
   getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
-  countPatches, patchKindCounts, countVoices,
+  countPatches, patchKindCounts, countVoices, getPatch,
   retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
   updateTurnContent,
 } from '../memory/store.js';
+import { applyPatchAction } from '../memory/patch-apply.js';
 import { recallHistory } from '../memory/recall-history.js';
 import { craftCatalog, normalizeCraftSettings } from '../world/craft.js';
 
@@ -630,6 +631,39 @@ sessionsRouter.post('/sessions/:id/patches/:patchId/resolve', (req, res) => {
   const status = ['applied', 'dismissed'].includes(req.body?.status) ? req.body.status : 'dismissed';
   setPatchStatus(session.id, Number(req.params.patchId), status);
   res.json({ ok: true, status });
+});
+
+/**
+ * POST /api/sessions/:id/patches/:patchId/apply
+ *
+ * 「接受」和「真的执行」是两件事。上面的 `/resolve` 只改状态——对 `alias` 这类
+ * 「同一实体两个名字」的提案，点了接受之后账本里两个名字照旧各写各的，
+ * 界面显示已处理，世界没变。这是一个静默失真：报告与面板都以为修好了。
+ *
+ * 这个入口只做**确定性**动作（见 `server/memory/patch-apply.js`）：规范名由卡快照的
+ * 别名索引定，只合并「一个名字在卡里、另一个不在卡里」的形态，其余返回 400 并
+ * 写明 reason。不做模糊猜测、不调模型、不改 `name`。
+ */
+sessionsRouter.post('/sessions/:id/patches/:patchId/apply', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const result = applyPatchAction(session.id, Number(req.params.patchId), {
+    branchId: session.branch_id || 'main',
+  });
+  if (!result.found) return res.status(404).json({ error: { message: 'patch not found' } });
+  if (!result.ok) {
+    return res.status(400).json({
+      error: { message: result.reason || 'apply failed', code: result.reason },
+      patch: getPatch(session.id, Number(req.params.patchId)),
+    });
+  }
+  res.json({
+    ok: true,
+    status: result.status,
+    already: !!result.already,
+    fix_result: result.fix_result,
+    patch: getPatch(session.id, Number(req.params.patchId)),
+  });
 });
 
 /* ------------------------------ 作者笔记 ------------------------------ */

@@ -271,6 +271,15 @@ console.log('\n=== 记忆六表 ===');
   ok(pKind.data.patches.every((x) => x.kind === 'offstage_event'), 'kind 过滤生效');
   ok(pKind.data.patches.length <= 5, 'limit 生效');
 
+  // 「接受」与「执行」是两条不同的路由：/resolve 只改状态，/apply 才动账本。
+  // 这里只断言不可达路径（404）与「不存在的提案」，确定性合并本身在 test-memory 里用库断言。
+  ok((await req('POST', `/api/sessions/${SESSION_ID}/patches/999999/apply`, {})).status === 404,
+    '不存在的提案 apply 返回 404（不是静默成功）');
+  ok((await req('POST', '/api/sessions/nope/patches/1/apply', {})).status === 404,
+    '未知会话 apply 返回 404');
+  ok((await req('POST', `/api/sessions/${SESSION_ID}/patches/999999/resolve`, { status: 'applied' })).status === 200,
+    'resolve 对任意 id 都返回 200（它是「标记」不是「执行」，不做存在性校验）');
+
   const br = await req('GET', `/api/sessions/${SESSION_ID}/branches`);
   ok(br.data.current === 'main', '分支列表');
 

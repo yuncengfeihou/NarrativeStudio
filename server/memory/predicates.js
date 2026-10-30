@@ -14,7 +14,7 @@ export const PREDICATES = [
   '敌对', '效忠', '隐瞒', '承诺', '欠', '伤害', '救下', '是', '曾经是',
 ];
 
-export const PREDICATE_CARDINALITY = Object.freeze({
+const PREDICATE_CARDINALITY = Object.freeze({
   位于: 'one',
   是: 'one',
   曾经是: 'one',

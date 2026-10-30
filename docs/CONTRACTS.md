@@ -32,6 +32,7 @@ NarrativeStudio/
 │   │   ├── store.js        SQLite CRUD（世界卡/会话/记忆/分支/提案/实体投影）
 │   │   ├── branch-guard.js 异步写入的分支/叶守卫
 │   │   ├── player-view.js  玩家可见状态投影（纯函数；场景信息条唯一数据源）
+│   │   ├── patch-apply.js  提案的人工确定性动作（/apply：合并别名、真的改账本）
 │   │   └── context-engine.js 上下文装配（核心）
 │   ├── routes/
 │   │   ├── worlds.js       世界卡 + 辞书钉选 + 导出
@@ -302,7 +303,7 @@ renderCardText(card)               // 纯文本导出（角色段 + 设定集段
 
 ```js
 import {
-  buildWorldGraph, graphNeighbors, graphAncestors, graphChildren, hasContainment,
+  buildWorldGraph, graphNeighbors, graphAncestors,
 } from './world/graph.js';
 import { lintCard } from './world/lint.js';
 
@@ -310,7 +311,7 @@ buildWorldGraph(card)
 // -> { entities:Map, edges[], aliasToId:Map, entityById:Map, personById:Map,
 //      adjacency:Map, resolve(ref) }
 graphNeighbors(graph, ids, { depth })   // -> Set<entityId>（1 跳/多跳邻域）
-graphAncestors(graph, id) / graphChildren(graph, id) / hasContainment(graph)
+graphAncestors(graph, id)                // -> string[]（由 parent_id 决定的祖先链）
 lintCard(card)
 // -> {issues:[{severity:'blocker'|'major'|'minor'|'info', code, message, ids?}],
 //     counts:{entities, persons, facts, edges, issues, bySeverity:{blocker,major,minor,info}}}
@@ -452,7 +453,7 @@ loadCraftConfigRaw()       // JSON 坏掉时返回 {__corrupt:true}，不抛错
 ```js
 import { assembleContext, buildSystemLayer, buildContract, selectFacts, renderKnowledgeMatrix,
          overlapWindowFrom, recallVisibleFrom,
-         BRANCH_SHEET_TRIMS, BRANCH_CORE_KEYS, resolveBranchSheetTrim, selectBranchSections }
+         resolveBranchSheetTrim, selectBranchSections }
   from './memory/context-engine.js';
 
 // 原文窗口起点（装配层与检索层共读一个函数，不许各写一份规则）：
@@ -700,7 +701,7 @@ trimToolHistory(messages, baseLen, budgetTokens) -> removed
 // 史官（每轮后）
 runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, declaredTargets, signal, guard })
 // -> { applied:{assertions, assertions_invalidated, states, changes, relations, threads,
-//              threads_rejected, voices, ledger, skipped},
+//              threads_rejected, rejected_changes, voices, ledger, skipped},
 //      scene_change:{changed, when, place, place_id, weather, tension, present[]},
 //      uncertain, usage, stale?, parse_failed?, retried? }
 // uncertain 只解析、不落库也不外发（D6）：它是史官的减压阀（允许「正文没明说，我不猜」），
@@ -727,6 +728,18 @@ applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerNa
 //   gone 的回程通道对 changes 写出的离场完全失效（实测凌玥 t18 被标 gone 后 19 拍仍在正文，
 //   玩家四次点名一次都没唤回）。同拍若 `update.states` 已写过同一条则跳过，避免同拍两行。
 //   其它字段（condition/mood/...）仍只走 world_state，不制造第二份真相。
+// 返回值里的 `applied.rejected_changes = { count, by_reason, items }`（D35）：
+//   `sanitizeChange()` 阶段就丢弃的 changes 提案，形状与 `threads_rejected` / `skipped` 同族——
+//   报告只需读 `count` 一个数就知道「这一拍有没有被拒的变更」，`by_reason` 按 reason 码计数，
+//   `items: [{rejected, reason, op, kind, entity_id, path, entity_kind?, entity_type?, turn_no, evidence}]`
+//   给明细（`items` 全量，patch payload 里截 50 条）。非空时落**一条** patch：
+//   `patches(kind='rejected_change', status='failed', severity='warn', payload:{count, by_reason, items})`。
+//   **`rejected_change` 与 `dropped_delta` 不许合并**：前者是「连 `world_state` 行都没写进去」
+//   （要被修的是模型写的 kind/path 与提示词/白名单），后者是「写进去了、投影期按实体真实类型
+//   被白名单挡掉」（D34；要被修的是卡里实体类型判错）。两者要修的东西完全不同，
+//   混成一个 kind 报告就无法归因（AGENTS §5.3 D35）。
+//   与 `skipped_targets` 的分工：那条是「提案合法但目标没被 declaredTargets 声明」，
+//   这条是「提案本身不合法（op/kind/path/值）」，所以 status 是 `failed` 而不是 `skipped`。
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
 // applyArchivistUpdate 的返回值除各计数外，还有 `applied.onstage: [{who, field, life_state}]`：
 //   本拍**真实写进去**的「谁在镜头里」证据（states / changes / 账本 present）。
@@ -734,6 +747,28 @@ parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → �
 parseArchivistUpdateStrict(content) // -> {ok, error, update}；只有顶层 JSON 对象才算成功（供重试/留痕）
 sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
 sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, delta, {aliasIndex})
+// 成功返回值形状（逐字段冻结，D35 未改）：普通 `{kind, entity_id, path, op, value}`；
+//   introduce 多两个键 `{kind, entity_id, path:'', op:'introduce', value, name, aliases_from_narrative?}`；
+//   数值路径提前返回、`value` 已 round 到两位。
+// **丢弃不再返回 null（D35）**，返回 `{rejected:true, reason, op, kind, entity_id, path,
+//   entity_kind?, entity_type?}`——丢弃时**不能**静默消失：越界提案连 `world_state` 行都没有、
+//   patch 也没有、计数也没有，报告只看得到「这一拍没变化」，状态于是悄悄停在错值上而全绿。
+//   `entity_kind` = 归一后实际拿去查白名单的类型，`entity_type` = 卡里该实体的真实类型
+//   （两者不同就是「类型判错了」的直接证据）。
+// reason 码固定为（新增丢弃点必须同时加码并同步这一行）：
+//   `bad_op` op 不在 set/add/remove/introduce/delta
+//   `bad_kind` kind 不在 ENTITY_KINDS
+//   `bad_introduce` introduce 的 kind 不是实体类型 / 没 name / sanitizeIntroduce 返空
+//   `no_target` 非 introduce 却给不出 id/name/who/entity
+//   `canon_immutable` 非人物改写 FACT_CANON_PATHS（作者公理只能走 introduce）
+//   `path_not_allowed` pathsFor(kind) 不存在或没这个 path（D35 的原始病灶）
+//   `op_path_mismatch` add/remove 用非列表路径、set 用列表路径
+//   `not_a_number` 数值路径的值不是数字（含 op 不是 set/delta）
+//   `delta_on_non_number` 非数值路径用 delta
+//   `bad_reveal` reveal 不在 CODEX_REVEALS
+//   `empty_value` 值缺失或被裁空
+// **`life_state` 枚举外不是丢弃**：退回 `{path:'status', op:'set', value:<原文>}`，与 sanitizeState 同口径。
+// 调用方判据是 `if (c?.rejected) { …; continue; }`——**不要改回 `if (!c)`**，那会把留痕吞掉。
 // narrative（D13）：introduce 时若新名字的前缀（≥2 字、且不等于正经别名）出现在本拍正文里，
 //   就把它 absorbed 成别名（返回值多一个 aliases_from_narrative），让后文的简称能对上实体。
 //   只收**前缀**，不做「首 2 + 末 1」组合——那是 §1.2 禁止的识别器堆叠；
@@ -800,16 +835,25 @@ applyContinuityFixes(sessionId, { branchId, turnNo, issues, threads, aliasIndex,
 //   非人物 subject（reason='not_a_person'）与受控表外字段（reason='unknown_field'）
 //   一律拒写并留痕。aliasIndex 必须是 buildAliasIndex() 产出的数组（resolveEntity 用 .find）。
 // merge_alias 不是可用 action（D29）：没有实现分支，合并别名必须人确认。提示词里已从
-//   action 枚举删掉；模型仍可能写出来，那种情况记 reason='not_implemented'，与「形态填错」区分。
+//   action 枚举删掉；`fix_result.reason='not_implemented'` 这条分支也一并删除——枚举里没有的
+//   action 永远不会出现，留着就是死代码（D36）。
 // 未执行的提案写进 patch payload 的 fix_result:{action,target,state:'unmatched',retryable:false[,reason]}，
 // 并记 patch.status='failed'（D31）——`open` 的唯一语义是「等人裁决」，记忆面板会给它
-//   接受/忽略两个按钮；而形态填错的 set_state、没实现的 merge_alias、非人物 subject 这三类，
+//   接受/忽略两个按钮；而形态填错的 set_state、非人物 subject 这两类，
 //   人点了接受也不会执行。它们过去全记 open，于是看起来像在排队等人，实际是死通道。
 //   reason 区分「模型的错」（stale_value = target 解析不出 `人物::字段`；bad_target_form =
 //   有 `::` 但人名/字段为空）与「代码按设计拒写」（not_a_person / unknown_field）——
 //   前者下一轮改提示词能修，后者修不了也不该修。set_state 的 value 是「校勘那一拍应有的值」，
 //   隔 N 拍再执行会把状态改回过去，比不执行更坏，所以 retryable:false、不做存量回填
-//   （只能等下一次校勘重新发现问题）。action:'none' 仍记 open——那才是真的等人裁决。
+//   （只能等下一次校勘重新发现问题）。
+// **alias 类提案的终态是 `noted`（D36），不是 `open`**：提示词要求 alias 一律填
+//   action:'none'（合并别名要人确认），若沿用「none 记 open」，报告就会把它读成
+//   「major 挂着没人处置」（45 拍实测 2 条全落这里）。现在 alias 记
+//   `status='noted'` + `fix_result:{action,target,state:'manual_only',retryable:false,
+//   reason:'alias_merge_needs_human'}`，语义是「按设计等人工入口」，与「模型自己说不确定」
+//   区分开。**action:'none' 的非 alias 提案仍记 open**——那才是真的等人裁决。
+//   人工入口见 HTTP 节 `POST /api/sessions/:id/patches/:patchId/apply`（真的改账本，
+//   `/resolve` 只是改状态）。
 // tests 必须覆盖它——抽成纯函数就是为了这个（抽之前 runContinuity 零测试，才让上面那条活了 40 拍）。
 runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}
 // 工具：search_events / search_assertions / get_character_state / get_threads / get_scene /
@@ -907,8 +951,27 @@ runEffectOnce(snapshot, fn, { isStale? }) -> Promise<
 // fn 正常返回 -> settleEffect('applied')；guard 失效/快照过时 -> 'stale'；抛错 -> settleEffect('failed') 后重新抛
 // 幂等回执（store.js）：claimEffect({sessionId,branchId,turnNo,agent,effectId,fingerprint})
 //   settleEffect(sessionId, effectId, {branchId,status,turnNo,agent})
-//   getEffectReceipt(sessionId, effectId, {branchId}) / listEffectReceipts(sessionId, {branchId})
+//   getEffectReceipt(sessionId, effectId, {branchId})
 //   status: pending（claim 产生）/ applied / failed / stale；同 effect_id 只落一次
+
+// 提案的人工确定性动作（server/memory/patch-apply.js，D36）
+applyPatchAction(sessionId, patchId, { branchId? })
+// -> { found:false, ok:false }                                  提案不存在（路由回 404）
+// -> { found:true, ok:true, status:'applied', already:true, fix_result }   幂等重复执行
+// -> { found:true, ok:true, status:'applied', fix_result:{action:'merge_alias', target,
+//      state:'applied', canonical:{id,name,type}, aliases:[…], runtime_duplicates:[…]} }
+// -> { found:true, ok:false, status:'failed', reason, fix_result:{…, reason} }
+//      reason ∈ kind_not_supported / need_two_names / both_in_card / neither_in_card
+// 只做确定性动作，目前只有 kind='alias'（合并别名）。判据写死在代码里：
+//   ① 规范名由**卡快照**的 buildAliasIndex 决定，不由模型说、也不用投影卡——
+//      投影卡里可能有运行期 introduce 出来的幽灵实体（45 拍局 t30 凭空造了「提酒男子」）。
+//   ② 只合并「一个名字在卡里、另一个不在卡里」。两边都在卡里（真·两名冲突）或都不在
+//      （都是运行期新造的）→ 不猜，记 reason 交人；猜错不可逆。
+//   ③ 动作只有一条：world_state 的 aliases add（source='human'）。**不改 name**（身份根不可写）；
+//      运行期同名幽灵实体不删除（红线 4/6 只追加），但如实报进 runtime_duplicates，
+//      避免「合并成功」掩盖「世界里还多着一个同名的人」。
+// 与 `setPatchStatus()` 的分工：那条只改状态（「作者认可」），这条才动账本（「真的执行」）。
+// 两者都走 store.js 具名函数，不许路由层直接拼 SQL（红线 7）。
 
 // 制卡（server/agents/card-smith.js）
 smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed, player,
@@ -1112,6 +1175,24 @@ GET    /api/sessions/:id/patches          ?status=&kind=&limit=
 // 这类流水、校勘每 10 拍才写几次矛盾），混在一起时列表被高频类占满，
 // 面板无法区分「没有矛盾」和「矛盾被截断在 100 条之外」。
 POST   /api/sessions/:id/patches/:id/resolve  body:{status:'applied'|'dismissed'}
+// 只改状态，**不执行任何修复**。语义是「作者认可/忽略这条提案」。
+// 「认可」与「执行」是两件事：对 alias 这类「同一实体两个名字」的提案，
+// 点了 accepted 之后账本里两个名字依然各写各的（曾长期如此，界面显示已处理、世界没变）。
+// 需要真的改账本时用下面那条 /apply。
+POST   /api/sessions/:id/patches/:id/apply   body:{} -> { ok, status, already?, fix_result, patch }
+// 只做**确定性**动作，目前支持 kind='alias'（合并别名）。
+// -> 200 { ok:true, status:'applied', fix_result:{ canonical:{id,name,type}, aliases[], runtime_duplicates[] } }
+// -> 200 { ok:true, status:'applied', already:true }  幂等：重复执行不重复写别名
+// -> 404 patch 不存在
+// -> 400 { error:{ message, code } }  code ∈
+//      'kind_not_supported'（该类提案没有确定性动作）
+//      'need_two_names'（subject 拆不出两个名字）
+//      'both_in_card'（两个名字在卡里分属不同实体——真·两名冲突，猜错不可逆）
+//      'neither_in_card'（两个都是运行期新造的，可能真是两个人）
+// 规范名只由**卡快照**的 buildAliasIndex 决定（投影卡里有运行期 introduce 出的幽灵实体，
+// 拿它当索引会把幽灵认成「卡里有的」）。合并动作只有一条：world_state 的 aliases add，
+// **不改 name**（身份根不可写）；运行期同名幽灵实体不删除（红线 4/6 只追加），
+// 但如实报进 fix_result.runtime_duplicates。
 GET    /api/sessions/:id/notes
 POST   /api/sessions/:id/notes            body:{content, kind}
 PATCH  /api/sessions/:id/notes/:id

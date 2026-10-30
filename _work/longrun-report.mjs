@@ -52,18 +52,44 @@ const TH = {
   // 斜率 ≤ 0 反而是坏信号——记忆没在长，或者场次索引被反复降级。
   BUDGET_SLOPE_MIN: 0,
 
+  // 上游缓存「0 命中」异常：只看连续 0 命中的**区间**，并且扣掉结构回退能解释的那部分。
+  // 一次 prefix_shared_tokens 回退最多解释该拍 + 后 2 拍的 0 命中：第一拍必然 miss
+  // （这次请求才把这段前缀写进上游缓存），第二三拍本该命中；扣完还剩 ≥3 拍 0 命中，
+  // 才不是我们自己的结构问题（场次索引追加 / 封场轮转）。
+  // 不用「0 命中拍数 > 30%」：结构上限本来只有 ~55%，那个比率在 7 局里 4 局必超，
+  // 既不区分局、也指向不了任何可修的东西（D27 的教训）。
+  CACHE_ZERO_RUN_MIN: 5,
+  CACHE_ZERO_PREHEAT_TURNS: 2,
+  CACHE_ZERO_UNEXPLAINED_WARN: 3,
+  // 「上游到底吃到了多少」低于它时才需要印「命中是路由抽签」那句解释。
+  // 7 局实测：d7a6f899 0.94、a3363ce8 0.68 是吃满；其余五局 0.16–0.45 全在抽签区。
+  // 印在健康局上等于给正常状态发免责声明，会训练读者忽略这一行。
+  CACHE_CAPTURE_LOW: 0.5,
+
   // 3-gram 跨轮重复率（「套话化」量化口径）。**这是启发式，不是契约**：
   // 基线来自 4 轮实测 p90 ≈ 10.7%，按每 40 轮约 +3%/10 轮的经验漂移外推；
   // 超过 22% 文本开始明显复用句式，超过 32% 就是模板化生产。
   GRAM3_P90_WARN: 0.22,
   GRAM3_P90_FAIL: 0.32,
 
-  // 局部重复率（5-gram vs 前 3 轮）的阈值。这是**长跑真正可用**的口径：
-  // 它跟轮数解耦，衡量「最近几拍有没有在自我重复」。
-  // 依据：本局实测 mean 4.0% / p90 8.2%；句中真正抄自己上一拍时会在 20% 以上
-  // （能看到整句复用），所以 12% WARN、20% FAIL 是同量级的分界。
+  // 局部重复率（5-gram vs 前 3 轮）的阈值，**只在 20 拍量级上标定过**
+  // （mean 4.0% / p90 8.2%；句中整句复用会到 20% 以上，所以 12% WARN、20% FAIL 同量级）。
+  // 45 拍以上时它的 p90 不具判别力：p90 的 95% 置信区间跨过阈值本身（实测 10.6%–19.4%），
+  // 同一局多几拍就能从 PASS 翻成 WARN，而且它对「整段原样重演」几乎不敏感。
+  // 所以 `repeat_local` / `repeat_local_tail` 降为 INFO 参考值，判定交给下面的
+  // `REPEAT_LONGEST_*`；这两个数仍然保留，因为 `repeat_local_trend` 要用 WARN 线做恶化门槛。
   REPEAT_LOCAL_WARN: 0.12,
   REPEAT_LOCAL_FAIL: 0.2,
+
+  // 最长连续照搬（逐拍与前 3 拍的最长公共子串，只比汉字）。这是「抄自己」的直接量：
+  // 5-gram 比率对整段重演极不敏感——394 字原样重演只把那一拍的 5-gram 率抬到 30%，
+  // p90 几乎不动（d7a6f899 实测 p90 只有 6%，旧口径判 PASS）。所以必须单量「最长那段多长」。
+  // 标定 7 局（实测最长公共子串，字）：d7a6f899 394（t18→t19 整段重演）、b3940eb4 110、
+  // 27980417 102、91314aeb 74（t6→t7 搬麻袋那段原样重来）、a3363ce8 71、5fdb2eab 51、9140f8cb 48。
+  // ≥100 = 正文的 1/3 以上原样照搬（那三局是真抄）；60–99 = 段落级重演（74 字是整整一段动作）；
+  // <60 = 人名/动作短语/天气意象这类必要复用，48–51 的三局正文确实没有整段照搬。
+  REPEAT_LONGEST_WARN: 60,
+  REPEAT_LONGEST_FAIL: 100,
 
   // 长跑必须真的封过场：一场都没关，场次索引与「最近这场怎么收的」就是空的，
   // 等于长程记忆根本没接上（§13.15）。
@@ -209,6 +235,34 @@ function cjkOnly(s) {
   let out = '';
   for (const ch of String(s ?? '')) if (CJK_RE.test(ch)) out += ch;
   return out;
+}
+/** 最长公共**连续**子串，返回 {len, end}（end 是 a 内的结束下标）。
+ *  为什么不能只数 n-gram 命中：整段重演时，重复的 5-gram 只占那一拍 gram 集合的一部分，
+ *  比率口径会被句长稀释（394 字原样重演只把 5-gram 率抬到 30%），而「最长这段有多长」
+ *  是直接的量——它能把「抄了一整段」和「复用了几个必要短语」分开。
+ *  只用于长跑报告，字符串都在 1–2K 汉字量级，O(len²) 足够。 */
+function lcsLongest(a, b) {
+  const n = a.length;
+  const m = b.length;
+  if (!n || !m) return { len: 0, end: 0 };
+  let prev = new Uint16Array(m + 1);
+  let cur = new Uint16Array(m + 1);
+  let best = 0;
+  let bestEnd = 0;
+  for (let i = 1; i <= n; i++) {
+    const ai = a.charCodeAt(i - 1);
+    for (let j = 1; j <= m; j++) {
+      if (ai === b.charCodeAt(j - 1)) {
+        const v = prev[j - 1] + 1;
+        cur[j] = v;
+        if (v > best) { best = v; bestEnd = i; }
+      } else cur[j] = 0;
+    }
+    const t = prev;
+    prev = cur;
+    cur = t;
+  }
+  return { len: best, end: bestEnd };
 }
 
 /* ══════════════════════════════════════════════════════════════════════════
@@ -1385,6 +1439,68 @@ try {
     const c = Number(sessionUsage?.cached_tokens) || 0;
     return p > 0 ? c / p : null;
   })();
+  // 「上游到底吃到了多少」的三个口径，**都不参与解释扣减**，只有判据行要引用它们：
+  //   · capture_rate       = Σcached / Σprefix_shared_tokens（按 token 加权，本地上限的兑现度）
+  //   · hit_capture_p10    = 逐拍 cached/prefix_shared_tokens 的 p10（「多数拍到底吃到了多少」）
+  //   · token_hit_rate     = Σcached / Σprompt_tokens（上游口径的会话总命中率）
+  // 用 p10 而不是均值：均值会被少数吃满的拍拉高，而「一直吃不到」才是要判的形状。
+  const captureSeries = realCacheRows
+    .map((r) => {
+      const pf = Number(asmByTurn.get(r.turn_no)?.cache?.prefix_shared_tokens);
+      return Number.isFinite(pf) && pf > 0 ? { turn_no: r.turn_no, cached: r.cached, prefix_shared_tokens: pf, capture: r.cached / pf } : null;
+    })
+    .filter(Boolean);
+  const sumCached = captureSeries.reduce((s, r) => s + r.cached, 0);
+  const sumPrefix = captureSeries.reduce((s, r) => s + r.prefix_shared_tokens, 0);
+  const captureRate = sumPrefix > 0 ? sumCached / sumPrefix : null;
+  const captureP10 = captureSeries.length
+    ? quantile(captureSeries.map((r) => r.capture).sort((a, b) => a - b), 0.1)
+    : null;
+  const tokenHitRate = (() => {
+    const p = realCacheRows.reduce((s, r) => s + r.prompt, 0);
+    const c = realCacheRows.reduce((s, r) => s + r.cached, 0);
+    return p > 0 ? c / p : null;
+  })();
+  // 连续 0 命中的区间。判据只看**区间**，不看「0 命中拍的占比」：
+  // 后者对所有局都接近 3/4（结构上限只有 ~55%），既不区分局、也指向不了可修的东西。
+  // 区间按 narrator 拍的先后切，起止用 turn_no 报（回合号有空洞，§13.3）。
+  const zeroRuns = (() => {
+    const out = [];
+    let cur = null;
+    for (const r of realCacheRows) {
+      if (r.cached === 0) {
+        if (!cur) cur = { from: r.turn_no, to: r.turn_no, len: 1, turns: [r.turn_no] };
+        else { cur.to = r.turn_no; cur.len += 1; cur.turns.push(r.turn_no); }
+      } else if (cur) { out.push(cur); cur = null; }
+    }
+    if (cur) out.push(cur);
+    // 解释量：区间内每发生一次**结构回退**，最多解释该拍 + 后 2 拍的 0 命中。
+    // 一次前缀回退时，这一拍的请求才把新前缀写进上游缓存，所以它必 miss；
+    // 第二三拍本该命中。扣掉这部分还剩 ≥3 拍 0 命中，才不能归因于我们自己的结构。
+    // rewrite / slide **不算解释项**：那是我们自己的缺陷（cache_prefix_reuse 已在管），
+    // 把它们当免责理由等于拿缺陷给缺陷发合格证；它们只单独报数。
+    return out.map((run) => {
+      const inside = prefixRegressions.filter((x) => x.to >= run.from && x.to <= run.to);
+      const structural = inside.filter(isStructural);
+      const selfDefect = inside.filter((x) => !isStructural(x));
+      const preheat = TH.CACHE_ZERO_PREHEAT_TURNS * structural.length;
+      return {
+        from: run.from,
+        to: run.to,
+        len: run.len,
+        turns: run.turns,
+        prefix_regressions: structural.length,
+        self_defect_regressions: selfDefect.length,
+        preheat_turns: preheat,
+        unexplained: Math.max(0, run.len - preheat),
+      };
+    });
+  })();
+  const longZeroRuns = zeroRuns.filter((r) => r.len >= TH.CACHE_ZERO_RUN_MIN);
+  const worstZeroRun = longZeroRuns.reduce(
+    (m, r) => (m === null || r.unexplained > m.unexplained ? r : m),
+    null
+  );
   report.cache.upstream = {
     sessions_prompt_tokens: Number(sessionUsage?.prompt_tokens) || 0,
     sessions_cached_tokens: Number(sessionUsage?.cached_tokens) || 0,
@@ -1394,13 +1510,37 @@ try {
     narrator_zero_turns: realCacheZero,
     narrator_mean_rate: realCacheRate,
     local_estimate_mean: rateStats ? rateStats.mean : null,
+    // 逐拍明细：判据行不能只印「几个数」——出现争议时要能逐拍对账。
+    capture_series: captureSeries,
+    capture_rate: captureRate,
+    hit_capture_p10: captureP10,
+    token_hit_rate: tokenHitRate,
+    zero_runs: zeroRuns,
+    zero_run_min: TH.CACHE_ZERO_RUN_MIN,
+    preheat_turns: TH.CACHE_ZERO_PREHEAT_TURNS,
+    worst_unexplained: worstZeroRun ? worstZeroRun.unexplained : null,
+    rewrite_turns: rewriteBreaks.length,
+    slide_turns: slideBreaks.length,
+    threshold_note: '上游缓存的判据只看「连续 0 命中区间扣掉结构回退后的剩余拍数」（CACHE_ZERO_UNEXPLAINED_WARN）；'
+      + '一次前缀回退最多解释该拍 + 后 2 拍（缓存写入请求本身必 miss）。rewrite/slide 不参与扣减，'
+      + '那是我们自己的缺陷，由 cache_prefix_reuse 判。',
   };
   if (realCacheRows.length) {
     console.log(
       `上游真命中   narrator ${realCacheHit}/${realCacheRows.length} 拍命中过半（${realCacheZero} 拍 0 tok）｜均值 ${pctv(realCacheRate)}｜全会话 ${pctv(sessionRealRate)}｜本地估算上限 ${pctv(rateStats ? rateStats.mean : null)}`
     );
     console.log(
-      `             ${realCacheZero > realCacheRows.length * 0.3 ? '⚠ 超过三成回合 0 命中：不是前缀断了（断点性质那行可证），是上游缓存按节点/分片、命中是路由抽签——同一份 prompt 连发 12 次实测 11 次 94.6%、1 次 0%' : '上游缓存基本吃满，本地估算与真实接近'}`
+      `  兑现度       capture_rate ${pctv(captureRate)}（Σcached/Σprefix_shared）｜p10 ${pctv(captureP10)}｜token 加权 ${pctv(tokenHitRate)}` +
+      `｜${captureRate !== null && captureRate < TH.CACHE_CAPTURE_LOW
+        ? '⚠ 低于五成：不是前缀断了（断点性质那行可证），是上游缓存按节点/分片、命中是路由抽签——同一份 prompt 连发 12 次实测 11 次 94.6%、1 次 0%'
+        : '上游缓存基本吃满，本地估算与真实接近'}`
+    );
+    console.log(
+      `  0 命中区间  ≥${TH.CACHE_ZERO_RUN_MIN} 拍的 ${longZeroRuns.length} 个` +
+      (longZeroRuns.length
+        ? '：' + longZeroRuns.map((r) => `t${r.from}-${r.to}(L${r.len},R${r.prefix_regressions},U${r.unexplained})`).join(' · ')
+        : `（最长 ${zeroRuns.reduce((m, r) => Math.max(m, r.len), 0)} 拍，均未到门槛）`) +
+      `｜区间外 rewrite ${rewriteBreaks.length} / slide ${slideBreaks.length}（不参与扣减）`
     );
   } else {
     console.log('上游真命中   (缺失)（turns 里没有 usage_json.cached_tokens）');
@@ -1660,6 +1800,39 @@ try {
   });
   const localStats = stats(localRates.map((g) => g.rate).filter((v) => v !== null));
 
+  /* 最长连续照搬（2026-10-30）：逐拍与前 LOCAL_WINDOW 拍比「最长公共连续子串」。
+   *
+   * 为什么不用 5-gram 比率：它会被句长稀释，对「整段原样重演」几乎不敏感。
+   * 实测 d7a6f899 有一拍 394 字整段照搬（t18→t19），5-gram 只把那一拍抬到 ~30%，
+   * p90 只有 6%，旧口径判 PASS——缺陷在，判据看不见。
+   * 「最长那一段有多长」是直接量：整段重演 → 三四百字；必要复用（人名/动作短语/天气意象）
+   * → 四五十字。两者差一个数量级，不需要统计窗口就能分开。
+   *
+   * 比**前 3 拍**而不是只比上一拍：实测 a3363ce8 的 71 字重复跨了两拍（t97 vs t99），
+   * 只看相邻会退化成 39 字，正好掉到 WARN 线以下——「隔一拍再抄」是最常见的长跑形态。
+   */
+  const cjkTexts = asmRows.map((r) => cjkOnly(r.content));
+  const longestRows = asmRows.map((r, i) => {
+    if (i === 0) return { turn_no: r.turn_no, len: null, from: null, head: '' };
+    let best = { len: 0, from: null, head: '' };
+    for (let j = Math.max(0, i - LOCAL_WINDOW); j < i; j++) {
+      const { len: l, end } = lcsLongest(cjkTexts[i], cjkTexts[j]);
+      if (l > best.len) {
+        best = {
+          len: l,
+          from: asmRows[j].turn_no,
+          // 存片段首 60 字：判据行要能贴出「重复的是哪一段」，否则读报告的人只能信数字。
+          head: cjkTexts[i].slice(end - l, end - l + 60),
+        };
+      }
+    }
+    return { turn_no: r.turn_no, len: best.len, from: best.from, head: best.head };
+  });
+  const longestStats = stats(longestRows.map((g) => g.len).filter((v) => v !== null));
+  const longestWorst = longestRows.filter((g) => Number.isFinite(g.len))
+    .reduce((m, g) => (m === null || g.len > m.len ? g : m), null);
+  const longestOver = (thr) => longestRows.filter((g) => Number.isFinite(g.len) && g.len >= thr);
+
   // 8 字以上「跨轮重复短语」：先把每轮里「每个 3-gram 都跨轮出现过」的连续区间合并成
   // 极大片段，再按「出现在几轮里」排序。必须合并——固定窗口会把同一句话切成一串
   // 逐字右移的 8-gram，top 10 全变成同一句的十个位移，等于没报。
@@ -1802,6 +1975,20 @@ try {
   });
   const contMajor = contRows.filter((r) => r.severity === 'major');
   const contMajorOpen = contMajor.filter((r) => r.status === 'open');
+  // 只有 contradiction / state_jump 是「系统自己报过、必须被处置」的那两类：
+  // 它们描述的是账本与正文的公开矛盾，处置通道存在（自动修复 / 人工裁决）。
+  // alias（同一实体两个名字）、timeline、stale_thread、knowledge_breach 即使被标 major，
+  // 处置方式也是**人工裁决且不需要动作**——D36 之后 alias 落 `noted`，正文与账本都没错。
+  // 把它们算进「挂 open」等于让一条按设计永不自动处理的通道永远把判据拖成 WARN，
+  // 于是真正的 contradiction 挂 open 被淹掉（45 拍复验局：2 条 contradiction 全 applied，
+  // 唯一的 major open 是一条 alias，判据却只报「major 1 条 open 1 条」）。
+  const CONT_ABSORB_KINDS = new Set(['contradiction', 'state_jump']);
+  const contMajorAbsorb = contMajor.filter((r) => CONT_ABSORB_KINDS.has(r.kind));
+  const contMajorAbsorbOpen = contMajorAbsorb.filter((r) => r.status === 'open');
+  // 其余 kind 的 major 只计数、**必须无条件印出来**：不印的话，「alias major 1 条」
+  // 会看起来像「什么都没有」，而这正是「报告量不到就一直健康」的同一个形状。
+  const contMajorOther = contMajor.filter((r) => !CONT_ABSORB_KINDS.has(r.kind));
+  const contMajorOtherOpen = contMajorOther.filter((r) => r.status === 'open');
   // D31：形态不对 / 通道没实现的提案不再记 `open`，改成 `failed` 终态。
   // 这不是「发明了一个新状态」，而是**把「等人裁决」和「永远执行不了」分开**：
   // 过去两者都是 open，于是「major 挂 open N 条」既可能是待人工裁决，也可能是一条
@@ -1904,6 +2091,24 @@ try {
     const pl = safeJson(p.payload_json);
     return { turn_no: Number(p.turn_no), name: pl.name ?? null, from: pl.from ?? null, to: pl.to ?? null };
   });
+  // D35：`sanitizeChange` 阶段就被丢掉的 `update.changes` 提案。
+  // 与 `dropped_delta` 是**两道门**：这条是「连 world_state 行都没写进去」，
+  // 那条是「写进去了、投影期被实体真实类型挡掉」。两者要修的东西不同
+  // （提示词/白名单 vs 卡里类型判错），所以不许合并计数。
+  // 老会话没有这个 patch kind → 本局必然 0，报告必须把「形状未出现」说出来，
+  // 否则又是一次空过判 PASS（AGENTS §5.3 同族第七次）。
+  const rejectedChangeRows = (all(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'rejected_change' order by turn_no asc, id asc",
+    { sid: sessionId }
+  ) || []).map((p) => {
+    const pl = safeJson(p.payload_json);
+    return { turn_no: Number(p.turn_no), count: Number(pl.count || 0), by_reason: pl.by_reason || {}, items: arr(pl.items) };
+  });
+  const rejectedChangeTotal = rejectedChangeRows.reduce((s, r) => s + r.count, 0);
+  const rejectedChangeByReason = {};
+  for (const r of rejectedChangeRows) {
+    for (const [k, v] of Object.entries(r.by_reason)) rejectedChangeByReason[k] = (rejectedChangeByReason[k] || 0) + Number(v || 0);
+  }
   // D34 回溯探针：patch 只在新会话才有，老会话要看「本来会不会被丢」得从原始数据复算。
   // 判据：world_state 里 `op='introduce'` 且声明 person 的行，其 name 若在卡里是**非人物**
   // 条目 → 修复后该条目会被升级；修复前它的 person 运行态会被 concept 白名单吃掉。
@@ -1980,6 +2185,15 @@ try {
       total: contRows.length,
       major: contMajor.length,
       major_open: contMajorOpen.length,
+      // 判据（continuity_absorbed）只看这两类，所以必须单列一份：
+      // `major` / `major_open` 保留原义（全部 kind），消费方若直接读它们会重新把
+      // alias 的「等人裁决」算成「没人处置」——那正是这次要修的口径错误。
+      // 两份数都报，是为了让「窄化后的判据」与「全量事实」在报告里同时可见。
+      major_absorb: contMajorAbsorb.length,
+      major_open_absorb: contMajorAbsorbOpen.length,
+      major_other: contMajorOther.length,
+      major_open_other: contMajorOtherOpen.length,
+      absorb_kinds: [...CONT_ABSORB_KINDS],
       minor: contMinor.length,
       rows: contRows,
       // D12：fix 通道是否真的跑通过。applied=0 而 fix 非 none 的条目 >0，就是「提了但没执行」。
@@ -2083,6 +2297,36 @@ try {
         + 'low_weight 多 = 提示词判据没说服模型；wip_full 多 = 上限对这张卡偏小。',
     },
     life_state: { distribution: lifeStates, dead_writes: deadWrites, death_turns: deathTurns },
+    // 第三档「正文提及但不在场」的明细。它不参与判定（见 7.6 的注释），
+    // 但必须落进报告结构里：这些名字和轮次是「模型是否把 gone 写成了在场」的唯一原始证据，
+    // 判据降为 INFO 之后如果连数据都不留，就退回「看不见所以健康」。
+    offstage_mentioned: {
+      n: lifeLeaks.length,
+      rows: lifeLeaks.map((x) => ({
+        who: x.who,
+        value: x.value,
+        from: x.from,
+        valid_to: x.valid_to,
+        turns: x.turns,
+        in_present: x.in_present,
+        named_by_player: x.named_by_player,
+      })),
+      note: '正文出现名字但 present 名单里没有、玩家也没点名 = 回忆/对白/否定式，合法写法（§5.3 gone 的语义）。'
+        + '真缺陷是 in_present 非空（人还在场却写了 gone）或 named_by_player 非空（玩家点名要见她、代码仍剔出在场），'
+        + '两者各有独立的 FAIL 档；这里只计数并留原文位置，不当缺陷。',
+    },
+    rejected_change: {
+      patches: rejectedChangeRows.length,
+      n: rejectedChangeTotal,
+      by_reason: rejectedChangeByReason,
+      rows: rejectedChangeRows,
+      note: 'D35：`update.changes` 在 sanitizeChange 阶段就被丢弃的提案。'
+        + '它过去 `return null`，调用方 `if (!c) continue` —— 连 world_state 行都没有、'
+        + '无 patch、无计数，状态悄悄停在错值上而报告全绿。'
+        + '**与 dropped_delta 不许合并**：这条是「连门都没进」，那条是「进门后被挡」，'
+        + '两者要修的东西不同（提示词/白名单 vs 卡里类型判错）。'
+        + '0 条且本局跑在 D35 之前 = 该形状量不到，不是「没有越界提案」。',
+    },
     // D14：主角进 absentees = 他从自己的场记单里消失了，而正文仍是第一人称。
     player_absentees: {
       known: absenteesKnown,
@@ -2193,7 +2437,22 @@ try {
       window: LOCAL_WINDOW,
       per_turn: localRates,
       stats: localStats,
-      threshold_note: '长跑口径：5-gram 只与前 3 轮比，与轮数解耦；衡量「最近几拍是否在自我重复」。',
+      threshold_note: '长跑口径：5-gram 只与前 3 轮比，与轮数解耦；衡量「最近几拍是否在自我重复」。'
+        + '**45 拍以上 p90 的 95% 置信区间跨过阈值（实测 10.6%–19.4%），不具判别力**，'
+        + '只作参考值；判定交给 repeat_longest。',
+    },
+    // 判定口径。保留 repeat_local 不动是因为 `_work/scorecard.mjs` 与 `_work/longrun-ab.mjs`
+    // 读的是 `report.memory.repeat_local`，换名字会把消费方静默打空。
+    repeat_longest: {
+      window: LOCAL_WINDOW,
+      per_turn: longestRows.map((g) => ({ turn_no: g.turn_no, len: g.len, from: g.from })),
+      worst: longestWorst,
+      stats: longestStats,
+      over_warn: longestOver(TH.REPEAT_LONGEST_WARN).length,
+      over_fail: longestOver(TH.REPEAT_LONGEST_FAIL).length,
+      threshold_note: '逐拍与前 3 拍的最长公共连续子串（只比汉字）。5-gram 率对整段重演不敏感'
+        + '（394 字照搬只把那一拍抬到 30%，p90 不动），所以单量「最长那段多长」。'
+        + '≥100 字 = 正文 1/3 以上原样照搬；60–99 = 段落级重演；<60 = 人名/动作短语的必要复用。',
     },
     phrases: { min_chars: PHRASE_N, min_turns: PHRASE_MIN_TURNS, top10: phraseTop },
     openings: { dup_count: dupOpenings.length, dup: dupOpenings.map(([head, n]) => ({ head, n })) },
@@ -2239,7 +2498,10 @@ try {
   console.log(`3-gram 重复  均值 ${gramStats ? (gramStats.mean * 100).toFixed(1) + '%' : MISSING}｜p50 ${gramStats ? (gramStats.p50 * 100).toFixed(1) + '%' : MISSING}｜p90 ${gramStats ? (gramStats.p90 * 100).toFixed(1) + '%' : MISSING}｜max ${gramStats ? (gramStats.max * 100).toFixed(1) + '%' : MISSING}（累积口径，只作参考：随轮数必然上涨）`);
   console.log(`  最低轮     ${gramRates.filter((g) => g.rate !== null).sort((a, b) => a.rate - b.rate).slice(0, 3).map((g) => `t${g.turn_no}:${(g.rate * 100).toFixed(0)}%`).join(' ') || MISSING}`);
   console.log(`  最高轮     ${gramRates.filter((g) => g.rate !== null).sort((a, b) => b.rate - a.rate).slice(0, 3).map((g) => `t${g.turn_no}:${(g.rate * 100).toFixed(0)}%`).join(' ') || MISSING}`);
-  console.log(`局部重复     5-gram vs 前 ${LOCAL_WINDOW} 轮：均值 ${localStats ? (localStats.mean * 100).toFixed(1) + '%' : MISSING}｜p90 ${localStats ? (localStats.p90 * 100).toFixed(1) + '%' : MISSING}（长跑判据看这一行）`);
+  console.log(`局部重复     5-gram vs 前 ${LOCAL_WINDOW} 轮：均值 ${localStats ? (localStats.mean * 100).toFixed(1) + '%' : MISSING}｜p90 ${localStats ? (localStats.p90 * 100).toFixed(1) + '%' : MISSING}（**只作参考值**，45 拍以上的 p90 置信区间跨阈值；判定看下一行）`);
+  console.log(`最长照搬     与前 ${LOCAL_WINDOW} 拍的最长公共子串：均值 ${longestStats ? longestStats.mean.toFixed(1) : MISSING} 字｜p90 ${longestStats ? longestStats.p90.toFixed(0) : MISSING} 字｜max ${longestStats ? longestStats.max : MISSING} 字` +
+    `｜≥${TH.REPEAT_LONGEST_FAIL} 字 ${longestOver(TH.REPEAT_LONGEST_FAIL).length} 拍｜≥${TH.REPEAT_LONGEST_WARN} 字 ${longestOver(TH.REPEAT_LONGEST_WARN).length} 拍` +
+    (longestWorst ? `｜最长 t${longestWorst.from}→t${longestWorst.turn_no} ${longestWorst.len} 字「${longestWorst.head}」` : ''));
   console.log(`  逐轮       ${localRates.filter((g) => g.rate !== null).map((g) => `t${g.turn_no}:${(g.rate * 100).toFixed(0)}%`).join(' ')}`);
   if (phraseTop.length) {
     console.log(`重复短语 top ${phraseTop.length}（≥${PHRASE_N} 字片段，出现在 ≥${PHRASE_MIN_TURNS} 轮）：`);
@@ -2251,7 +2513,7 @@ try {
   console.log(`场外引用     ${offstageRows.length} 条（可进提示词 ${offstageVisible} / hidden ${offstageHidden}）｜被后文点名 ${offstageCited}（${pct(offstageCited, offstageVisible)} of visible）` +
     `｜按正文拍 ${offstageCitedBodyTurns.size}/${narr.length}（${pct(offstageCitedBodyTurns.size, narr.length)}）` +
     (offstageDetail.length ? '｜' + offstageDetail.slice(0, 6).map((o) => `t${o.turn_no}:${o.who.join('/') || '?'}${o.cited_at ? '✓' : '✗'}`).join(' ') : ''));
-  console.log(`校勘         ${contRows.length} 条（major ${contMajor.length}｜其中挂 open ${contMajorOpen.length}｜minor ${contMinor.length}）` +
+  console.log(`校勘         ${contRows.length} 条（major ${contMajor.length}｜contradiction+state_jump ${contMajorAbsorb.length} 条挂 open ${contMajorAbsorbOpen.length}｜其余 kind major ${contMajorOther.length} 条挂 open ${contMajorOtherOpen.length}｜minor ${contMinor.length}）` +
     (contFailed.length ? `｜未执行终态 ${contFailed.length}` : ''));
   console.log(`  自动修复     fix 提案 ${contFixRows.length} 条｜已执行 ${contFixApplied.length} 条｜target 带 # 的 ${contHashTargets.length} 条` +
     (contFixRows.length && !contFixApplied.length
@@ -2265,14 +2527,29 @@ try {
     (rejectedDeltaRows.length
       ? '｜' + rejectedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no}:${r.path} ${r.value}（${r.reason}，余额停在 ${r.prev}）`).join(' ')
       : '｜应为 0（D11：拒绝会让余额卡死、正文与账本分裂）'));
-  console.log(`白名单丢弃   ${droppedDeltaRows.length} 条` +
-    (droppedDeltaRows.length
-      ? `｜其中类型判错 ${droppedKindMismatch.length} 条` +
-        (droppedKindMismatch.length
-          ? ' ← 模型声明的类型 ≠ 实体真实类型（D34）'
-          : '') +
-        '｜' + droppedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no}:${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join(' ')
-      : '｜应为 0（D34：被放弃的写入必须留痕，否则状态悄悄停在错值上）'));
+  // D35：越界 changes 必须在报告里数得到，否则「写进库了但报告数不到」＝又一条空过。
+  // 老会话没有这个 patch kind，所以「0 条」必须分两种说法：跑在 D35 之前（量不到）
+  // vs 本局真没有越界提案（量到了、是 0）。
+  {
+    const reasonStr = Object.entries(rejectedChangeByReason)
+      .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`).join('、');
+    console.log(`越界变更     ${rejectedChangeTotal} 条` +
+      (rejectedChangeTotal
+        ? `（${rejectedChangeRows.length} 拍）｜按 reason：${reasonStr}` +
+          '｜' + rejectedChangeRows.flatMap((r) => r.items).slice(0, 6)
+            .map((i) => `t${i.turn_no || '?'}:${i.reason} ${i.entity_id || '?'}/${i.path || '?'}`).join(' ') +
+          ' ← 连 world_state 行都没写进去（D35：可见的不写）'
+        : '｜0 = 本局没有 changes 提案被 sanitizeChange 丢掉'
+          + '（老会话量不到：D35 之前这条通道完全无痕，0 不等于没有）'));
+    console.log(`白名单丢弃   ${droppedDeltaRows.length} 条` +
+      (droppedDeltaRows.length
+        ? `｜其中类型判错 ${droppedKindMismatch.length} 条` +
+          (droppedKindMismatch.length
+            ? ' ← 模型声明的类型 ≠ 实体真实类型（D34）'
+            : '') +
+          '｜' + droppedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no}:${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join(' ')
+        : '｜应为 0（D34：被放弃的写入必须留痕，否则状态悄悄停在错值上）'));
+  }
   // 撞名探针不依赖 patch，历史会话也能看：这局有没有「卡里是概念、剧情里是人」的条目。
   // 关键区分：撞名实体上写的行，`entity_kind` 是**史官当时解析出的类型**。
   // 声明成 concept 的行 = 修复前会被 concept 白名单吃掉（实测「宫男」8 条）；
@@ -2616,13 +2893,38 @@ try {
   // 这一条判「上游到底吃到了多少」——实测同一份 prompt 连发 12 次，11 次 94.6%、1 次 0%，
   // 说明命中是上游按节点/分片的路由抽签，不是我们的结构问题。
   // 因此它最多 WARN，绝不 FAIL（FAIL 会让人去改没错的东西）。
+  //
+  // 判据形状（2026-10-30 改）：**只判「扣掉结构回退后还剩多少 0 命中」**。
+  // 旧口径「0 命中拍 > 三成」在 7 局里 4 局必超（结构上限本身只有 ~55%），既不区分局，
+  // 也指向不了任何可修的东西。而「区间内完全没有前缀回退」在这个架构里**不可满足**：
+  // 前缀每 3 拍被记忆窗口轮转改一次，长区间必然包含回退——写成那样就是恒不触发，
+  // 又回到「量不到就一直显健康」。所以按机制扣减：一次回退解释该拍 + 后 2 拍。
+  // 扣完仍 ≥3 拍 = 上游确实没在缓存我们的稳定前缀。
   const up = report.cache.upstream;
+  const upKnown = Boolean(up && up.narrator_turns);
+  // 常量必须具名引入，不能在这里写裸数字：换成 0.3 那种内联魔法值以后没人知道它的依据。
+  const upWorst = up && up.worst_unexplained !== null ? up.worst_unexplained : null;
+  const upRunText = up && up.zero_runs && up.zero_runs.length
+    ? up.zero_runs
+      .filter((r) => r.len >= up.zero_run_min)
+      .map((r) => `t${r.from}-${r.to}(L${r.len},R${r.prefix_regressions},U${r.unexplained})`)
+      .join(' · ')
+    : '无';
+  const upStatus = !upKnown
+    ? 'WARN'
+    : upWorst !== null && upWorst >= TH.CACHE_ZERO_UNEXPLAINED_WARN ? 'WARN' : 'INFO';
   add(
     'cache_upstream_hit',
-    '上游真实缓存命中率应接近本地估算上限（差距大说明命中是路由抽签，不是前缀断了）',
-    (up && up.narrator_turns ? (up.narrator_zero_turns > up.narrator_turns * 0.3 ? 'WARN' : 'PASS') : 'WARN'),
-    up && up.narrator_turns
-      ? `narrator ${up.narrator_hit_turns}/${up.narrator_turns} 拍命中过半，${up.narrator_zero_turns} 拍 0 tok｜真实均值 ${pctv(up.narrator_mean_rate)} vs 本地上限 ${pctv(up.local_estimate_mean)}｜**WARN 不代表前缀断了**：上游缓存按节点/分片，同一份 prompt 连发 12 次实测 11 次 94.6%、1 次 0%`
+    `连续 ${TH.CACHE_ZERO_RUN_MIN} 拍以上的 0 命中区间，扣掉结构回退（每次解释该拍+后 ${TH.CACHE_ZERO_PREHEAT_TURNS} 拍）后剩余 ≥ ${TH.CACHE_ZERO_UNEXPLAINED_WARN} 拍 → WARN`,
+    upStatus,
+    upKnown
+      ? `narrator ${up.narrator_hit_turns}/${up.narrator_turns} 拍命中过半，${up.narrator_zero_turns} 拍 0 tok` +
+        `｜capture_rate ${pctv(up.capture_rate)}（Σcached/Σprefix_shared）｜hit_capture_p10 ${pctv(up.hit_capture_p10)}｜token 加权命中 ${pctv(up.token_hit_rate)}` +
+        `｜真实均值 ${pctv(up.narrator_mean_rate)} vs 本地上限 ${pctv(up.local_estimate_mean)}` +
+        `｜≥${up.zero_run_min} 拍的 0 命中区间 ${((up.zero_runs || []).filter((r) => r.len >= up.zero_run_min)).length} 个：${upRunText}` +
+        `｜最大剩余 ${num(upWorst)} 拍（门槛 ${TH.CACHE_ZERO_UNEXPLAINED_WARN}）` +
+        `｜区间外 rewrite ${num(up.rewrite_turns)} / slide ${num(up.slide_turns)}（不参与扣减：那是我们自己的缺陷，见 cache_prefix_reuse）` +
+        '｜**本判据扣除结构回退的解释量；INFO 表示无可归因于上游的异常，不代表健康**'
       : '没有 usage_json.cached_tokens，量不到'
   );
 
@@ -2681,20 +2983,22 @@ try {
   // 不是系统的违约行为。但长跑里它必须被看见，所以不能只记 INFO。
   add(
     'continuity_absorbed',
-    '校勘报出的 major 级问题不应长期挂 open',
-    contMajor.length === 0 ? 'WARN'
-      : contMajorOpen.length === 0 ? 'PASS' : 'WARN',
-    contMajor.length === 0
-      ? '本局未触发 major 级校勘（间隔/切场才触发，样本不足）'
-      : `major ${contMajor.length} 条，open ${contMajorOpen.length} 条` +
-        (contMajorOpen.length ? '：' + contMajorOpen.map((r) => `t${r.turn_no}/${r.kind}`).join(',') : '') +
-        `｜minor ${contMinor.length} 条只计数` +
-        // D31：failed 是终态（形态不对 / 通道没实现 / 按设计拒写），它**不是**待裁决，
-        // 所以不能算进「挂 open」。但也不能不提——「有 4 条已经判死」和「一条都没有」
-        // 是两种状态，混在一起会让一个死通道看起来像健康的。
-        (contFailed.length
-          ? `｜已判终态 ${contFailed.length} 条（${Object.entries(contFailReasons).map(([k, n]) => `${k} ${n}`).join('，')}）`
-          : '')
+    '校勘报出的 major 级问题（仅 contradiction / state_jump）不应长期挂 open',
+    contMajorAbsorb.length === 0 ? 'WARN'
+      : contMajorAbsorbOpen.length === 0 ? 'PASS' : 'WARN',
+    // 判据行的 detail 必须**无条件**印出两类各自的条数：只看 PASS 分不清
+    // 「一处问题都没有」和「有问题但都在别的 kind 上」，而后者正是这条判据被窄化后的常态。
+    `contradiction/state_jump：major ${contMajorAbsorb.length} 条｜挂 open ${contMajorAbsorbOpen.length} 条` +
+    (contMajorAbsorbOpen.length ? '：' + contMajorAbsorbOpen.map((r) => `t${r.turn_no}/${r.kind}`).join(',') : '') +
+    `｜alias 类 major ${contMajorOther.length} 条（其中 open ${contMajorOtherOpen.length} 条，按设计需人工裁决、不自动处置）` +
+    (contMajorAbsorb.length === 0 ? '｜本局未触发 contradiction/state_jump 级 major（间隔/切场才触发，样本不足）' : '') +
+    `｜minor ${contMinor.length} 条只计数` +
+    // D31：failed 是终态（形态不对 / 通道没实现 / 按设计拒写），它**不是**待裁决，
+    // 所以不能算进「挂 open」。但也不能不提——「有 4 条已经判死」和「一条都没有」
+    // 是两种状态，混在一起会让一个死通道看起来像健康的。
+    (contFailed.length
+      ? `｜已判终态 ${contFailed.length} 条（${Object.entries(contFailReasons).map(([k, n]) => `${k} ${n}`).join('，')}）`
+      : '')
   );
 
   add(
@@ -2803,27 +3107,72 @@ try {
   // 老会话没有 patch 时退回回溯探针：按 concept 声明的运行态 > 0 就是修复前的形状。
   {
     const d34Legacy = droppedDeltaRows.length === 0 && Number(byConceptRunStates || 0) > 0;
+    // 第二级 PASS：被丢的行**全部**发生在同名升级的那一拍。
+    // 语义：那次 introduce 声明的类型与卡里撞名条目不同，代码先升级了实体类型，
+    // 同一拍剩下的增量是按「升级前的类型」解析的，被记为 dropped —— 这是**同一次形状切换
+    // 留下的两条留痕**，不是「某段运行态凭空消失」。留痕齐全（promoted + dropped 都在）
+    // 才是 D34 要的形状；只有 dropped 没有 promoted 才是静默丢。
+    // 判据仍不许整条放宽：跨拍被丢 / 没有升级记录，一律 FAIL。
+    const promotedTurns = new Set(promotedRows.map((r) => Number(r.turn_no)));
+    const allDropTurnsPromoted = droppedDeltaRows.length > 0 &&
+      droppedDeltaRows.every((r) => promotedTurns.has(Number(r.turn_no)));
+    // 撞名形状本局出现几次，必须**无条件**印出来：本判据只在真撞名时才有信号，
+    // 「PASS」既可能是修好了、也可能是一次都没走到（AGENTS §5.3 D34 同族第六次）。
+    const collisionShapeLine = collisionNames.length
+      ? `｜撞名且类型不同的 introduce ${nameCollisions.length} 行（条目 ${collisionNames.join('、')}，卡内类型 ${nameCollisions
+        .map((x) => `${x.name}:${x.card_type}`).filter((v, i, a) => a.indexOf(v) === i).join('、')}）`
+      : '｜撞名且类型不同的 introduce 0 行（该形状本局未出现，PASS 不代表修复被验证）';
     add(
       'dropped_delta_silent',
       '不应有增量被白名单悄悄丢掉（D34）',
-      droppedDeltaRows.length === 0 && !d34Legacy ? 'PASS' : 'FAIL',
-      droppedDeltaRows.length === 0 && !d34Legacy
+      droppedDeltaRows.length === 0 && !d34Legacy ? 'PASS'
+        : allDropTurnsPromoted ? 'PASS' : 'FAIL',
+      (droppedDeltaRows.length === 0 && !d34Legacy
         ? '没有增量被白名单挡掉' +
           (promotedRows.length
             ? `（本局有 ${promotedRows.length} 次同名条目升级，运行态照常落地）`
             : collisionNames.length
               ? `（本局有撞名条目 ${collisionNames.join('、')}，D34 起会按实体真实类型判定）`
               : '')
-        : droppedDeltaRows.length
-          ? `${droppedDeltaRows.length} 条被丢` +
-            (droppedKindMismatch.length
-              ? `｜其中 ${droppedKindMismatch.length} 条是类型判错（模型声明 ≠ 实体真实类型）`
-              : '') +
-            '：' + droppedDeltaRows.slice(0, 6)
-              .map((r) => `t${r.turn_no} ${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join('，') +
-            '｜被丢的路径不会报错、不进 rejected_delta、正文照常演，最终表现为「某个人的状态长期空白」或「已离场的人还在场」'
-          : `本局跑在 D34 之前：撞名条目 ${collisionNames.join('、')} 有 ${byConceptRunStates} 条人物运行态` +
-            '按 concept 声明写入，全被白名单吃掉（老会话没有 dropped_delta 留痕，这条是回溯复算）'
+        : allDropTurnsPromoted
+          ? `${droppedDeltaRows.length} 条被丢，但**全部**发生在同名升级拍（t${turnRanges([...promotedTurns])}）：` +
+            `${droppedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no} ${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join('，')}` +
+            '｜这是同一次类型切换的两条留痕（promoted + dropped 都在），不是状态凭空消失'
+          : droppedDeltaRows.length
+            ? `${droppedDeltaRows.length} 条被丢` +
+              (droppedKindMismatch.length
+                ? `｜其中 ${droppedKindMismatch.length} 条是类型判错（模型声明 ≠ 实体真实类型）`
+                : '') +
+              '：' + droppedDeltaRows.slice(0, 6)
+                .map((r) => `t${r.turn_no} ${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join('，') +
+              '｜被丢的路径不会报错、不进 rejected_delta、正文照常演，最终表现为「某个人的状态长期空白」或「已离场的人还在场」'
+            : `本局跑在 D34 之前：撞名条目 ${collisionNames.join('、')} 有 ${byConceptRunStates} 条人物运行态` +
+              '按 concept 声明写入，全被白名单吃掉（老会话没有 dropped_delta 留痕，这条是回溯复算）') +
+        collisionShapeLine
+    );
+  }
+
+  // D35：`sanitizeChange` 阶段被丢掉的 changes 提案。
+  // 与上一条是两道门：上一条判「进门后被挡」，这条判「连门都没进」。
+  // 0 条分两种：跑在 D35 之前（这条通道完全无痕，0 不代表没有）vs 本局真的没越界提案。
+  // 判 INFO 而不是 PASS：这条量的是「留痕通道是否活着」，不是「模型有没有写错」；
+  // 「量不到」和「量到 0」不许说成同一件事（AGENTS §5.3 同族第七次）。
+  // >0 判 WARN 不判 FAIL：拒写是白名单在正常工作，缺陷只在于它过去是**静默**的。
+  {
+    const reasonStr = Object.entries(rejectedChangeByReason)
+      .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`).join('、');
+    add(
+      'rejected_change_visible',
+      '越界变更必须留痕，不许静默丢弃（D35）',
+      rejectedChangeTotal > 0 ? 'WARN' : 'INFO',
+      rejectedChangeTotal > 0
+        ? `${rejectedChangeTotal} 条 changes 提案在 sanitizeChange 阶段被拒（${rejectedChangeRows.length} 拍）｜按 reason：${reasonStr}` +
+          '｜' + rejectedChangeRows.flatMap((r) => r.items).slice(0, 6)
+            .map((i) => `t${i.turn_no || '?'} ${i.reason} ${i.entity_id || '?'}/${i.path || '?'}`).join('，') +
+          '｜它们不会写进 world_state、不进 rejected_delta——拒写本身正确，' +
+          '但若原因集中在 path_not_allowed，说明史官在按错误的白名单写（提示词或卡里类型判错）'
+        : '本局 0 条｜本局没有 changes 提案在 sanitizeChange 阶段被拒；' +
+          '注意老会话（D35 之前）这条通道完全无痕，0 不等于没有越界提案'
     );
   }
 
@@ -3081,32 +3430,56 @@ try {
   const warnShare = localVals.length ? overWarn.length / localVals.length : null;
   add(
     'repeat_local',
-    `局部重复率 p90 < ${(TH.REPEAT_LOCAL_WARN * 100).toFixed(0)}%（5-gram vs 前 3 轮）`,
-    localP90 === null
-      ? 'WARN'
-      : localP90 <= TH.REPEAT_LOCAL_WARN
-        ? 'PASS'
-        : localP90 <= TH.REPEAT_LOCAL_FAIL
-          ? 'WARN'
-          : 'FAIL',
+    `（参考值，不判定）局部重复率 p90 / FAIL 线 ${(TH.REPEAT_LOCAL_FAIL * 100).toFixed(0)}%（5-gram vs 前 3 轮）`,
+    // 降 INFO 的理由不是「这局不好看」，是**口径本身在 45 拍量级上不可靠**：
+    // p90 的 95% 置信区间（10.6%–19.4%）横跨 12% 的 WARN 线，同一局多几拍就能从 PASS 翻成
+    // WARN；更关键的是它对「整段原样重演」几乎不敏感（394 字照搬 p90 只有 6%）。
+    // 一个既不稳定、又对最严重缺陷失明的口径，继续当判据只会训练人忽略它。
+    'INFO',
     localP90 === null
       ? '样本不足'
       : `mean ${(localStats.mean * 100).toFixed(1)}% / p90 ${(localP90 * 100).toFixed(1)}%` +
         (localRates.filter((g) => g.rate !== null).sort((a, b) => b.rate - a.rate).slice(0, 3)
           .map((g) => `｜最高 t${g.turn_no}:${(g.rate * 100).toFixed(0)}%`).join(''))
   );
-  // 尾部判据：分位数看不见的少数几拍，单独一条。
+  // 尾部判据：分位数看不见的少数几拍，单独一条（同样降为 INFO，理由同上）。
   add(
     'repeat_local_tail',
-    `越 FAIL 线（>${(TH.REPEAT_LOCAL_FAIL * 100).toFixed(0)}%）的拍数占比 ≤ 5% 且越 WARN 线 ≤ 10%`,
-    failShare === null
-      ? 'WARN'
-      : failShare > 0.05 ? 'FAIL' : warnShare > 0.10 ? 'WARN' : 'PASS',
+    `（参考值，不判定）越 FAIL 线（>${(TH.REPEAT_LOCAL_FAIL * 100).toFixed(0)}%）的拍数占比 / 越 WARN 线占比`,
+    'INFO',
     failShare === null
       ? '样本不足'
       : `越 FAIL ${overFail.length}/${localVals.length}（${(failShare * 100).toFixed(1)}%）` +
         `｜越 WARN ${overWarn.length}/${localVals.length}（${(warnShare * 100).toFixed(1)}%）` +
         (overFail.length ? `｜${overFail.map((g) => `t${g.turn_no}:${(g.rate * 100).toFixed(0)}%`).join(' ')}` : '')
+  );
+
+  // 7.5a-2 最长连续照搬（2026-10-30 新增，取代 repeat_local 的判定位）
+  // 判据形状：取全局最长的那一拍。不取 p90——「抄没抄」是存在性问题，
+  // 拍数越多越容易出一次整段重演，用分位数会把那次重演摊薄掉（同 §13.11 的教训）。
+  const longestStatus = !longestWorst
+    ? 'WARN'
+    : longestWorst.len >= TH.REPEAT_LONGEST_FAIL
+      ? 'FAIL'
+      : longestWorst.len >= TH.REPEAT_LONGEST_WARN
+        ? 'WARN'
+        : 'PASS';
+  add(
+    'repeat_longest',
+    `最长连续照搬 < ${TH.REPEAT_LONGEST_WARN} 字（逐拍与前 ${LOCAL_WINDOW} 拍的最长公共子串；≥${TH.REPEAT_LONGEST_FAIL} = FAIL，${TH.REPEAT_LONGEST_WARN}–${TH.REPEAT_LONGEST_FAIL - 1} = WARN）`,
+    longestStatus,
+    (longestWorst
+      ? `最长 ${longestWorst.len} 字（t${longestWorst.from}→t${longestWorst.turn_no}）「${longestWorst.head}」` +
+        `｜p90 ${longestStats ? longestStats.p90.toFixed(0) : MISSING} 字｜mean ${longestStats ? longestStats.mean.toFixed(1) : MISSING} 字`
+      : '样本不足（只有一拍正文）') +
+    // 分档计数必须无条件印：只看「最长 74 字 → WARN」认不出这是唯一一次，
+    // 还是每三拍都在抄六十字。两个数一起才说得清形状。
+    `｜≥${TH.REPEAT_LONGEST_FAIL} 字 ${longestOver(TH.REPEAT_LONGEST_FAIL).length} 拍` +
+    `｜≥${TH.REPEAT_LONGEST_WARN} 字 ${longestOver(TH.REPEAT_LONGEST_WARN).length} 拍` +
+    `｜≥30 字 ${longestOver(30).length} 拍` +
+    (longestOver(TH.REPEAT_LONGEST_WARN).length
+      ? `｜${longestOver(TH.REPEAT_LONGEST_WARN).map((g) => `t${g.from}→t${g.turn_no}:${g.len}字`).join(' ')}`
+      : '')
   )
 
   // 7.5b 趋势：前 1/3 与后 1/3 的局部重复率对比（D7 第 1 条，此前只有 p90 —— 早该有）。
@@ -3179,16 +3552,17 @@ try {
           + '回程通道（读 character_states）对它们完全失效；这条 FAIL 是修复前的存量数据'
         : '');
   } else if (lifeLeaks.length > 0) {
-    lifeStatus = 'WARN';
-    lifeDetail += `｜${lifeLeaks.map((x) => {
-      const why = x.named_by_player.length
-        ? `只在正文里被提到（玩家点名 t${x.named_by_player.join(',')}）`
-        : '只在正文里被提到（对白/心里想）';
-      return `${x.who}(${x.value}@t${x.from}${x.valid_to == null ? '' : `-t${x.valid_to}`})→正文 t${x.turns.join(',')}，但不在 present 名单（${why}）`;
-    }).join(' · ')}`;
+    // 第三档**不是缺陷**：正文里出现了这个名字，但 present 名单里没有、玩家长也没点名。
+    // 「回忆 / 对白里提到某人 / 否定式（她不在这里）」都是合法写法——`gone` 的语义正是
+    // 「这一场不在镜头里」（§5.3），被提一嘴不等于上场。旧口径把它记 WARN，等于让
+    // 45 拍局的 4 例正常叙述拖着整局不掉；更糟的是它把「在场」这个唯一确定的信号
+    // 稀释成「正文出现过名字」，而后者永远无法证伪。
+    // 定 INFO 而不是 PASS：数量必须照常印出来（0 例和 4 例是不同的形状），
+    // 但它不参与整局判定——否则「报告量不到就一直健康」的教训换个方向重犯。
+    lifeStatus = 'INFO';
+    lifeDetail += `｜正文提及但不在场 ${lifeLeaks.length} 例（回忆/对白/否定式，非缺陷）`;
   }
   add('life_state_consistency', '离场/死亡角色不得再上场（present 名单交叉，非比例判据）', lifeStatus, lifeDetail);
-
   // 7.6b 主角不得被判离场（D14）
   // 与 life_state_consistency 分开：那条管「配角走了又上场」，这条管「主角被删掉了」。
   // 两者机制不同（前者是 gone 无回程，后者是 player.life_state 没有消费方却仍被 lint 读到）。

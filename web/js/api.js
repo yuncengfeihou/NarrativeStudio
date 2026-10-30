@@ -419,6 +419,17 @@ export const api = {
     return request(`/api/sessions/${encodeURIComponent(id)}/patches/${patchId}/resolve`,
       { method: 'POST', body: { status }, signal });
   },
+  /**
+   * 真正执行一条提案（目前只有 `alias` 的确定性别名合并）。
+   *
+   * 与 `resolvePatch` 的区别是「有没有动世界」：那条只改状态，对实体零效果，
+   * 点了接受之后别名冲突照旧存在。这条走 `patch-apply.js` 的确定性动作，
+   * 400 时 `message` 就是拒绝原因（`both_in_card` / `neither_in_card` / `need_two_names`）。
+   */
+  applyPatch(id, patchId, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/patches/${patchId}/apply`,
+      { method: 'POST', body: {}, signal });
+  },
 
   /* ---------------- 分支 / 一致性检查 / 回忆 ---------------- */
 

@@ -1054,8 +1054,9 @@ console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
     '点号形态的 set_state 记 stale_value：它的 value 是「校勘那一拍应有的值」，不能隔拍重放');
   eq(p7.status, 'failed', '终态，不会在记忆面板里永远排队');
 
-  // merge_alias 从来没有实现分支。提示词已把它从 action 枚举删掉；万一模型仍写出来，
-  // 要能和「形态填错」区分开——否则又是一个「看起来在等人裁决」的死通道。
+  // alias 类提案的终态是 `noted`（D36）：模型按提示词填 `action:'none'`，但它的 none
+  // 和「我不确定」不是一回事——它是「按设计要人来」。判 open 会让报告算成「major 挂着
+  // 没修」，判 failed 会被读成「通道坏了」。人工入口是 /patches/:id/apply 的确定性合并。
   const n8 = pipe.applyContinuityFixes(sid, {
     branchId: 'main', turnNo: 14, threads: [], aliasIndex: schema.buildAliasIndex(contCard),
     issues: [{
@@ -1063,10 +1064,25 @@ console.log('\n=== 校勘自动修复（D12）：target 接受 # 前缀 ===');
       evidence: '第36-37轮原文', fix: { action: 'merge_alias', target: '2677', value: '东宫玄衣人' },
     }],
   });
-  eq(n8, 0, 'merge_alias 不执行（没有这条自动通道）');
+  eq(n8, 0, 'merge_alias 不作为 action 执行（合并走人工入口，不在这条自动通道里）');
   const p8 = store.listPatches(sid, { kind: 'alias', limit: 5 })[0];
-  eq(p8.payload?.fix_result?.reason, 'not_implemented', 'merge_alias 的落空原因是「没有实现」，不是「填错了」');
-  eq(p8.status, 'failed', 'merge_alias 落 failed 终态（不是 open——它不是「等人裁决」）');
+  eq(p8.payload?.fix_result?.state, 'manual_only', 'alias 提案记「只能人工」，不是「模型填错了」');
+  eq(p8.payload?.fix_result?.reason, 'alias_merge_needs_human',
+    '落空原因是「按设计需人确认」，不是「没有实现」也不是「填错了」');
+  eq(p8.status, 'noted', 'alias 落 noted 终态：不再排队等人裁决，也不假装通道坏了');
+
+  // 「我不确定」（action:'none'）与「按设计要人」（alias）必须分开：
+  // 前者仍是 open（等作者裁决），不能被 alias 的 noted 一起改掉。
+  const nNone = pipe.applyContinuityFixes(sid, {
+    branchId: 'main', turnNo: 15, threads: [], aliasIndex: schema.buildAliasIndex(contCard),
+    issues: [{
+      kind: 'contradiction', severity: 'major', subject: '大黑牛', claim: '两条断言冲突',
+      evidence: '第15轮原文', fix: { action: 'none', target: '', value: '' },
+    }],
+  });
+  eq(nNone, 0, 'action=none 不执行');
+  const pNone = store.listPatches(sid, { kind: 'contradiction', limit: 5 })[0];
+  eq(pNone.status, 'open', '「模型不确定」仍留 open 等人裁决（只有 alias 走 noted）');
 
   // 提示词必须写明 set_state 的 target 形态，且不能把 merge_alias 列成可用的 action——
   // 这两条是上面的代码约束在提示词侧的唯一证据，写漏一条就回到 D29。
@@ -1094,18 +1110,19 @@ console.log('\n=== 世界状态：变更校验 ===');
   );
   eq(add.entity_id, '凌玥', '实体变更按别名归一到 id');
   eq(add.path, 'knowledge.knows', '知识路径放行');
-  ok(arch.sanitizeChange(
+  // D35 起丢弃不再是 null 而是 {rejected,reason}：形状变了，但语义仍是「不落库」。
+  eq(arch.sanitizeChange(
     { kind: 'person', id: '凌玥', path: 'identity.age', op: 'set', value: '18' },
     { aliasIndex: idx },
-  ) === null, '身份根不可写');
-  ok(arch.sanitizeChange(
+  )?.reason, 'path_not_allowed', '身份根不可写');
+  eq(arch.sanitizeChange(
     { kind: 'person', id: '凌玥', path: 'knowledge.knows', op: 'set', value: 'x' },
     { aliasIndex: idx },
-  ) === null, '列表路径不能用 set');
-  ok(arch.sanitizeChange(
+  )?.reason, 'op_path_mismatch', '列表路径不能用 set');
+  eq(arch.sanitizeChange(
     { kind: 'person', id: '凌玥', path: 'mood', op: 'add', value: 'x' },
     { aliasIndex: idx },
-  ) === null, '标量路径不能用 add');
+  )?.reason, 'op_path_mismatch', '标量路径不能用 add');
 
   const introCodex = arch.sanitizeChange(
     { kind: 'place', fields: { name: '听雨楼', summary: '城南暗线' } },
@@ -1114,10 +1131,10 @@ console.log('\n=== 世界状态：变更校验 ===');
   eq(introCodex.op, 'introduce', 'introduce 放行新实体');
   eq(introCodex.entity_id, '听雨楼', '新实体 id 由名字生成');
 
-  ok(arch.sanitizeChange(
+  eq(arch.sanitizeChange(
     { kind: 'item', id: '玉佩', path: 'summary', op: 'set', value: '改写定义' },
     { aliasIndex: idx },
-  ) === null, '已有辞书定义不可改写');
+  )?.reason, 'canon_immutable', '已有辞书定义不可改写');
   const codexRuntime = arch.sanitizeChange(
     { kind: 'item', id: '玉佩', path: 'status', op: 'set', value: '发绿光' },
     { aliasIndex: idx },
@@ -1151,7 +1168,7 @@ console.log('\n=== 世界状态：变更校验 ===');
     { kind: 'player', id: '伍卿', path: 'life_state', op: 'set', value: 'injured' },
     { aliasIndex: idx, playerName: '伍卿' },
   );
-  eq(playerHurt, null, '玩家没有 life_state 这条路（D14：主角不会离场）');
+  eq(playerHurt?.reason, 'path_not_allowed', '玩家没有 life_state 这条路（D14：主角不会离场）');
   ok(!pathsFor('player').has('life_state'), 'PLAYER_SCALARS 不含 life_state');
   ok(pathsFor('person').has('life_state'), '人物仍然有 life_state（受控值不变）');
 }
@@ -1367,6 +1384,287 @@ console.log('\n=== D34：卡里的「设定集条目」撞上运行期「人物�
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D34 端到端：撞名升级与投影丢弃必须经 runTurn 落成 patches ===');
+{
+  // 上面那一块是纯函数级：它只证明投影算对了。D34 的判据要的是**报告看得见**，
+  // 而报告读的是 patches 表——投影结果还要经 orchestrator 的 needsProjection 门、
+  // 按本轮过滤后才落库。这条链路断了的时候纯函数测试全绿、报告里 0 条。
+  //
+  // 这里用进程内假上游驱动真实 runTurn：不起服务、不占端口，只换 globalThis.fetch
+  // （llm.js 的 chat/chatStream 都走全局 fetch）。分派键用 body.response_format /
+  // body.stream 这两个协议字段，不用提示词首行——提示词一改就会假红。
+  //
+  // 两处构造约束（不是风格问题）：
+  // ① 正向必须跨拍：`states` 循环写在 `changes` 循环之前，同拍里 states 先生成、
+  //    introduce 后到，撞名首拍的人物运行态一定按 concept 白名单被丢——那正是**反向**
+  //    用例的形状，拿它验正向会永远验不到「四条运行态全部落地」。
+  // ② 每拍都必须有投影理由：orchestrator 只在「本轮有数值路径或 introduce」时才重投影，
+  //    t1 的 introduce 就是 t2 之前那次投影的理由；同拍反向用例则靠 introduce 触发。
+  const realFetch = globalThis.fetch;
+  const encoder = new TextEncoder();
+  const streamOf = (frames) => new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(
+        `${frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')}data: [DONE]\n\n`,
+      ));
+      controller.close();
+    },
+  });
+  const jsonReply = (content) => ({
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+    }),
+    text: async () => '',
+  });
+  // 史官按「第几轮」答，其余 JSON Agent（场记 / 世界呼吸 / 校勘 / 资料员）回空对象。
+  let plan = new Map();
+  globalThis.fetch = async (url, init = {}) => {
+    const body = JSON.parse(init.body || '{}');
+    if (body.stream) {
+      return {
+        ok: true,
+        status: 200,
+        body: streamOf([
+          { choices: [{ index: 0, delta: { content: '他推门进来，站在灯下。' }, finish_reason: null }] },
+          {
+            choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+            usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+          },
+        ]),
+        text: async () => '',
+      };
+    }
+    const text = (body.messages || []).map((m) => String(m.content || '')).join('\n');
+    const hit = /【回合】第 (\d+) 轮/.exec(text);
+    const update = hit ? plan.get(Number(hit[1])) : null;
+    return jsonReply(JSON.stringify(update || {}));
+  };
+
+  try {
+    const card = schema.normalizeCard({
+      title: 'D34 端到端',
+      player: { name: '伍卿' },
+      entities: [
+        { id: 'gong-nan', name: '宫男', type: 'concept', summary: '宫中侍宴男性' },
+        { id: 'wu-qing', name: '伍卿', type: 'person' },
+      ],
+      anchors: [{ id: 'p0', label: '序章', snapshot: { time: '初冬 · 午后', place: '茶楼' } }],
+    });
+
+    /* ---- 正向：t1 只 introduce 撞名的 person，t2 才写四条人物运行态 ---- */
+    const wid = `w-d34-e2e-${Date.now()}`;
+    store.saveWorld({ id: wid, title: 'D34 端到端', card });
+    const sess = orch.createSessionWithSettings({ title: 'D34 端到端局', worldId: wid });
+    const sid = sess.id;
+    plan = new Map([
+      [1, {
+        changes: [{
+          kind: 'person', id: 'gong-nan', op: 'introduce',
+          fields: { name: '宫男', role: '东宫侍从', summary: '白裙送帖人' },
+        }],
+      }],
+      [2, {
+        changes: [
+          { kind: 'person', id: 'gong-nan', path: 'life_state', op: 'set', value: 'gone' },
+          { kind: 'person', id: 'gong-nan', path: 'mood', op: 'set', value: '惶恐' },
+          { kind: 'person', id: 'gong-nan', path: 'location', op: 'set', value: '门外' },
+          { kind: 'person', id: 'gong-nan', path: 'goal', op: 'set', value: '等回话' },
+        ],
+      }],
+    ]);
+    await orch.runTurn({ sessionId: sid, playerText: '我推门进去。', generateBranches: false });
+
+    const promoted = store.listPatches(sid, { branchId: 'main', kind: 'entity_promoted' });
+    eq(promoted.length, 1, 't1：撞名升级落成 1 条 entity_promoted（不是 0 也不是 2）');
+    eq(promoted[0]?.payload.from, 'concept', '升级审计记下升级前类型');
+    eq(promoted[0]?.payload.to, 'person', '升级审计记下升级后类型');
+    eq(promoted[0]?.payload.name, '宫男', '升级审计记下实体名');
+    eq(promoted[0]?.turn_no, 1, '升级审计挂在触发它的那一拍');
+    // 「该形状出现次数」单独断言：本卡只有 1 个同名 concept，撞名只可能发生 1 次。
+    // 少一条说明判据没被触发（空过），多一条说明同一实体升级了两次。
+    const introduceRows = store.getWorldState(sid, { branchId: 'main', atTurn: 2 })
+      .filter((d) => d.op === 'introduce' && d.entity_id === 'gong-nan');
+    eq(introduceRows.length, 1, '该形状出现次数 = 1（PASS 不是空过）');
+
+    await orch.runTurn({ sessionId: sid, playerText: '我再看他一眼。', generateBranches: false });
+
+    const t2Rows = store.getWorldState(sid, { branchId: 'main', atTurn: 2 })
+      .filter((d) => Number(d.valid_from) === 2 && d.entity_id === 'gong-nan');
+    eq(t2Rows.length, 4, 't2 四条运行态全部进 world_state（没有一条在 sanitizeChange 就被丢）');
+    ok(t2Rows.every((d) => d.entity_kind === 'person'), 't2 写入声明的实体类型是 person，不是 concept');
+
+    const projected = effective.buildEffectiveWorld(
+      schema.normalizeCard(sess.card_snapshot),
+      store.getWorldState(sid, { branchId: 'main', atTurn: 2 }),
+    );
+    const gong = projected.entities.find((e) => e.id === 'gong-nan');
+    eq(gong?.type, 'person', 't2 投影后实体是人物');
+    eq(gong?.life_state, 'gone', 'life_state 落地');
+    eq(gong?.mood, '惶恐', 'mood 落地');
+    eq(gong?.location, '门外', 'location 落地');
+    eq(gong?.goal, '等回话', 'goal 落地');
+    ok(!projected.dropped_deltas, '跨拍构造下没有任何写入被投影期丢弃');
+    eq(store.countPatches(sid, { branchId: 'main', kind: 'rejected_change' }), 0,
+      '全部合法提案，不产生 rejected_change 噪音');
+
+    /* ---- 反向：同一拍里 introduce 与人物运行态同时出现 → 后者按 concept 白名单被丢 ---- */
+    const wid2 = `w-d34-drop-${Date.now()}`;
+    store.saveWorld({ id: wid2, title: 'D34 同拍', card });
+    const sess2 = orch.createSessionWithSettings({ title: 'D34 同拍局', worldId: wid2 });
+    const sid2 = sess2.id;
+    plan = new Map([
+      [1, {
+        changes: [
+          { kind: 'person', id: 'gong-nan', path: 'life_state', op: 'set', value: 'gone' },
+          { kind: 'person', id: 'gong-nan', op: 'introduce', fields: { name: '宫男', type: 'person' } },
+        ],
+      }],
+    ]);
+    await orch.runTurn({ sessionId: sid2, playerText: '我推门进去。', generateBranches: false });
+
+    const dropped = store.listPatches(sid2, { branchId: 'main', kind: 'dropped_delta' });
+    eq(dropped.length, 1, '同拍构造：被白名单挡掉的写入留痕（1 条，不静默消失）');
+    eq(dropped[0]?.payload.entity_type, 'concept',
+      '留痕记下实体真实类型 concept（两者不同 = 类型判错了）');
+    eq(dropped[0]?.payload.entity_kind, 'person', '留痕同时记下模型声明的类型');
+    eq(dropped[0]?.payload.path, 'life_state', '留痕记下被挡的路径');
+    eq(dropped[0]?.turn_no, 1, '留痕挂在写入的那一拍');
+    // 两类留痕必须分得开：同一次投影里既可能升级（进门成功）也可能被丢（进门后挡掉），
+    // 报告要能分别数，混成一个 kind 就无法归因。
+    eq(store.countPatches(sid2, { branchId: 'main', kind: 'entity_promoted' }), 1,
+      '同一拍里升级照常留痕，与丢弃是两条不同的 kind');
+  } finally {
+    // 必须无条件恢复：后续套件在同一进程里跑，抢走 fetch 会让真实调用失败。
+    globalThis.fetch = realFetch;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D35：sanitizeChange 的丢弃必须留痕（带 reason 的可数明细） ===');
+{
+  // 病灶：丢弃返回 null，调用方只能 `if (!c) continue` —— 越界写入连 world_state 行
+  // 都没有、无 patch、无计数。报告只看得到「这一拍没变化」。
+  const card = schema.normalizeCard({
+    title: 't',
+    player: { name: '伍卿' },
+    entities: [
+      { id: 'gong-nan', name: '宫男', type: 'concept', summary: '宫中侍宴男性' },
+      { id: 'wu-qing', name: '伍卿', type: 'person' },
+      // 一个「卡里就是人物」的对照物：路径白名单是按解析出的真实类型取的，
+      // 用 concept 去测人物路径只会全部撞在 path_not_allowed 上，测不到后面几道门。
+      { id: 'lao-jiu', name: '老九', type: 'person' },
+    ],
+  });
+  const idx = schema.buildAliasIndex(card);
+  const clean = (raw) => arch.sanitizeChange(raw, { aliasIndex: idx, playerName: '伍卿' });
+
+  // ① 病灶本体：拿 concept 写人物运行态。改前这里返回 null，什么都留不下来。
+  const p1 = clean({ kind: 'concept', id: '宫男', path: 'life_state', op: 'set', value: 'gone' });
+  eq(p1?.rejected, true, '① 丢弃不再返回 null，而是带 rejected 的值');
+  eq(p1?.reason, 'path_not_allowed', '① reason = path_not_allowed');
+  eq(p1?.entity_kind, 'concept', '① 记下归一后查白名单的类型');
+  eq(p1?.entity_type, 'concept', '① 记下卡里该实体的真实类型');
+  eq(p1?.entity_id, 'gong-nan', '① 记下实体 id（不是模型写的名字）');
+  eq(p1?.path, 'life_state', '① 记下被挡的路径');
+
+  eq(clean({ kind: 'nope', id: 'x', path: 'status', op: 'set', value: 'y' })?.reason,
+    'bad_kind', '② kind 非法 → bad_kind');
+  eq(clean({ kind: 'concept', id: '宫男', path: 'summary', op: 'set', value: '新描述' })?.reason,
+    'canon_immutable', '③ 非人物改写作者公理 → canon_immutable');
+  eq(clean({ kind: 'person', id: '宫男', path: 'mood', op: 'explode', value: 'x' })?.reason,
+    'bad_op', '④ op 非法 → bad_op');
+  eq(clean({ kind: 'person', id: '', path: 'mood', op: 'set', value: 'x' })?.reason,
+    'no_target', '⑤ 没有目标 → no_target');
+  eq(clean({ kind: 'person', op: 'introduce', fields: {} })?.reason,
+    'bad_introduce', '⑥ introduce 没有名字 → bad_introduce');
+  eq(clean({ kind: 'person', id: '老九', path: 'mood', op: 'delta', value: 1 })?.reason,
+    'delta_on_non_number', '⑦ 非数值路径用 delta → delta_on_non_number');
+  eq(clean({ kind: 'player', id: 'player', path: 'money', op: 'delta', value: '很多' })?.reason,
+    'not_a_number', '⑧ 数值路径的值不是数字 → not_a_number');
+  eq(clean({ kind: 'concept', id: '宫男', path: 'reveal', op: 'set', value: 'nope' })?.reason,
+    'bad_reveal', '⑨ reveal 枚举外 → bad_reveal');
+  eq(clean({ kind: 'person', id: '老九', path: 'mood', op: 'set', value: '   ' })?.reason,
+    'empty_value', '⑩ 值裁空 → empty_value');
+
+  // 路径是列表还是标量由白名单决定，不由模型写的 op 决定。
+  const sp = await import('../server/world/state-paths.js');
+  const listPath = [...pathsFor('person')].find((p) => sp.LIST_PATH_SET.has(p));
+  eq(clean({ kind: 'person', id: '老九', path: listPath, op: 'set', value: 'x' })?.reason,
+    'op_path_mismatch', '⑪ 列表路径用 set → op_path_mismatch');
+  eq(clean({ kind: 'person', id: '老九', path: 'mood', op: 'add', value: 'x' })?.reason,
+    'op_path_mismatch', '⑫ 标量路径用 add → op_path_mismatch');
+
+  // life_state 枚举外**不是**丢弃：既有口径是退回 status 保留原文，别顺手改成 rejected。
+  const ls = clean({ kind: 'person', id: '老九', path: 'life_state', op: 'set', value: '半死不活' });
+  ok(!ls.rejected, '⑬ life_state 枚举外仍然不丢弃');
+  eq([ls.path, ls.value], ['status', '半死不活'], '⑬ 退回 status 并保留原文');
+
+  // 成功路径的形状必须逐字段不变：rejected 只出现在丢弃分支。
+  const good = clean({ kind: 'person', id: '老九', path: 'mood', op: 'set', value: '冷' });
+  eq(Object.keys(good).sort(), ['entity_id', 'kind', 'op', 'path', 'value'],
+    '⑭ 合法变更的键集合与改动前一致');
+  ok(!('rejected' in good), '⑭ 合法变更没有 rejected 键');
+  eq([good.entity_id, good.path, good.value], ['lao-jiu', 'mood', '冷'], '⑭ 合法变更的值不变');
+  const intro = clean({ kind: 'person', id: 'lao-jiu', op: 'introduce', fields: { name: '老九', role: '跑堂' } });
+  eq([intro.kind, intro.path, intro.op, intro.name], ['person', '', 'introduce', '老九'],
+    '⑭ introduce 成功返回值形状不变');
+
+  /* ---- 集成级：留痕必须真的进 patches 表，报告才数得到 ---- */
+  const sid = `s-d35-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const applied = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex: idx, playerName: '伍卿',
+    update: {
+      changes: [
+        { kind: 'concept', id: '宫男', path: 'life_state', op: 'set', value: 'gone' },
+        { kind: 'person', id: 'wu-qing', path: 'mood', op: 'set', value: '烦' },
+      ],
+    },
+  });
+  eq(applied.changes, 1, '同批合法变更照旧落库（留痕不阻断合法写入）');
+  eq(applied.rejected_changes?.count, 1, 'applied.rejected_changes.count 可被单测直读');
+  eq(applied.rejected_changes?.by_reason?.path_not_allowed, 1, 'by_reason 按 reason 计数');
+  eq(applied.rejected_changes?.items?.length, 1, 'items 带明细（不是只有条数）');
+  const rp = store.listPatches(sid, { branchId: 'main', kind: 'rejected_change' });
+  eq(rp.length, 1, '被拒变更合并成 1 条 patch（不是 0 条，也不是每条一条）');
+  eq(rp[0]?.status, 'failed', 'patch 状态是 failed（终态，不是等人裁决的 open）');
+  eq(rp[0]?.severity, 'warn', 'severity = warn');
+  eq(rp[0]?.turn_no, 1, 'patch 挂在被拒的那一拍');
+  eq(rp[0]?.payload?.count, 1, 'payload.count 是报告只需读的那一个数');
+  eq(rp[0]?.payload?.by_reason?.path_not_allowed, 1, 'payload 带按 reason 的可数明细');
+  eq(rp[0]?.payload?.items?.[0]?.reason, 'path_not_allowed', 'payload.items 带明细');
+  ok(String(rp[0]?.evidence || '').includes('越界变更 1 条'), 'evidence 有人能读的摘要');
+  const written = store.getWorldState(sid, { branchId: 'main', atTurn: 1 });
+  ok(!written.some((d) => d.entity_id === 'gong-nan' && d.path === 'life_state'),
+    '越界写入依旧没有 world_state 行（只是这次看得见的不写）');
+
+  // 预扫守卫：declaredSet 的 introduce 预扫只能吃「合法的」introduce。
+  // 否则一条被拒的 introduce 会把它的目标写进声明集合，同批里对那个名字的越界写入
+  // 就会被当成「已声明」放行——拒绝本身反而成了放行的通行证。
+  const sid2 = `s-d35-scan-${Date.now()}`;
+  store.createSession({ id: sid2, title: 't' });
+  store.createBranch(sid2, { branchId: 'main' });
+  const scanned = arch.applyArchivistUpdate({
+    sessionId: sid2, branchId: 'main', turnNo: 1, aliasIndex: idx, playerName: '伍卿',
+    declaredTargets: ['伍卿', 'player', 'world'],
+    update: {
+      changes: [
+        // kind='player' 不在 ENTITY_TYPES 里 → introduce 被拒，但 id 非空
+        { kind: 'player', id: 'ghost', op: 'introduce', fields: { name: '玄影' } },
+        { kind: 'person', id: 'ghost', path: 'mood', op: 'set', value: '冷' },
+      ],
+    },
+  });
+  eq(scanned.rejected_changes?.count, 1, '被拒的 introduce 记一条 rejected_change');
+  eq(scanned.skipped, 1, '被拒 introduce 的目标没进 declaredSet，后续写入按越界被挡');
+  eq(scanned.changes, 0, '两条都没有落库');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 数值账本：模型只报变化量，加减与余额由代码算 ===');
 {
   const paths = await import('../server/world/state-paths.js');
@@ -1455,23 +1753,23 @@ console.log('\n=== 数值账本：模型只报变化量，加减与余额由代�
     { kind: 'person', id: 'a-jiu', path: 'status', op: 'delta', value: 5 },
     { aliasIndex: [], playerName: '伍卿' },
   );
-  eq(dirty, null, '非数值路径上的 delta 被拒（不像素级信任模型的字面量类型）');
+  eq(dirty?.reason, 'delta_on_non_number', '非数值路径上的 delta 被拒（不像素级信任模型的字面量类型）');
 
   const badMoney = arch.sanitizeChange(
     { kind: 'player', id: 'player', path: 'money', op: 'delta', value: '很多' },
     { aliasIndex: [], playerName: '伍卿' },
   );
-  eq(badMoney, null, 'money 的 delta 值不是数字就整条拒绝');
+  eq(badMoney?.reason, 'not_a_number', 'money 的 delta 值不是数字就整条拒绝');
 
   // 空值不能当 0：Number('') === 0，会把「没写金额」误记成「余额归零」。
   eq(arch.sanitizeChange(
     { kind: 'player', id: 'player', path: 'money', op: 'set', value: '' },
     { aliasIndex: [], playerName: '伍卿' },
-  ), null, 'money 的空值不当成 0');
+  )?.reason, 'not_a_number', 'money 的空值不当成 0');
   eq(arch.sanitizeChange(
     { kind: 'player', id: 'player', path: 'money', op: 'delta', value: null },
     { aliasIndex: [], playerName: '伍卿' },
-  ), null, 'money 的 null 不当成 0');
+  )?.reason, 'not_a_number', 'money 的 null 不当成 0');
 
   // 分支复制：数值增量按 valid_to 裁剪，与其它 world_state 同一条规则。
   store.addWorldState(sid, {
@@ -2317,6 +2615,83 @@ console.log('\n=== 最小场长：场次太短会让「本场逐字原文」为�
   store.setState(sid2, every, { time: '初冬 · 午后', place: '茶楼' }, 'main');
   eq(detectSceneChange({ id: sid2, branch_id: 'main' }, { scene_change: {} }, every), true,
     `轮数强制封场不受最小场长影响（SCENE_EVERY=${every}）`);
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 人工处置提案：/apply 真的改账本，不是只改状态（D36） ===');
+{
+  // 背景：记忆面板的「接受」过去只调 setPatchStatus()，是一条 UPDATE，
+  // 对实体零效果。45 拍实测 t40 报「提酒男子 / 姬凡」，点接受后账本里
+  // 两个名字依然各写各的。这里锁的是 patch-apply.js 的确定性那一半。
+  const { applyPatchAction } = await import('../server/memory/patch-apply.js');
+
+  const sid = `patch-apply-${Date.now()}`;
+  const cardSnapshot = {
+    entities: [
+      { id: 'ji-fan', name: '姬凡', type: 'person', aliases: ['皇子'] },
+      { id: 'wu-qing', name: '伍卿', type: 'person' },
+    ],
+  };
+  store.createSession({ id: sid, title: 'patch-apply', cardSnapshot });
+  store.createBranch(sid, { branchId: 'main' });
+  const addAliasPatch = (subject, kind = 'alias') => store.addPatch(sid, {
+    branch_id: 'main', agent: 'continuity', kind, status: 'noted', severity: 'major',
+    turn_no: 40, payload: { subject, claim: `「${subject}」可能是同一实体` },
+  });
+
+  // ① 一个名字在卡里、一个不在：确定性合并。规范名必须是卡里那个。
+  const p1 = addAliasPatch('提酒男子 / 姬凡');
+  const r1 = applyPatchAction(sid, p1);
+  eq(r1.ok, true, 'apply 对 alias 提案返回 ok');
+  eq(r1.status, 'applied', 'apply 把状态置为 applied');
+  eq(r1.fix_result.canonical, { id: 'ji-fan', name: '姬凡', type: 'person' },
+    '规范名只由卡快照定：卡里有的那个赢（提酒男子是运行期造出来的幽灵）');
+  eq(r1.fix_result.aliases, ['提酒男子'], '不在卡里的名字被并入 aliases');
+  eq(r1.fix_result.runtime_duplicates, [], '本局没有同名幽灵实体');
+
+  const aliasRows = store.getWorldState(sid, { branchId: 'main' })
+    .filter((d) => d.entity_id === 'ji-fan' && d.path === 'aliases');
+  eq(aliasRows.length, 1, '别名真的写进了 world_state（不是只改 patch 状态）');
+  eq(aliasRows[0].value, '提酒男子', '写进去的就是那个名字');
+  eq(aliasRows[0].source, 'human', 'source 记为 human：这是人工裁决，不是模型提案');
+  eq(store.getPatch(sid, p1).status, 'applied', 'patch 行状态同步为 applied');
+
+  // ② 幂等：重复点不重复写。作者会连点两次，第二次不能再落一行。
+  const r2 = applyPatchAction(sid, p1);
+  eq(r2.already, true, '重复执行返回 already，不重复写别名');
+  eq(store.getWorldState(sid, { branchId: 'main' })
+    .filter((d) => d.entity_id === 'ji-fan' && d.path === 'aliases').length, 1,
+  '第二次执行没有多出别名行');
+
+  // ③ 两个名字都在卡里且是不同实体 = 真·两名冲突。猜错不可逆，必须交人。
+  const rBoth = applyPatchAction(sid, addAliasPatch('姬凡 / 伍卿'));
+  eq(rBoth.ok, false, '两个名字分属不同实体时不自动执行');
+  eq(rBoth.reason, 'both_in_card', 'reason=both_in_card');
+  eq(rBoth.status, 'failed', '按设计拒执行记 failed（不是 open，它不在等人裁决）');
+
+  // ④ 两个名字都不在卡里：可能真是剧情里的两个人，也不猜。
+  const rNeither = applyPatchAction(sid, addAliasPatch('阿甲 / 阿乙'));
+  eq(rNeither.reason, 'neither_in_card', 'reason=neither_in_card');
+
+  // ⑤ 拆不出两个名字：这类提案本来就缺信息，不是模型填错。
+  const rOne = applyPatchAction(sid, addAliasPatch('姬凡'));
+  eq(rOne.reason, 'need_two_names', 'reason=need_two_names');
+
+  // ⑥ 两个名字在卡里已属同一实体（一个是另一个的别名）= 无需合并，直接记 applied。
+  const rSame = applyPatchAction(sid, addAliasPatch('姬凡 / 皇子'));
+  eq(rSame.ok, true, '同名实体的两个名字直接记 applied');
+  eq(rSame.fix_result.aliases, [], '无需合并时不写别名');
+  ok(String(rSame.fix_result.note || '').includes('无需合并'), 'note 说明为什么没动账本');
+
+  // ⑦ 不支持的 kind：必须拒绝，否则界面会出现「按了有用」的错觉。
+  const pKind = addAliasPatch('姬凡 / 提酒男子', 'contradiction');
+  const rKind = applyPatchAction(sid, pKind);
+  eq(rKind.ok, false, '非 alias 类提案不执行');
+  eq(rKind.reason, 'kind_not_supported', 'reason=kind_not_supported');
+  eq(store.getPatch(sid, pKind).status, 'noted', '拒绝执行时原提案状态不被改动');
+
+  // ⑧ 提案不存在：路由要回 404，不能静默成功。
+  eq(applyPatchAction(sid, 999999).found, false, '不存在的提案返回 found=false');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

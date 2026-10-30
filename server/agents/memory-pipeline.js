@@ -531,6 +531,28 @@ export function applyContinuityFixes(sessionId, {
       status: 'failed', severity: issue.severity, payload: issue, evidence: issue.evidence,
     });
   };
+  /**
+   * `alias` 类提案的终态：`noted`。
+   *
+   * 校勘报「同一实体两个名字」时按设计**不自动合并**（要人确认），模型照规矩填
+   * `action:'none'`。旧代码把 `none` 排除在 `failed` 之外，于是这类提案永远停在
+   * `open`——而 `open` 在本系统里的唯一语义是「等我裁决」，记忆面板会给两个按钮，
+   * 点了「接受」只改状态、对实体零效果（`setPatchStatus` 不执行任何修复）。
+   * 45 拍实测：2 条 alias 全在 open，报告把它当「校勘有 major 挂着没修」。
+   *
+   * 现在它与「模型不确定」分开：alias 记 `noted` + `manual_only`，语义是
+   * 「已记录，系统按设计不动，等人工合并」；人工入口是 `POST …/patches/:id/apply`
+   * （见 `server/routes/sessions.js`），那是**确定性**的实体链接，不是让模型改数据。
+   */
+  const noteManual = (issue) => {
+    issue.fix_result = {
+      action: issue.fix.action || 'none',
+      target: String(issue.fix.target || ''),
+      state: 'manual_only',
+      retryable: false,
+      reason: 'alias_merge_needs_human',
+    };
+  };
   for (const issue of issues) {
     const { action, target, value } = issue.fix;
     let status = 'open';
@@ -620,18 +642,22 @@ export function applyContinuityFixes(sessionId, {
     // 提案了但没执行：把原因写进 payload，并把它**判成终态**（status='failed'）。
     // 过去这里记 `open`，而 `open` 在本系统里的含义是「等人裁决」——于是一条永远不可能
     // 执行的提案会在记忆面板里永久排队，报告也只能数出「执行 0 条」，数不出「它已经废了」。
-    // 只有 `action:'none'`（模型自己说不确定）才真的需要人来裁决，那种仍记 open。
+    // 只有 `alias`（按设计只报告、要人确认）与 `action:'none'`（模型自己说不确定）需要人来裁决：
+    // 前者记 `noted`，后者仍记 `open`。
     if (status !== 'applied' && action && action !== 'none') {
       status = 'failed';
       issue.fix_result = { action, target: String(target || ''), state: 'unmatched', retryable: false };
-      // merge_alias 从来没有实现过（提示词里曾把它列进 action 枚举，代码里没有分支，
-      // 于是 100% 落 unmatched 且记 open，看起来像「等人裁决」）。合并别名要改实体名，
-      // 属于要人确认的操作，所以这里不补实现，只把「没有这条通道」和「形态填错」分开记。
-      if (action === 'merge_alias') issue.fix_result.reason = 'not_implemented';
       // set_state 的 value 是「校勘那一拍应有的值」，不是「现在应有的值」：
       // 隔了 N 拍再执行会把状态改回 N 拍前，比不执行更坏。所以它不可重放，
       // 只能等下一次校勘重新发现问题（那时提示词已要求 `人物::字段`，形态是对的）。
       if (action === 'set_state') issue.fix_result.reason = 'stale_value';
+    }
+    // alias 类永远走这一支：模型按提示词填 `none`，但它的 `none` 和「我不确定」不是一回事。
+    // 判成 `open` 会让报告把它算成「major 挂着没修」，判成 `failed` 又会被读成
+    // 「通道坏了」——两者都不对。它是「设计上就要人来」。
+    if (status !== 'applied' && issue.kind === 'alias') {
+      status = 'noted';
+      noteManual(issue);
     }
     addPatch(sessionId, {
       branch_id: branchId, agent: 'continuity', kind: issue.kind, turn_no: turnNo, status,

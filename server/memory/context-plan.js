@@ -25,7 +25,7 @@ import { config } from '../config.js';
 import { resolveAgent } from '../model-registry.js';
 
 /** 各层占软目标的比例。和 = 1.00，改动前先想清楚「挤掉的是谁」。 */
-export const LAYER_SHARES = Object.freeze({
+const LAYER_SHARES = Object.freeze({
   system: 0.32,        // 契约 + 命题 + 宪章 + 世界索引 + 前史 + 主角（canon，冻结）
   archive: 0.30,       // 场次索引：一行一场、只追加（长程记忆载体）
   archiveDetail: 0.06, // 最近 1–2 场的细节
@@ -47,9 +47,9 @@ const LAYER_FLOORS = Object.freeze({
 });
 
 /** 生成预留的默认值：narrator 没配 maxTokens 时按这个从窗口里扣。 */
-export const DEFAULT_OUTPUT_RESERVE = 12000;
+const DEFAULT_OUTPUT_RESERVE = 12000;
 /** 安全余量：估算器与上游 tokenizer 的误差、消息封装的固定开销。 */
-export const SAFETY_TOKENS = 2000;
+const SAFETY_TOKENS = 2000;
 /** 自动软目标 = 提示词硬上限的这个比例（约等于「装到一半就开始降级」）。 */
 const AUTO_SOFT_RATIO = 0.55;
 

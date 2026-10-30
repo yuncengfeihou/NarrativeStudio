@@ -275,7 +275,11 @@ export function continuitySystemPrompt() {
   condition / mood / location / goal / life_state（例：「凌玥::location」）。
   写「凌玥.location」「凌玥位置」「凌玥」都不会执行——等于没提。
 - resolve_thread → target 填线索标题原文。
-- alias 类问题（同一实体两个名字）只报告，action 填 none：合并别名要人确认，没有自动通道。
+- alias 类问题（同一实体两个名字）只报名字，action 填 none：合并别名由人确认后由代码执行，
+  你不负责改实体名。**但同一条里若还夹着别的毛病，要拆成两条报**——最常见的是一边报
+  「两个名字」，一边那两条位置断言本身冲突（同一时间在两个地方）。名字那半报 alias，
+  断言那半按 timeline 报并给 invalidate_assertion。合在一条里报，修的时候只会修名字，
+  断言冲突就再也没人看见。
 
 # 六类问题
 1. contradiction：两条断言同时有效却互相冲突（注意：被标记为「曾经」的不算冲突）。

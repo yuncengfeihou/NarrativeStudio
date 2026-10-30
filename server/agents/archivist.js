@@ -242,6 +242,33 @@ function prefixesFoundIn(name, narrative, taken) {
 }
 
 /**
+ * 丢弃时返回「带原因的空值」，不再返回 null（D35）。
+ *
+ * 静默丢弃是这一族反复发作的病（AGENTS §13 第 11 条同族第七次）：越界提案连
+ * `world_state` 行都没写进去、也没有 patch、也没有计数，报告侧只能看到「这一拍没有变化」，
+ * 状态于是悄悄停在错值上而全绿。留痕形态与 `applyContinuityFixes()` 的 `fix_result` 同族：
+ * 一个可 JSON 序列化的**值**（不是异常、不是数组），既能在 `applied.rejected_changes`
+ * 里被单测直接读，也能整体进 patch payload 供报告数条数与按 reason 分组。
+ *
+ * 成功路径不受影响：`rejected` 只可能出现在丢弃分支，成功返回值形状一字未改。
+ */
+const rejectChange = (reason, o, extra = {}) => {
+  const out = {
+    rejected: true,
+    reason,
+    op: str(extra.op ?? o.op) || (o.fields ? 'introduce' : 'set'),
+    // kind 是**模型声明**的类型；entity_kind 是归一后实际拿去查白名单的类型。
+    // 两者分开记：「模型写错 kind」与「卡里这个实体本来就不是人物」是两种要修的错。
+    kind: str(extra.kind ?? o.kind),
+    entity_id: str(extra.entity_id ?? o.id ?? o.name ?? o.who ?? o.entity),
+    path: str(extra.path ?? o.path),
+  };
+  if (extra.entity_kind) out.entity_kind = str(extra.entity_kind);
+  if (extra.entity_type) out.entity_type = str(extra.entity_type);
+  return out;
+};
+
+/**
  * 校验一条实体变更提案。
  *
  * 只放行 state-paths 白名单；身份根（id/name/identity）不可写。
@@ -250,16 +277,21 @@ function prefixesFoundIn(name, narrative, taken) {
 export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrative = '' } = {}) {
   const o = obj(raw);
   const op = str(o.op) || (o.fields ? 'introduce' : 'set');
-  if (!['set', 'add', 'remove', 'introduce', 'delta'].includes(op)) return null;
+  const reject = (reason, extra = {}) => rejectChange(reason, o, { op, ...extra });
+  if (!['set', 'add', 'remove', 'introduce', 'delta'].includes(op)) return reject('bad_op');
   let kind = str(o.kind);
-  if (!ENTITY_KINDS.includes(kind)) return null;
+  if (!ENTITY_KINDS.includes(kind)) return reject('bad_kind', { kind });
+  const path = str(o.path);
 
   if (op === 'introduce') {
-    if (!ENTITY_TYPES.includes(kind)) return null;
+    if (!ENTITY_TYPES.includes(kind)) return reject('bad_introduce', { kind });
     const fields = obj(o.fields || o.value);
     const name = str(fields.name || o.id);
-    if (!name) return null;
+    if (!name) return reject('bad_introduce', { kind });
     const value = sanitizeIntroduce(kind, fields, name);
+    // sanitizeIntroduce 眼下对任何 kind 都返回对象，这一行是守卫而不是分支：
+    // 一旦它将来改成「字段不够就返回空」，被丢的 introduce 也必须留痕，不能退回静默 null。
+    if (!value) return reject('bad_introduce', { kind });
     // D13-A1：把正文里真的出现过的**名字前缀**收成别名。
     // 落在这里而不是提示词里：模型不需要知道这件事，代码一次性吸收。
     const taken = new Set([name, ...(value.aliases || [])]);
@@ -277,10 +309,12 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
   }
 
   const rawName = str(o.id || o.name || o.who || o.entity);
-  if (!rawName) return null;
-  const path = str(o.path);
+  if (!rawName) return reject('no_target', { kind });
 
   let entityId = rawName;
+  // 卡里该实体的**真实类型**：白名单是按它查的，留痕里必须带上，否则「模型声明 person、
+  // 卡里是 concept」这类撞名在报告里会看起来像路径写错。
+  let entityType = '';
   if (kind === 'player') {
     entityId = 'player';
   } else if (playerName && rawName === playerName) {
@@ -291,6 +325,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
     if (resolved.type) {
       kind = resolved.type;
       entityId = resolved.id;
+      entityType = resolved.type;
     } else {
       // D13-A1：简称（「蛇纹纸」→「蛇纹圆印纸」）不是别名也不是 id，
       // 上面查不到。再用一次实体链接（红线 2 唯一允许的字符串匹配）看它是不是
@@ -302,6 +337,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
         if (hit) {
           kind = hit.type;
           entityId = hit.id;
+          entityType = hit.type;
         }
       }
     }
@@ -309,49 +345,62 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
 
   // 事实实体的定义（summary/detail/facets.history）是作者公理：已有条目只能写运行态，
   // 想新增定义必须走 introduce（上面已返回）。人物没有这个限制。
-  if (kind !== PERSON_TYPE && FACT_CANON_PATHS.has(path)) return null;
+  if (kind !== PERSON_TYPE && FACT_CANON_PATHS.has(path)) {
+    return reject('canon_immutable', { kind, entity_kind: kind, entity_id: entityId, path, entity_type: entityType });
+  }
 
   // 先按别名归一实体类型，再按最终类型校验路径。
   const allowed = pathsFor(kind);
-  if (!allowed || !allowed.has(path)) return null;
+  if (!allowed || !allowed.has(path)) {
+    return reject('path_not_allowed', { kind, entity_kind: kind, entity_id: entityId, path, entity_type: entityType });
+  }
 
   const isList = LIST_PATH_SET.has(path);
-  if ((op === 'add' || op === 'remove') && !isList) return null;
-  if (op === 'set' && isList) return null;
+  const pathMismatch = {
+    kind, entity_kind: kind, entity_id: entityId, path, entity_type: entityType,
+  };
+  if ((op === 'add' || op === 'remove') && !isList) return reject('op_path_mismatch', pathMismatch);
+  if (op === 'set' && isList) return reject('op_path_mismatch', pathMismatch);
 
   // 数值路径：值必须是数字，路径本身也不能是列表。delta 只对数值路径合法——
   // 「模型写一个数字」不能把任意字符串路径变成数值路径（路径的性质由白名单决定）。
   // 注意 Number('') 与 Number(null) 都是 0：空值必须判非法，否则「没写金额」会被当成「余额归零」。
   const isNumber = isNumberPath(kind, path);
-  if (op === 'delta' && !isNumber) return null;
+  const numMismatch = {
+    kind, entity_kind: kind, entity_id: entityId, path, entity_type: entityType,
+  };
+  if (op === 'delta' && !isNumber) return reject('delta_on_non_number', numMismatch);
   if (isNumber) {
-    if (op !== 'set' && op !== 'delta') return null;
+    if (op !== 'set' && op !== 'delta') return reject('not_a_number', numMismatch);
     const n = typeof o.value === 'number'
       ? o.value
       : (typeof o.value === 'string' && o.value.trim() !== '' ? Number(o.value) : NaN);
-    if (!Number.isFinite(n)) return null;
+    if (!Number.isFinite(n)) return reject('not_a_number', numMismatch);
     return { kind, entity_id: entityId, path, op, value: Math.round(n * 100) / 100 };
   }
 
   let value = o.value;
+  const enumMismatch = {
+    kind, entity_kind: kind, entity_id: entityId, path, entity_type: entityType,
+  };
   if (kind !== PERSON_TYPE && path === 'reveal') {
     value = CODEX_REVEALS.includes(str(value)) ? str(value) : null;
-    if (!value) return null;
+    if (!value) return reject('bad_reveal', enumMismatch);
   }
   if (path === 'life_state') {
     const state = asLifeState(value);
     // 与 sanitizeState 同口径：枚举外不静默丢，退回 status 保留原文。
     if (!state) {
       const raw = str(value);
-      if (!raw) return null;
+      if (!raw) return reject('empty_value', enumMismatch);
       return { kind, entity_id: entityId, path: 'status', op: 'set', value: raw.slice(0, 300) };
     }
     value = state;
   }
-  if (value == null) return null;
+  if (value == null) return reject('empty_value', enumMismatch);
   if (typeof value === 'string') {
     const text = value.trim();
-    if (!text) return null;
+    if (!text) return reject('empty_value', enumMismatch);
     value = text.slice(0, 300);
   }
   return { kind, entity_id: entityId, path, op, value };
@@ -784,13 +833,21 @@ export function applyArchivistUpdate({
   // 被 WIP 上限/权重阈值挡下的线索提案。不静默丢：合并成一条
   // patches(kind='thread_rejected')，让「模型一直在埋、系统一直在拒」在报告里看得见。
   const rejectedThreads = [];
+  // D35：连 world_state 行都没写进去的变更提案（sanitizeChange 阶段就被挡下）。
+  // 与 dropped_deltas 分工明确：那是**写进去了、投影期被白名单丢掉**，这是**连门都没进**。
+  // 两类失真必须分开数，否则报告分不清「模型乱写」和「卡片类型与运行态冲突」。
+  const rejectedChanges = [];
+  const recordRejection = (c, raw) => {
+    rejectedChanges.push({ ...c, turn_no: turnNo, evidence: str(obj(raw).evidence).slice(0, 120) });
+  };
 
   // 同一批提案里，模型可能先写新角色的账本/状态/关系，再把 introduce 放进 changes。
   // 先扫一遍 introduce 纳入声明集合，避免「同拍引入的实体被自己的提案拒掉」。
+  // 被拒的返回值没有 entity_id 语义（它的 op 可能根本不是 introduce），不能进集合。
   if (declaredSet) {
     for (const raw of update.changes || []) {
       const c = sanitizeChange(raw, { aliasIndex, playerName, narrative });
-      if (c && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
+      if (c && !c.rejected && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
     }
   }
 
@@ -954,7 +1011,9 @@ export function applyArchivistUpdate({
   /* ---- 实体变更：世界线自己的运行期状态 ---- */
   for (const raw of update.changes || []) {
     const c = sanitizeChange(raw, { aliasIndex, playerName, narrative });
-    if (!c) continue;
+    // D35：被拒的提案不再静默 continue。留痕只让「不写」变成**可见的不写**，
+    // 不加任何纠正/兜底逻辑——越界写入仍然不落库（A3）。
+    if (c?.rejected) { recordRejection(c, raw); continue; }
     // introduce 是唯一允许新实体的入口（且已限定 cast/codex）；其余变更受目标声明约束。
     if (declaredSet && c.op !== 'introduce' && !isDeclaredTarget(c.entity_id, declaredSet, aliasIndex)) {
       skipTarget('change', c.entity_id);
@@ -1063,6 +1122,34 @@ export function applyArchivistUpdate({
         total: rejectedThreads.length,
         wip_limit: THREAD_RENDER_MAX,
         items: rejectedThreads.slice(0, 20),
+      },
+    });
+  }
+
+  /* ---- 变更被拒留痕：连 world_state 行都没写进去的那一类 ---- */
+  // 与 dropped_delta 的分工是本任务唯一的验收标准：dropped_delta 是「写进去了、投影期
+  // 被白名单挡掉」，rejected_change 是「连门都没进」。两类失真的修法完全不同（前者查卡里
+  // 实体类型，后者查模型写的 kind/path），混成一个 kind 报告就无法归因。
+  // 只落一条合并 patch（与 skipped_targets / thread_rejected 同形），payload 里给
+  // count + by_reason + items 三层：报告只需读一个数就能判断「这一拍有没有被拒的变更」，
+  // 又不会因为只记一个 boolean 而重新变成「报告量不到的上限」。
+  const rejectedByReason = {};
+  for (const r of rejectedChanges) {
+    rejectedByReason[r.reason] = (rejectedByReason[r.reason] || 0) + 1;
+  }
+  applied.rejected_changes = { count: rejectedChanges.length, by_reason: rejectedByReason, items: rejectedChanges };
+  if (rejectedChanges.length) {
+    const brief = rejectedChanges.slice(0, 5)
+      .map((r) => `${r.reason} ${r.entity_id || '?'}/${r.path || '-'}`)
+      .join('、');
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'rejected_change', turn_no: turnNo,
+      status: 'failed', severity: 'warn',
+      evidence: `越界变更 ${rejectedChanges.length} 条：${brief}`,
+      payload: {
+        count: rejectedChanges.length,
+        by_reason: rejectedByReason,
+        items: rejectedChanges.slice(0, 50),
       },
     });
   }

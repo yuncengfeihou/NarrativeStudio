@@ -650,10 +650,10 @@ export function recallVisibleFrom(sceneCoveredTo, turnNo, overlapTurns = 0) {
  * **裁的是「同一份 sections」，不是重新渲染**：重渲染会连字数取舍都变，
  * A/B 就不再是「只差被删的段」。
  */
-export const BRANCH_SHEET_TRIMS = ['default', 'core_only'];
+const BRANCH_SHEET_TRIMS = ['default', 'core_only'];
 
 /** `core_only` 保留的段：与 renderSceneSheet 的 sections key 同名。 */
-export const BRANCH_CORE_KEYS = new Set([
+const BRANCH_CORE_KEYS = new Set([
   'when', 'world', 'player', 'cast', 'relations', 'threads', 'pressure', 'directive',
 ]);
 
@@ -768,18 +768,25 @@ export async function assembleContext({
   /* ---- 已故 / 离场：解释「名单里为什么少了一个人」 ---- */
   // 来源只认 world_state 的 life_state（史官结构化写入），不认自由文本关键词；
   // 存活分支用有效投影值，取最近被标记的 ≤3 人，交给场记单渲染成一行。
+  //
+  // 键**只按 id/name**，不带 `entity_kind` 后缀（D34 之后）。曾写成
+  // `${entity_id}::${entity_kind}` 再按 `::person` 取，于是「史官按 concept 声明、
+  // 投影期被 promoteToPerson 升级成人」的那条 gone 永远匹配不上：人已经被
+  // lintState 从在场剔掉，场记单却印不出「离场：谁」——名单少一个人而不解释。
+  // 投影后的卡里类型已经是真相，声明类型只是历史包袱。
   const lifeMarked = new Map();
   for (const d of deltas) {
     if (d.path !== 'life_state' || d.op !== 'set') continue;
-    const key = `${d.entity_id}::${d.entity_kind}`;
+    const key = str(d.entity_id);
+    if (!key) continue;
     const at = Number(d.valid_from) || 0;
     if (!lifeMarked.has(key) || lifeMarked.get(key) <= at) lifeMarked.set(key, at);
   }
+  const markedAt = (e) => Math.max(lifeMarked.get(str(e.id)) || 0, lifeMarked.get(str(e.name)) || 0);
   const absentees = (card.entities || [])
     .filter((e) => e.type === 'person' && (e.life_state === 'dead' || e.life_state === 'gone'))
-    .filter((e) => lifeMarked.has(`${e.id}::person`) || lifeMarked.has(`${e.name}::person`))
-    .sort((a, b) => (lifeMarked.get(`${b.id}::person`) || lifeMarked.get(`${b.name}::person`) || 0)
-      - (lifeMarked.get(`${a.id}::person`) || lifeMarked.get(`${a.name}::person`) || 0))
+    .filter((e) => markedAt(e) > 0)
+    .sort((a, b) => markedAt(b) - markedAt(a))
     .slice(0, 3)
     .map((e) => ({ name: e.name, state: e.life_state, note: str(e.status) }));
 
