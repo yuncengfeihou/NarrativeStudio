@@ -1272,6 +1272,101 @@ console.log('\n=== D32：life_state 的两条写入入口必须落到同一张�
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D34：卡里的「设定集条目」撞上运行期「人物」同名时，不能把人物运行态吃掉 ===');
+{
+  // 形状：卡里把「宫男」写成 type:'concept'（一类人，描述「宫中侍宴男性」），
+  // 剧情里真的走出一个同名人物，史官按规矩 introduce 一个 person 类型的「宫男」。
+  // 投影按 id/name 找已有实体，**先命中那个 concept 条目** → type 永远停在 concept，
+  // 而 pathsFor('concept') 没有 life_state/mood/goal/location，这些运行态被白名单
+  // 吃掉且不留痕。实测 110 拍：8 条静默丢弃，最终表现为「已离场的人还在场」。
+  const card = schema.normalizeCard({
+    title: 't',
+    entities: [
+      { id: 'gong-nan', name: '宫男', type: 'concept', summary: '宫中侍宴男性，穿白裙装扮阴柔' },
+      { id: 'wu-qing', name: '伍卿', type: 'person' },
+    ],
+  });
+  const D = (patch) => ({
+    entity_kind: 'person', entity_id: 'gong-nan', op: 'set', valid_from: 1, ...patch,
+  });
+  const project = (deltas) => effective.buildEffectiveWorld(card, deltas);
+  const pick = (w) => w.entities.find((e) => e.id === 'gong-nan');
+
+  // ① 没有 introduce 之前，它就是设定集条目，不该被无端升级
+  const plain = project([]);
+  eq(pick(plain).type, 'concept', '卡里的条目原本是 concept，不因存在而升级');
+  eq(plain.promotions, undefined, '没有 introduce 就没有升级记录');
+
+  // ② introduce 声明 person 撞上 concept → 就地升级成人物
+  const w1 = project([D({
+    op: 'introduce', value: { name: '宫男', type: 'person', role: '东宫侍从', summary: '白裙送帖人' },
+  })]);
+  eq(pick(w1).type, 'person', 'introduce 声明 person 撞上同名 concept → 升级成人物');
+  eq(pick(w1).role, '东宫侍从', 'introduce 的 role 写进去了');
+  eq(pick(w1).summary, '白裙送帖人', 'introduce 的 summary 覆盖了原概念描述');
+  // 骨架必须齐全，否则场记单渲染会直接取 c.voice.rhythm 崩掉
+  ok(Array.isArray(pick(w1).voice?.lexicon), '升级后带完整人物骨架（voice）');
+  ok(Array.isArray(pick(w1).psyche?.wants), '升级后带完整人物骨架（psyche）');
+  eq(typeof pick(w1).identity, 'object', '升级后带 identity');
+  eq(w1.promotions.length, 1, '升级留一条审计记录');
+  eq(w1.promotions[0].from, 'concept', '审计记下升级前的类型');
+  eq(w1.promotions[0].to, 'person', '审计记下升级后的类型');
+  eq(w1.promotions[0].name, '宫男', '审计记下实体名');
+
+  // ③ 升级之后 person 的运行态才写不进去 —— 这正是 D34 的病根
+  const w2 = project([
+    D({ op: 'introduce', value: { name: '宫男', type: 'person', role: '东宫侍从' } }),
+    D({ path: 'life_state', value: 'gone', valid_from: 2 }),
+    D({ path: 'mood', value: '惶恐', valid_from: 2 }),
+    D({ path: 'location', value: '门外', valid_from: 2 }),
+    D({ path: 'goal', value: '等回话', valid_from: 2 }),
+  ]);
+  eq(pick(w2).life_state, 'gone', 'life_state 不被 concept 白名单吃掉');
+  eq(pick(w2).mood, '惶恐', 'mood 不被吃掉');
+  eq(pick(w2).location, '门外', 'location 不被吃掉');
+  eq(pick(w2).goal, '等回话', 'goal 不被吃掉');
+  eq(w2.dropped_deltas, undefined, '四条运行态全部落地，没有丢弃');
+
+  // ④ 白名单按实体真实类型取：不做 introduce，直接给 concept 写 person 才有的路径，
+  //    也应当按 concept 的规则拒掉并**留痕**（不再静默 return）。
+  const w3 = project([
+    { entity_kind: 'person', entity_id: 'gong-nan', path: 'life_state', op: 'set', value: 'gone', valid_from: 1 },
+  ]);
+  eq(pick(w3).life_state, undefined, '仍是 concept 时 life_state 不生效（类型没被模型的话改掉）');
+  eq(w3.dropped_deltas?.length, 1, '被白名单挡掉的增量留痕，不再静默消失');
+  eq(w3.dropped_deltas[0].entity_kind, 'person', '留痕记下模型声明的类型');
+  eq(w3.dropped_deltas[0].entity_type, 'concept', '留痕记下实体真实类型（两者不同 = 类型判错了）');
+  eq(w3.dropped_deltas[0].path, 'life_state', '留痕记下被挡的路径');
+
+  // ⑤ 反向：卡里本来就是 person 的，行为完全不变
+  const w4 = project([
+    { entity_kind: 'person', entity_id: 'wu-qing', path: 'mood', op: 'set', value: '烦', valid_from: 1 },
+  ]);
+  eq(w4.entities.find((e) => e.id === 'wu-qing').mood, '烦', '普通人物写入照旧');
+  eq(w4.promotions, undefined, '没有撞名就没有升级');
+  eq(w4.dropped_deltas, undefined, '没有非法写入就没有丢弃记录');
+
+  // ⑥ 反向：introduce 声明的是非人物、撞上人物 —— 不降级（不做「概念化人物」）
+  const card2 = schema.normalizeCard({
+    title: 't',
+    entities: [{ id: 'a', name: '甲', type: 'person' }],
+  });
+  const w5 = effective.buildEffectiveWorld(card2, [{
+    entity_kind: 'concept', entity_id: 'a', op: 'introduce', valid_from: 1,
+    value: { name: '甲', summary: '某类人' },
+  }]);
+  eq(w5.entities.find((e) => e.id === 'a').type, 'person', '不会被降级成 concept（只升不降）');
+  eq(w5.promotions, undefined, '没有升级就没有审计记录');
+
+  // ⑦ player 路径的白名单之外也留痕（D34 之前这里也是静默 return）
+  const w6 = project([
+    { entity_kind: 'player', entity_id: 'player', path: 'life_state', op: 'set', value: 'dead', valid_from: 1 },
+  ]);
+  eq(w6.dropped_deltas?.length, 1, 'player 路径被挡也留痕');
+  ok(!w6.rejected_deltas, '与「值非法」分开记：这不是 rejected_delta');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 数值账本：模型只报变化量，加减与余额由代码算 ===');
 {
   const paths = await import('../server/world/state-paths.js');

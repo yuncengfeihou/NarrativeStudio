@@ -477,10 +477,16 @@ async function runTurnInner({
     //
     // 余额转负**不再**算拒绝（D11）：它照常落库、渲染成「欠 X」，这里记成
     // `overdrawn` 只是留痕（正文里真的开始欠债了，报告该看得见）。
+    //
+    // 投影还承担一件事（D34）：`introduce` 声明 person 却撞上卡里的非人物条目时，
+    // 投影会把它升级成人物。升级是**投影期**行为（卡模板不动），所以只在这里留痕，
+    // 让「这张卡的某个概念条目被剧情升级成了人」在报告里看得见。
     if (!archRun.skipped) {
       const turnDeltas = getWorldState(sessionId, { branchId, atTurn: turnNo })
         .filter((d) => Number(d.turn ?? d.valid_from) === turnNo);
-      if (turnDeltas.some((d) => isNumberPath(d.entity_kind, d.path))) {
+      const needsProjection = turnDeltas.some((d) => isNumberPath(d.entity_kind, d.path)
+        || d.op === 'introduce');
+      if (needsProjection) {
         const projected = buildEffectiveWorld(
           normalizeCard(session.card_snapshot || world?.card || {}),
           getWorldState(sessionId, { branchId, atTurn: turnNo }),
@@ -499,6 +505,25 @@ async function runTurnInner({
             branch_id: branchId, agent: 'archivist', kind: 'overdrawn', turn_no: turnNo,
             status: 'applied', severity: 'info', payload: r,
             evidence: `${r.path || ''} ${r.prev} ${r.value >= 0 ? '+' : ''}${r.value} = ${r.next}`.trim(),
+          });
+        }
+        for (const r of projected.promotions || []) {
+          if (Number(r.turn) !== turnNo) continue;
+          addPatch(sessionId, {
+            branch_id: branchId, agent: 'archivist', kind: 'entity_promoted', turn_no: turnNo,
+            status: 'applied', severity: 'info', payload: r,
+            evidence: `${r.from} → ${r.to}：${r.name || r.id}`,
+          });
+        }
+        // D34：被白名单挡掉的增量。以前这里什么都不留——卡里把某人写成 concept 之后，
+        // 他的 life_state/mood/goal/location 全部消失，报告看不见、正文照演。
+        // `entity_kind` 与 `entity_type` 不同就是「类型判错了」的直接证据。
+        for (const r of projected.dropped_deltas || []) {
+          if (Number(r.turn) !== turnNo) continue;
+          addPatch(sessionId, {
+            branch_id: branchId, agent: 'archivist', kind: 'dropped_delta', turn_no: turnNo,
+            status: 'failed', severity: 'warn', payload: r,
+            evidence: `${r.entity_kind}/${r.entity_type} ${r.entity_id || ''} ${r.path} ${r.op}`.trim(),
           });
         }
       }

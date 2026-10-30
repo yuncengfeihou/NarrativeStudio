@@ -1492,8 +1492,7 @@ try {
     { sid: sessionId }
   ) || []).map((r) => ({ ...r, raw_who: r.who, who: lifeWho(r.who), value: lifeVal(r.value) }));
   const lifeKey = (r) => `${r.who}::${r.value}::${Number(r.valid_from)}`;
-  const lifeSeenCs = new Set(lifeRowsCs.map(lifeKey));
-  const lifeRows = [
+  const lifeSeenCs = new Set(lifeRowsCs.map(lifeKey));  const lifeRows = [
     ...lifeRowsCs,
     ...lifeRowsWs
       .map((r) => ({ who: r.who, value: r.value, valid_from: r.valid_from, valid_to: r.valid_to }))
@@ -1853,6 +1852,77 @@ try {
       reason: pl.reason ?? null,
     };
   });
+  // D34：被白名单挡掉的增量。以前这里什么都不留——卡里把一个「一类人」的条目
+  // （type:'concept'）之后，剧情里真的走出同名人物时，他的 life_state/mood/goal/
+  // location 全部消失，`rejected_deltas` 里没有、报告看不见、正文照常演。
+  // `entity_kind`（模型声明的）与 `entity_type`（实体真实类型）不同 = 类型判错了。
+  const droppedDeltaRows = (all(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'dropped_delta' order by turn_no asc, id asc",
+    { sid: sessionId }
+  ) || []).map((p) => {
+    const pl = safeJson(p.payload_json);
+    return {
+      turn_no: Number(p.turn_no), entity_id: pl.entity_id ?? null,
+      entity_kind: pl.entity_kind ?? null, entity_type: pl.entity_type ?? null,
+      path: pl.path ?? null, op: pl.op ?? null,
+    };
+  });
+  const droppedKindMismatch = droppedDeltaRows.filter((r) => r.entity_kind && r.entity_type
+    && r.entity_kind !== r.entity_type);
+  // D34：introduce 声明 person 撞上卡里的非人物条目 → 投影里就地升级成人物。
+  // 这是**投影期**行为（卡模板不动），所以只留痕、不判 FAIL——撞名本身不是缺陷，
+  // 悄悄停在错类型才缺陷。
+  const promotedRows = (all(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'entity_promoted' order by turn_no asc, id asc",
+    { sid: sessionId }
+  ) || []).map((p) => {
+    const pl = safeJson(p.payload_json);
+    return { turn_no: Number(p.turn_no), name: pl.name ?? null, from: pl.from ?? null, to: pl.to ?? null };
+  });
+  // D34 回溯探针：patch 只在新会话才有，老会话要看「本来会不会被丢」得从原始数据复算。
+  // 判据：world_state 里 `op='introduce'` 且声明 person 的行，其 name 若在卡里是**非人物**
+  // 条目 → 修复后该条目会被升级；修复前它的 person 运行态会被 concept 白名单吃掉。
+  // 这条不依赖 patch，所以对任何历史会话都能回答「这局有没有撞名形状」。
+  const d34Snap = safeJson(session.card_snapshot_json) || {};
+  const d34TypeByName = new Map();
+  for (const e of d34Snap.entities || []) {
+    if (e?.name) d34TypeByName.set(String(e.name), String(e.type || ''));
+  }
+  const introPersonRows = (all(
+    `select entity_id, value_json, valid_from from world_state
+      where session_id = :sid and op = 'introduce' and entity_kind = 'person' order by valid_from, id`,
+    { sid: sessionId }
+  ) || []);
+  const nameCollisions = [];
+  for (const r of introPersonRows) {
+    let v = null;
+    try { v = safeJson(r.value_json); } catch { v = null; }
+    const nm = String(v?.name || r.entity_id || '');
+    const cardType = d34TypeByName.get(nm);
+    if (!cardType || cardType === 'person') continue;
+    nameCollisions.push({ turn_no: Number(r.valid_from), name: nm, card_type: cardType });
+  }
+  const collisionNames = [...new Set(nameCollisions.map((x) => x.name))];
+  // 这些撞名条目的 person 运行态有没有真的写进来（= 修复前会被吃掉的那些路径）。
+  // **不能按 entity_kind='person' 过滤**：修复前史官把撞名的「宫男」解析成 concept，
+  // 写出来的行 entity_kind 就是 `concept`——按 person 过滤会把它们全漏掉，
+  // 探针就会报「0 条运行态」而实际上是「写了 8 条、全被吃」。
+  const PERSON_ONLY_PATHS = new Set(['life_state', 'mood', 'goal', 'location']);
+  const collisionRunStates = collisionNames.length
+    ? (all(
+      `select entity_id, entity_kind, path, count(*) c, group_concat(distinct valid_from) turns from world_state
+        where session_id = :sid and op != 'introduce' and path in (${[...PERSON_ONLY_PATHS].map((p) => `'${p}'`).join(',')})
+        group by entity_id, entity_kind, path`,
+      { sid: sessionId }
+    ) || []).filter((r) => collisionNames.includes(String(r.entity_id)))
+      // 只留「人物才有的路径」：概念/地点自己的 location 之类不算被吃的运行态。
+      .filter((r) => r.entity_kind !== 'concept' || PERSON_ONLY_PATHS.has(String(r.path)))
+    : [];
+  // 撞名实体上按 `concept` 声明的运行态行数：修复前它们全被 concept 白名单吃掉。
+  // 单独提出来是因为判定项要用它做老会话的回溯判据（patch 只有新会话才有）。
+  const byConceptRunStates = collisionRunStates
+    .filter((r) => r.entity_kind === 'concept')
+    .reduce((s, r) => s + Number(r.c), 0);
   // D13：被目标声明挡掉的写入。模型在正文里用简称指代长名实体（「蛇纹纸」指「蛇纹圆印纸」），
   // 简称不在别名索引里 → canonicalize 失败 → 整条写入被拒，而正文继续按它推进。
   // 拒写本身是对的（白名单防模型给没出现过的东西记账），**看不见才是问题**。
@@ -1912,6 +1982,20 @@ try {
       rows: rejectedDeltaRows,
       note: 'D11：数值增量被拒（余额会变负）。拒绝后基准不动，会形成「余额卡死、正文继续花」'
         + '的分裂；非 0 就说明这条链路上出现过静默丢弃。',
+    },
+    dropped_delta: {
+      n: droppedDeltaRows.length,
+      kind_mismatch: droppedKindMismatch.length,
+      rows: droppedDeltaRows,
+      note: 'D34：路径不在实体白名单里而被丢掉的增量（区别于 rejected_delta：那是值非法）。'
+        + '以前这里什么都不留。kind_mismatch = 模型声明类型 ≠ 实体真实类型，是「按声明类型取白名单」'
+        + '这个错误的直接证据；D34 修复后应当为 0。',
+    },
+    entity_promoted: {
+      n: promotedRows.length,
+      rows: promotedRows,
+      note: 'D34：introduce 声明 person、按名撞上卡里的非人物条目 → 投影里就地升级成人物。'
+        + '撞名本身不是缺陷，悄悄停在错类型才是；非 0 说明这张卡的某个「一类人」条目被剧情升级成了人。',
     },
     overdrawn: {
       n: overdrawnRows.length,
@@ -2146,6 +2230,34 @@ try {
     (rejectedDeltaRows.length
       ? '｜' + rejectedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no}:${r.path} ${r.value}（${r.reason}，余额停在 ${r.prev}）`).join(' ')
       : '｜应为 0（D11：拒绝会让余额卡死、正文与账本分裂）'));
+  console.log(`白名单丢弃   ${droppedDeltaRows.length} 条` +
+    (droppedDeltaRows.length
+      ? `｜其中类型判错 ${droppedKindMismatch.length} 条` +
+        (droppedKindMismatch.length
+          ? ' ← 模型声明的类型 ≠ 实体真实类型（D34）'
+          : '') +
+        '｜' + droppedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no}:${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join(' ')
+      : '｜应为 0（D34：被放弃的写入必须留痕，否则状态悄悄停在错值上）'));
+  // 撞名探针不依赖 patch，历史会话也能看：这局有没有「卡里是概念、剧情里是人」的条目。
+  // 关键区分：撞名实体上写的行，`entity_kind` 是**史官当时解析出的类型**。
+  // 声明成 concept 的行 = 修复前会被 concept 白名单吃掉（实测「宫男」8 条）；
+  // 声明成 person 的行 = 本来就落得下。两者分开报，才看得出「修了没修」。
+  if (collisionNames.length) {
+    const byKind = {};
+    for (const r of collisionRunStates) byKind[r.entity_kind] = (byKind[r.entity_kind] || 0) + Number(r.c);
+    console.log(`同名升级     ${collisionNames.join('、')}（卡内类型 ${nameCollisions
+      .map((x) => `${x.name}:${x.card_type}`).filter((v, i, a) => a.indexOf(v) === i).join('、')}）` +
+      `｜自 t${nameCollisions[0].turn_no} 起共 ${nameCollisions.length} 次 introduce 撞名` +
+      `｜人物运行态写入 ${collisionRunStates.reduce((s, r) => s + Number(r.c), 0)} 条` +
+      `（按 concept 声明 ${Number(byKind.concept || 0)} 条 ← 修复前这些会被白名单吃掉；` +
+      `按 person 声明 ${Number(byKind.person || 0)} 条）` +
+      '（D34：撞名本身不是缺陷，运行态能不能落地才是）');
+  } else {
+    console.log('同名升级     无（本局没有「卡里是设定集条目、剧情里同名人」的形状）');
+  }
+  if (promotedRows.length) {
+    console.log(`实体升级     ${promotedRows.length} 次｜${promotedRows.slice(0, 6).map((r) => `t${r.turn_no}:${r.name}(${r.from}→${r.to})`).join(' ')}（D34：同名概念条目被剧情升级成人物，卡模板不动）`);
+  }
   if (overdrawnRows.length) {
     const minBal = overdrawnRows.reduce((m, r) => (typeof r.next === 'number' && (m === null || r.next < m) ? r.next : m), null);
     console.log(`  余额转负     ${overdrawnRows.length} 笔｜最低 ${minBal ?? '?'}｜首次 t${overdrawnRows[0].turn_no}（渲染成「银钱 欠 X」，D11 的新正确形状）`);
@@ -2636,6 +2748,36 @@ try {
         rejectedDeltaRows.slice(0, 6).map((r) => `t${r.turn_no} ${r.path} ${r.value}（${r.reason}）`).join('，') +
         '｜被拒后基准不动，余额会卡在旧值上而正文继续按新值写'
   );
+
+  // D34：被白名单挡掉的增量。判 FAIL 而不是 WARN——「被放弃的写入」如果连痕迹都没有，
+  // 状态会悄悄停在错值上，而正文照常演（这正是 D34 的成因：8 条运行态消失、报告全绿）。
+  // 撞名升级（entity_promoted）不判：撞名本身不是缺陷，它是这张卡的结构事实。
+  // 老会话没有 patch 时退回回溯探针：按 concept 声明的运行态 > 0 就是修复前的形状。
+  {
+    const d34Legacy = droppedDeltaRows.length === 0 && Number(byConceptRunStates || 0) > 0;
+    add(
+      'dropped_delta_silent',
+      '不应有增量被白名单悄悄丢掉（D34）',
+      droppedDeltaRows.length === 0 && !d34Legacy ? 'PASS' : 'FAIL',
+      droppedDeltaRows.length === 0 && !d34Legacy
+        ? '没有增量被白名单挡掉' +
+          (promotedRows.length
+            ? `（本局有 ${promotedRows.length} 次同名条目升级，运行态照常落地）`
+            : collisionNames.length
+              ? `（本局有撞名条目 ${collisionNames.join('、')}，D34 起会按实体真实类型判定）`
+              : '')
+        : droppedDeltaRows.length
+          ? `${droppedDeltaRows.length} 条被丢` +
+            (droppedKindMismatch.length
+              ? `｜其中 ${droppedKindMismatch.length} 条是类型判错（模型声明 ≠ 实体真实类型）`
+              : '') +
+            '：' + droppedDeltaRows.slice(0, 6)
+              .map((r) => `t${r.turn_no} ${r.entity_id}(${r.entity_kind}≠${r.entity_type}) ${r.path}`).join('，') +
+            '｜被丢的路径不会报错、不进 rejected_delta、正文照常演，最终表现为「某个人的状态长期空白」或「已离场的人还在场」'
+          : `本局跑在 D34 之前：撞名条目 ${collisionNames.join('、')} 有 ${byConceptRunStates} 条人物运行态` +
+            '按 concept 声明写入，全被白名单吃掉（老会话没有 dropped_delta 留痕，这条是回溯复算）'
+    );
+  }
 
   // D13：目标越界。判 WARN 而不是 FAIL——拒写本身是白名单在正常工作；
   // 但「同一个目标被拒 ≥2 次」说明它在正文里反复出现、账本里却永远没有，

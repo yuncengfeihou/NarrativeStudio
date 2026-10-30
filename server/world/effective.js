@@ -220,10 +220,74 @@ function pushRejected(world, item) {
 }
 
 /**
+ * 记一条「被白名单挡掉」的增量（D34）。
+ *
+ * 这里以前是 `if (!allowed.has(path)) return;` —— 什么都不留。于是卡里的「宫男」
+ * 被写成 concept 之后，它的 life_state/mood/goal/location 全部消失，而
+ * `rejected_deltas` 里没有、报告看不见、正文照常演，110 拍跑完只能靠「某个人物
+ * 状态一片空白」倒推。这与 D10/D12/D29/D31 是同一个形状：**为安全而设的拒绝，
+ * 让状态悄悄停在一个错值上**。所以现在两条路分开记：值非法 → rejected_deltas；
+ * 路径不被允许 → dropped_deltas（带实体当前类型，能直接看出是不是类型判错了）。
+ */
+function pushDropped(world, item) {
+  if (!Array.isArray(world.dropped_deltas)) world.dropped_deltas = [];
+  world.dropped_deltas.push(item);
+}
+
+/**
+ * 升级成人物时要搬过去的字段（D34）。
+ *
+ * 不能只把 `type` 改成 person：概念/地点条目没有 voice / psyche / knowledge /
+ * identity，场记单渲染会直接取 `c.voice.rhythm` 而抛错。所以造一份人物骨架，
+ * 再把原条目里**世界事实**那部分搬过去——卡的模板不动，只动这条世界线的投影。
+ */
+const PROMOTE_KEEP = [
+  'aliases', 'tags', 'links', 'summary', 'detail', 'facets', 'role', 'status',
+  'condition', 'mood', 'location', 'goal', 'reveal', 'weight', 'pinned', 'muted',
+  'parent_id', 'always_present', 'sources', 'canon_from', 'improvised',
+];
+
+/**
+ * 把一个既有非人物条目就地升级成人物（D34）。
+ *
+ * 触发条件只有一个：`introduce` 声明它是 person，而按 id/name 命中的卡内条目不是。
+ * 典型形状是卡里把一个「宫男」写成 `type:'concept'`（一类人），剧情里真的走出一个
+ * 同名人物。此时若停在 concept，`pathsFor('concept')` 没有 life_state/mood/goal/
+ * location，这些运行态会被白名单丢掉，最终表现为「已离场的人还在场」。
+ */
+function promoteToPerson(world, entity, delta) {
+  const idx = world.entities.indexOf(entity);
+  if (idx < 0) return entity;
+  const promoted = emptyPersonEntry(entity.id, entity.name);
+  for (const k of PROMOTE_KEEP) {
+    const v = entity[k];
+    if (v === undefined || v === '') continue;
+    if (Array.isArray(v) && !v.length) continue;
+    promoted[k] = v;
+  }
+  world.entities[idx] = promoted;
+  if (!Array.isArray(world.promotions)) world.promotions = [];
+  world.promotions.push({
+    id: entity.id,
+    name: entity.name,
+    from: String(entity.type || ''),
+    to: PERSON_TYPE,
+    turn: Number(delta.valid_from) || 0,
+    delta_id: delta.id ?? null,
+  });
+  return promoted;
+}
+
+/**
  * 把一条增量应用到实体上。
  * set 写标量；add/remove 写列表；introduce 创建会话内的新实体；delta 只作用于数值路径。
  * entity_kind 是 v5 的实体类型值（person / place / …），不再有 cast/codex 两套。
  * player / world 不是卡里的实体：前者投影到 world.player，后者投影到 world.runtime。
+ *
+ * D34：实体路径的白名单按「这个实体在世界里**当前是什么**」取，不按「模型这一拍
+ * 声明它是什么」取（与 §5.3「路径是不是数值由白名单决定，不由模型吐出的字面量类型
+ * 决定」同源）。原先按声明取，一旦名称撞上卡里的非人物条目，person 的运行态
+ * （life_state/mood/goal/location）就会被 concept 的白名单吃掉且不留痕。
  */
 function applyDelta(world, delta) {
   const kind = String(delta.entity_kind || '');
@@ -236,7 +300,14 @@ function applyDelta(world, delta) {
 
   if (kind === 'player' || kind === 'world') {
     const target = kind === 'player' ? world.player : world.runtime;
-    if (!isObj(target) || !allowed.has(path)) return;
+    if (!isObj(target)) return;
+    if (!allowed.has(path)) {
+      pushDropped(world, {
+        entity_kind: kind, entity_id: id, path, op,
+        entity_type: kind, turn: Number(delta.valid_from) || 0, delta_id: delta.id ?? null,
+      });
+      return;
+    }
     if (op === 'add') addList(target, path, value);
     else if (op === 'remove') removeList(target, path, value);
     else if (isNumberPath(kind, path)) writeNumber(world, target, path, op, value, delta);
@@ -249,6 +320,14 @@ function applyDelta(world, delta) {
   const introduceName = op === 'introduce' && isObj(value) ? String(value.name || '') : '';
   let entity = world.entities.find((x) => x.id === id || x.name === id
     || (introduceName && x.name === introduceName));
+  // D34：introduce 声明 person，却按 id/name 撞上卡里的非人物条目（同名概念/地点/物件）
+  // → 就地升级成人物。不升级的话它的运行态会被概念的白名单静默吃掉。
+  if (entity && person && op === 'introduce' && entity.type !== PERSON_TYPE) {
+    entity = promoteToPerson(world, entity, delta);
+  }
+  // 实体已存在时，白名单用它的**真实类型**；只有新建实体才用模型声明的 kind。
+  const effectiveKind = entity ? String(entity.type || kind) : kind;
+  const effectiveAllowed = entity ? pathsFor(effectiveKind) : allowed;
   if (!entity && op === 'introduce') {
     entity = person
       ? emptyPersonEntry(id, introduceName || id)
@@ -271,7 +350,7 @@ function applyDelta(world, delta) {
         entity.facets = { ...entity.facets, ...v };
       } else if (LIST_PATHS.has(k)) {
         entity[k] = asArray(v).map(String);
-      } else if (allowed.has(k)) {
+      } else if (effectiveAllowed.has(k)) {
         entity[k] = String(v ?? '');
       } else if (['knowledge', 'psyche', 'voice', 'identity'].includes(k)) {
         entity[k] = { ...(entity[k] || {}), ...(isObj(v) ? v : {}) };
@@ -279,10 +358,19 @@ function applyDelta(world, delta) {
     }
     return;
   }
-  if (!allowed.has(path)) return;
+  if (!effectiveAllowed.has(path)) {
+    // D34：路径不被允许时留痕，而不是悄悄 return。`entity_type` 记的是**实体实际类型**，
+    // 与 `entity_kind`（模型声明的）不一致时，就是「类型判错了」的直接证据。
+    pushDropped(world, {
+      entity_kind: kind, entity_id: entity.id, path, op,
+      entity_type: String(entity.type || ''), turn: Number(delta.valid_from) || 0,
+      delta_id: delta.id ?? null,
+    });
+    return;
+  }
   if (op === 'add') addList(entity, path, value);
   else if (op === 'remove') removeList(entity, path, value);
-  else if (isNumberPath(kind, path)) writeNumber(world, entity, path, op, value);
+  else if (isNumberPath(effectiveKind, path)) writeNumber(world, entity, path, op, value);
   else if (path.includes('.')) setAt(entity, path, value);
   else entity[path] = String(value ?? '');
 }

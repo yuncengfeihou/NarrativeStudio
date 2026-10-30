@@ -1,7 +1,7 @@
-# 长轮次记忆：讨论清单（D1–D33 已落地、D34 已登记待修；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回）
+# 长轮次记忆：讨论清单（D1–D34 已全部落地；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回，D34 让投影按实体真实类型取白名单）
 
 > 用途：把「几十轮就有这么多问题、几百轮怎么办」这个讨论拆成可逐条拍板的决策项。
-> **状态（2026-10-30）**：**D1–D33 已全部落地、D34 已登记待修（等拍板）**。D1–D8 经 50 轮真实会话验证；
+> **状态（2026-10-30）**：**D1–D34 已全部落地**。D1–D8 经 50 轮真实会话验证；
 > D9–D15 是那 50 轮与第二轮验证长跑现场发现的缺陷（D10/D11/D12/D15 是真实 bug，
 > 不是设计取舍），已按推荐方案全部实现并测通。**D19–D22 都是报告判据自身的缺陷**
 > （D19 分类名错、D20 层级错、D21 对象错、D22 曾被怀疑缺信号）——它们不改变运行时行为，
@@ -1029,7 +1029,7 @@ importance 分级（major:normal:minor = 1:1:1）
 
 ---
 
-## 4. 建议的顺序（D1–D33 已全部落地并已跑完验证；D34 待拍板）
+## 4. 建议的顺序（D1–D34 已全部落地；D34 的修复尚待下一局长跑复验）
 
 ```
 第 0 步（已做完）：
@@ -1135,7 +1135,7 @@ D3 那种「改取数逻辑」才需要数据支撑。
 | D31 三处死通道 | **孤儿回合与空正文整拍回滚**（`addTurnPair` 事务；正文没产出就一行不写） + 校勘三类落空记 `failed` 终态并带 `reason`；`open` 只留「等人裁决」 | m11285 |
 | D32 `life_state` 两套存储 | **已落地**：`changes` 里的 `life_state` 同时补写 `character_states`（按 `aliasIndex` 反查人物名、同拍 `states` 写过就跳过）；报告判据改读两表并集并单列「两套存储分裂」 | 第三次长跑凌玥经 `changes` 被标 `gone`，而回程通道读 `character_states`、永远看不见它：她 27 拍正文里 **19 拍不在 present**，玩家 t24/32/40/45 四次点名一次都没唤回，报告 `VERDICT` 却是 FAIL 0 —— **判据读错表＝给缺陷发合格证** |
 | D33 上游抖动与旧线回切 | **已落地**：`llm.js` 的 `failureOf()` 沿 `err.cause` 归一 `fetch failed`/`terminated` 为可重试；`orchestrator` 新增 `NARRATION_RETRY_MAX=3` 整拍重发（还原 `lastAssembly`/`lastMessages` 基线、emit `narration_retry`）；`store.checkoutBranch()` + `POST /api/sessions/:id/checkout` 切回已有世界线；`countVisibleTurns()` 让回合数成派生值 | 用户原话「中断就重新生成，数据重新更新」「每轮的数据要像 git 历史一样可以回滚」。前者的根因是 `withRetry` 白名单只认老式 socket 错误码（Node fetch 把真 code 埋在 `cause` 里），一次都不重试；后者是文案写着「旧线随时可以回去看」而 `setSessionBranch()` 只被 fork 调过——**界面承诺没有对应路径** |
-| D34 同名条目吞掉人物 | **待修**：卡里是 `concept`、运行期用同名 `introduce` 引进「同一人」，投影按 id/name 先命中旧条目 → `type` 永远是 `concept` → 人物的 `life_state`/`mood`/`goal`/`location` 被 `pathsFor(concept)` 白名单**静默丢掉**（110 拍局实测丢 8 行，`宫男 gone@t75` 因此不进缺席名单，报告唯一 FAIL）。全库 82 局真正被丢 13 条，只有这一种形状触发。修法：投影按「实体当前类型」而非「模型声明的类型」取白名单 | m13050 |
+| D34 同名条目吞掉人物 | **已落地**：卡里是 `concept`、运行期用同名 `introduce` 引进「同一人」时，投影按 id/name 先命中旧条目 → `type` 永远停在 `concept` → 人物的 `life_state`/`mood`/`goal`/`location` 被 `pathsFor(concept)` **静默丢掉**（110 拍局实测丢 8 行，`宫男 gone@t75` 因此不进缺席名单，报告唯一 FAIL）。修法：白名单按实体真实类型取 + 同名条目在投影里升级成人物 + 被挡的写入留痕（见 §D34 节的「落地」块） | m13050 |
 
 **三十四条全部有结论**（其中 D2/D8 定「不做」）。**没有待拍板项**（D18 已删；D26-B 已落地；D26 方案 A 已做成会话级开关，同剧本双局长跑已跑完，定「维持开关、不转默认」；D5 的 seeds 槽位已拍板为「不改上限、只改可见性」并落地）。
 
@@ -3651,7 +3651,7 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
   公式、权重与实测值。**五维不加权成总分**（剧情质量和成本没有可比量纲，合成一个数只会掩盖
   「分数好看但某一维塌了」）；**拿不到数据的项记 null 并从分母剔除，不按 0 算**——把
   「没量到」当「量到 0」是这个项目踩过最多的坑（D7/D30/D32 都是这个形状）。
-### D34【待修】卡里的「设定集条目」和运行期引入的「人物」同名时，人物的运行态被白名单静默丢掉
+### D34【已落地】卡里的「设定集条目」和运行期引入的「人物」同名时，人物的运行态被白名单静默丢掉
 
 **怎么发现的**：D32 的 110 拍验证局（`a3363ce8`）唯一一条 FAIL 是「离场/死亡角色不得再上场」，
 明细写着 `宫男(gone@t75→t92,94)`。逐拍核对后确认这不是 D32 的回归（两表零分裂），而是另一个缺陷。
@@ -3689,11 +3689,44 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 ②非 introduce 的增量先找实体、再用 `entity.type || delta.entity_kind` 取白名单。
 两种做法都要补一条负向断言：**不能靠改卡或加名字特判**（§1.2）。
 
-**为什么先记不修**：它只影响「同名条目 + 同名人物」这一种形状，且后果是「少一个人被剔出在场」
-而不是数据损坏；而 ①②两处都会改动投影的类型判定，属于机制层改动，按 §0 四问要单独一轮做，
-不该混在「验证 D32」这一轮里。
+**为什么当时先记不修**：它只影响「同名条目 + 同名人物」这一种形状，后果是「少一个人被剔出在场」
+而不是数据损坏；而两处都会改动投影的类型判定，属于机制层改动，按 §0 四问要单独一轮做。
 
-**顺带修好的两处判据 bug（不是线上缺陷）**：`_work/d32-check.mjs` 与 `_work/longrun-report.mjs` 的 `life_state` 两表比对，
+#### 落地（2026-10-30）
+
+| 改动 | 位置 | 为什么这样选 |
+|---|---|---|
+| 白名单按实体真实类型取 | `server/world/effective.js` 的 `applyDelta()`：解析出实体后 `effectiveKind = entity.type`，再 `pathsFor(effectiveKind)`；只有新建实体才用模型声明的 `kind` | 与 §5.3 已有的口径同源（「路径是不是数值由白名单决定，不由模型吐出的字面量类型决定」）。只按真实类型取还不够——撞名时实体本身还是 `concept` |
+| 同名条目在投影里升级成人物 | 同文件新增 `promoteToPerson()`：`emptyPersonEntry()` 造骨架 → 搬 `PROMOTE_KEEP`（`aliases/tags/links/summary/detail/facets/role/status/condition/mood/location/goal/reveal/weight/pinned/muted/parent_id/always_present/sources/canon_from/improvised`）→ 换掉实体 → 记 `world.promotions` | **不能只改 `type`**：概念条目没有 `voice/psyche/knowledge/identity`，`renderSceneSheet` 直接取 `c.voice.rhythm` 会抛 `TypeError: Cannot read properties of undefined (reading 'rhythm')`（实测）。**只升不降**：`introduce` 声明非人物撞上 person 不降级 |
+| 被挡的写入必须留痕 | `pushDropped()` 写 `world.dropped_deltas`（`{entity_kind, entity_type, entity_id, path, op, turn, delta_id}`）；`orchestrator` 落成 `patches(kind='dropped_delta', status='failed')`，升级落成 `patches(kind='entity_promoted', status='applied')` | `entity_kind ≠ entity_type` 就是「类型判错了」的直接证据。**与 `rejected_deltas` 分开**：那是「值非法」，这是「路径不被允许」。两者都不进提示词、不占预算 |
+| `needsProjection` 要认 `introduce` | `server/agents/orchestrator.js`：`turnDeltas.some(d => isNumberPath(d.entity_kind, d.path) || d.op === 'introduce')` | 原来只判数值路径 → 从不投影 → 「升级」永远不发生、也无从留痕 |
+
+**修复后实测（真库、同一局）**：
+
+```
+宫男 t60 type=person（升级一次，promotions 记 {from:concept, to:person, turn:60, delta_id:11889}）
+     t75 life_state="gone" location="青石巷茶棚下"
+     t92 mood="尖细却刻意压低" location="院心"
+     t94 mood="惶恐" location="门外"
+末态被丢 0 条（修复前 8 条）｜dropped_deltas=0
+```
+
+**判据（`_work/longrun-report.mjs` 的 `dropped_delta_silent`，判 FAIL）**：分两根依据，
+因为 patch 只有新会话才有：
+
+- 新会话：`patches(kind='dropped_delta')` 必须为 0；非 0 时打印 `entity_kind≠entity_type` 的那几条。
+- 老会话（回溯复算，不依赖 patch）：从 `world_state` 找 `op='introduce' and entity_kind='person'`、且 name 在卡快照里是**非人物**条目的行 → 统计这个实体上按 `concept` 声明的 `life_state/mood/goal/location` 行数；>0 就是修复前的形状（110 拍局实测 8 条）。
+  这里**不能按 `entity_kind='person'` 过滤**——修复前史官把撞名的「宫男」解析成 concept，
+  写出来的行 `entity_kind` 就是 `concept`，按 person 过滤会让探针报「0 条运行态」而实际是「写了 8 条、全被吃」。
+
+**测试**：`tests/test-memory.js` 新增 `=== D34：…===` 整块 29 条断言（不 introduce 不升级 / 升级且骨架齐全 /
+四条运行态全落地 / 仍是 concept 时被挡且留痕 / 普通人物照旧 / 只升不降 / player 路径被挡也留痕）。
+
+**教训（同族第五条）**：**「静默丢弃」和「拒绝写入」是两件事**。`sanitizeChange` 会 `return null`（可数可看），
+而 `applyDelta` 里 `if (!allowed.has(path)) return;` 什么都不留——同一条写入到底是被拒了还是没到装配层，
+从数据上分辨不出来。凡「按白名单过滤」处都要问：被滤掉的那部分谁看得见。
+这条与 D10（`gone` 没有回程）、D12（校勘修复从未生效）、D29、D31 是同一形状的第五次发作：
+**为安全而设的拒绝，让状态永久卡在错误值上、且没有任何恢复通道、报告又看不见**。
 原来直接拿 `world_state` 的实体 id 去比 `character_states` 的人物名（`liu-shen` vs `刘婶`），本局报出 **4 行假分裂**、真分裂 0 ——
 同一形状第三次出现（D30 把自愈当缺陷、D32 给缺陷发合格证、这次判据把「同一件事的两种拼法」当成两件事）。
 两边现在都按卡快照的 `entities[]` 归一到 name 再比；复核 D32 修复前那局仍准确报 2 行（凌玥@t18、张兰@t37），判据没失效。
@@ -3753,4 +3786,4 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 | 2026-10-29 | D31 | 三处「错了也不会说」的通道改行为：孤儿回合与空正文整拍回滚、校勘死提案判 failed | 新增 e2e 22 条 + test-memory 20 条；全量绿 |
 | 2026-10-29 | D32 | `changes` 里的 `life_state` 补写 `character_states`；报告判据改读两表并集 | test-memory 新增 7 条（443 passed）；全量 6 套件绿；真库回放第三次长跑，`life_state_consistency` 从误判 PASS 变为如实 FAIL 并注明是修复前存量 |
 | 2026-10-30 | D33 落地：上游连接中断自动整拍重发（`failureOf()` 归一 `fetch failed`/`terminated`，`NARRATION_RETRY_MAX=3`，新增 `narration_retry` 事件）＋ `checkoutBranch()` 切回已有世界线（`POST /api/sessions/:id/checkout`）＋ 回合数改派生值 `countVisibleTurns()` |
-| 2026-10-30 | D34 登记：卡内 `concept` 条目与运行期同名 `introduce` 人物撞 id/name → 投影 `type` 停在 `concept` → 人物运行态（`life_state`/`mood`/`goal`/`location`）被 `pathsFor()` 静默丢弃。110 拍验证局（`a3363ce8`，6.44h）实测丢 8 行，`宫男 gone@t75` 因此未被剔出 present，成为该局唯一 FAIL。同时把 D32 的报告判据与 `_work/d32-check.mjs` 的 id/name 归一修好（第一版报出 4 行假分裂，真分裂 0） |
+| 2026-10-30 | **D34 落地**：卡内 `concept` 条目与运行期同名 `introduce` 人物撞 id/name → 投影 `type` 停在 `concept` → 人物运行态（`life_state`/`mood`/`goal`/`location`）被 `pathsFor()` 静默丢弃。修法三步：白名单按实体真实类型取、`promoteToPerson()` 把同名条目在投影里升级成人物、`dropped_deltas` 让被挡的写入留痕（`patches(kind='dropped_delta')`）。真库回放 110 拍局：8 条丢弃归零、宫男 life/mood/location 全部落地；test-memory 新增 29 条（489 passed），全量 5 套件绿。同时把 D32 的报告判据与 `_work/d32-check.mjs` 的 id/name 归一修好（第一版报出 4 行假分裂，真分裂 0） |

@@ -240,6 +240,25 @@ reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summa
 与 `voice / psyche / knowledge / agenda / relations` 的列表路径；`life_state` 只接受
 `LIFE_STATES` 里的四个值，代码据此判定死亡/离场（自由文本只作 `status` 展示）。
 新条目第一次 `introduce` 时可以一次写清定义。
+
+**路径白名单按实体真实类型取（D34）**：`applyDelta` 解析出目标实体后，用
+`entity.type`（而不是 `delta.entity_kind`，即模型这一拍声明的类型）去查 `pathsFor()`；
+与「路径是不是数值由白名单决定、不由模型吐出的字面量类型决定」同源。
+配套的两件事：
+
+- **同名条目升级**：`op='introduce'` 声明 `person`、按 `id`/`name` 撞上卡里**非人物**条目时，
+  投影里把它换成完整人物骨架（`emptyPersonEntry` + 保留 `summary/detail/facets/role/aliases/
+  tags/links/...`），并记 `EffectiveWorld.promotions`（`{id, name, from, to, turn, delta_id}`）
+  → `patches(kind='entity_promoted', status='applied')`。**卡模板不动**，只改会话投影；
+  只升不降（`introduce` 声明非人物撞上 person 不降级）。
+  为什么不能只改 `type`：概念条目没有 `voice/psyche/knowledge/identity`，场记单渲染会直接抛
+  `TypeError: Cannot read properties of undefined (reading 'rhythm')`。
+- **被挡的写入必须留痕**：白名单不接受的路径记 `EffectiveWorld.dropped_deltas`
+  （`{entity_kind, entity_type, entity_id, path, op, turn, delta_id}`）
+  → `patches(kind='dropped_delta', status='failed')`。`entity_kind ≠ entity_type` 就是
+  「类型判错了」的直接证据。**与 `rejected_deltas` 分开**：那是「值非法」，这是「路径不被允许」。
+  两者都不进提示词、不占预算。
+
 **玩家（kind=`player`）没有 `life_state`**（D14）：主角不会「这一场不在镜头里」，
 他离场整场戏就结束了；这条路径没有任何消费方（`absentees` 只挑 `type==='person'`），
 放行只会让 `card.player.life_state` 永久停在某个值。史官对玩家写它会因白名单拒绝
@@ -719,7 +738,14 @@ sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, de
 //   非 introduce 分支还有一条兜底：resolveEntity 查不到时用 linkEntities，
 //   唯一命中才归一 kind/entityId（多命中保持原样，不猜）。
 // isDeclaredTarget 同样接受「实体链接能解析到已声明实体」的写法，否则简称会被目标声明挡掉。
-// buildEffectiveWorld(cardSnapshot, deltas) 在 server/world/effective.js，纯函数
+// buildEffectiveWorld(cardSnapshot, deltas, fates) 在 server/world/effective.js，纯函数
+// -> world；除卡形状外还带两个「投影期副作用记录」（不进提示词、不占预算）：
+//    promotions:      [{id, name, from, to, turn, delta_id}]  introduce 声明 person 撞上卡里
+//                     非人物条目 → 投影内升级成人物（D34；卡模板不动，只升不降）
+//    dropped_deltas:  [{entity_kind, entity_type, entity_id, path, op, turn, delta_id}]
+//                     路径不在实体白名单里而被丢掉（D34；与 rejected_deltas 的「值非法」分开）
+//    两者由 orchestrator 落成 patches(kind='entity_promoted' / 'dropped_delta')。
+//    白名单按 entity.type（真实类型）取，不按 delta.entity_kind（模型声明）取。
 
 // 定稿：把当前世界线固化成新的世界卡（显式作者操作）
 canonizeSession({ sessionId, title?, anchorLabel?, openingSeed?, id? })
