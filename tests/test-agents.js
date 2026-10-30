@@ -1,0 +1,542 @@
+/**
+ * 旁路 Agent 端到端：runArchivist / runContinuity / runWorldTick / runRetrieval。
+ *
+ * 为什么单独一套：这四个模块的**纯函数**（parseArchivistUpdateStrict / applyArchivistUpdate /
+ * applyContinuityFixes / pickOffstagePersons / parseRetrievalRequest）早已被各套件覆盖，
+ * 但从没测过「真发一次模型调用 → 拿到形状不对的回复 → 回灌重问 / guard / 降级」这一段。
+ * 接口一改（字段改名、回灌丢了、guard 忘了接、异常被吞成空提案）纯函数测试全绿，
+ * 线上却是坏的——D34 的「空过」就是这么漏掉的。
+ *
+ * 用进程内假上游驱动真实的 Agent 函数：不起服务、不占端口，只换 globalThis.fetch
+ * （llm.js 的 chat / chatStream 都走全局 fetch）。分派键只有协议字段
+ * （body.model / body.stream），不读提示词首行——提示词一改就会假红。
+ */
+import './load-env.js';
+import os from 'node:os';
+import path from 'node:path';
+
+// DB_PATH 必须在 import store 之前设置：store 在第一次 getDb() 时读 config。
+process.env.DB_PATH = path.join(os.tmpdir(), `narra-agents-${Date.now()}.db`);
+
+// 每个 Agent 绑不同的上游模型名。假上游按 body.model 分派——这是协议字段，
+// 也是唯一能让「哪个 Agent 被调了几次」在测试里可数、且不依赖调用顺序的办法。
+process.env.NARRATOR_MODEL = 'fake-narrator';
+process.env.ARCHIVIST_MODEL = 'fake-archivist';
+process.env.SCENE_KEEPER_MODEL = 'fake-scene-keeper';
+process.env.CONTINUITY_MODEL = 'fake-continuity';
+process.env.WORLD_TICK_MODEL = 'fake-world-tick';
+process.env.RETRIEVAL_MODEL = 'fake-retrieval';
+process.env.BRANCH_MODEL = 'fake-branch';
+process.env.LIBRARIAN_MODEL = 'fake-librarian';
+process.env.CARD_SMITH_MODEL = 'fake-card-smith';
+// 管线接线那一块要把节奏拧到最短：2 轮一次校勘、每 2 轮强制封场、最小场长 1。
+process.env.CONTINUITY_EVERY = '2';
+process.env.SCENE_EVERY = '2';
+process.env.MIN_SCENE_TURNS = '1';
+
+const schema = await import('../server/world/schema.js');
+const store = await import('../server/memory/store.js');
+const pipe = await import('../server/agents/memory-pipeline.js');
+const { runArchivist, buildDeclaredTargets } = await import('../server/agents/archivist.js');
+const { runRetrieval, shouldPrecheckRetrieval } = await import('../server/agents/retrieval.js');
+const orch = await import('../server/agents/orchestrator.js');
+
+let pass = 0;
+let fail = 0;
+function ok(cond, label, extra = '') {
+  if (cond) { pass++; console.log(`  ✓ ${label}`); }
+  else { fail++; console.log(`  ✗ ${label}${extra ? ` — ${extra}` : ''}`); }
+}
+function eq(a, b, label) {
+  ok(JSON.stringify(a) === JSON.stringify(b), label, `expected ${JSON.stringify(b)}, got ${JSON.stringify(a)}`);
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 假上游                                                                  */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+const encoder = new TextEncoder();
+function streamReply(reasoning, content) {
+  const frames = [];
+  if (reasoning) frames.push({ choices: [{ index: 0, delta: { reasoning_content: reasoning }, finish_reason: null }] });
+  if (content) frames.push({ choices: [{ index: 0, delta: { content }, finish_reason: null }] });
+  frames.push({
+    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+  });
+  return {
+    ok: true,
+    status: 200,
+    body: new ReadableStream({
+      start(controller) {
+        controller.enqueue(encoder.encode(
+          `${frames.map((f) => `data: ${JSON.stringify(f)}\n\n`).join('')}data: [DONE]\n\n`,
+        ));
+        controller.close();
+      },
+    }),
+    text: async () => '',
+  };
+}
+
+function jsonReply(content) {
+  return {
+    ok: true,
+    status: 200,
+    json: async () => ({
+      choices: [{ index: 0, message: { role: 'assistant', content }, finish_reason: 'stop' }],
+      usage: { prompt_tokens: 10, completion_tokens: 2, total_tokens: 12 },
+    }),
+    text: async () => '',
+  };
+}
+
+function errorReply(status, message) {
+  return {
+    ok: false,
+    status,
+    json: async () => ({ error: { message } }),
+    text: async () => JSON.stringify({ error: { message } }),
+  };
+}
+
+/**
+ * 装一个按 body.model 分派的假上游。
+ * handlers[model] 可以是字符串（回复内容）或 `(body, nthCallOfThisModel) => 字符串 | {content} | {error}`。
+ * 返回 `{ calls, count(model), restore() }`——每个用例都必须 finally restore。
+ */
+function install(handlers) {
+  const realFetch = globalThis.fetch;
+  const calls = [];
+  const perModel = new Map();
+  globalThis.fetch = async (url, init = {}) => {
+    const body = JSON.parse(init.body || '{}');
+    const model = String(body.model || 'unknown');
+    const nth = (perModel.get(model) || 0) + 1;
+    perModel.set(model, nth);
+    calls.push({ model, nth, body });
+    const h = handlers[model];
+    const out = typeof h === 'function' ? h(body, nth) : h;
+    if (out == null) return jsonReply('');
+    if (typeof out === 'object' && out.error) return errorReply(out.error, out.message || 'boom');
+    const content = typeof out === 'string' ? out : String(out.content ?? '');
+    const reasoning = typeof out === 'string' ? '' : String(out.reasoning ?? '');
+    return body.stream ? streamReply(reasoning, content) : jsonReply(content);
+  };
+  return {
+    calls,
+    count: (model) => perModel.get(model) || 0,
+    restore() { globalThis.fetch = realFetch; },
+  };
+}
+
+async function using(handlers, fn) {
+  const fake = install(handlers);
+  try { return await fn(fake); } finally { fake.restore(); }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+/* 夹具                                                                    */
+/* ══════════════════════════════════════════════════════════════════════ */
+
+const BASE_CARD = {
+  title: '旁路 Agent 端到端',
+  player: { name: '伍卿' },
+  entities: [
+    {
+      id: 'ling-yue', name: '凌玥', type: 'person', role: '旧识',
+      psyche: { wants: ['找回玉佩'], hides: ['她已许人'] }, weight: 0.9,
+    },
+    { id: 'wu-qing', name: '伍卿', type: 'person' },
+    { id: 'yu-pei', name: '无纹玉佩', type: 'item', summary: '贴身收藏的白玉，纹路全无' },
+  ],
+  anchors: [{ id: 'p0', label: '序章', snapshot: { time: '初冬 · 午后', place: '茶楼' } }],
+};
+
+let seq = 0;
+function newSession(label) {
+  const card = schema.normalizeCard({ ...BASE_CARD, title: label });
+  const worldId = `w-ag-${++seq}-${Date.now()}`;
+  store.saveWorld({ id: worldId, title: label, card });
+  const created = orch.createSessionWithSettings({ title: label, worldId });
+  const session = store.getSession(created.id);
+  return { card, world: { card }, session };
+}
+
+/** 给会话塞一拍原文：校勘只处理「最近 N 轮原文」，没有原文它直接返回不调用模型。 */
+function seedTurn(sessionId, turnNo, narr = '他把玉佩搁在桌上。') {
+  store.addTurn(sessionId, { turn_no: turnNo, kind: 'player', content: '我推门进去。', branch_id: 'main' });
+  store.addTurn(sessionId, { turn_no: turnNo, kind: 'narrator', content: narr, branch_id: 'main' });
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 1. runArchivist：解析回灌 / 落库 / 目标声明 / guard ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  const OK_UPDATE = {
+    scene_change: { changed: false },
+    assertions: [{ subject: '凌玥', predicate: '知道', object: '玉佩在伍卿手上', confidence: 0.9 }],
+    states: [{ who: '伍卿', field: 'condition', value: '湿透' }],
+    quotes: [{ who: '凌玥', text: '「卿儿，过来。」' }],
+  };
+  const call = (ctx, extra = {}) => runArchivist({
+    session: ctx.session, world: ctx.world, turnNo: 1,
+    playerText: '我推门进去。', narrative: '他把玉佩搁在桌上。', ...extra,
+  });
+
+  // ① 正常一枪过：一次调用就落库，不应触发回灌。
+  {
+    const ctx = newSession('史官正常');
+    const r = await using({ 'fake-archivist': JSON.stringify(OK_UPDATE) },
+      (fake) => call(ctx).then((x) => ({ ...x, calls: fake.count('fake-archivist') })));
+    eq(r.calls, 1, '一次就解析成功（不需要回灌）');
+    eq(r.applied.assertions, 1, '断言落库 1 条');
+    eq(r.applied.states, 1, '人物状态落库 1 条');
+    eq(r.parse_failed, undefined, '不需要回灌时没有 parse_failed');
+    const rows = store.getAssertions(ctx.session.id, { branchId: 'main' });
+    eq(rows.filter((x) => x.subject === '凌玥').length, 1, '断言真的写进了库');
+  }
+
+  // ② 首次回复不是 JSON → 回灌重问一次；第二次合法 → 照常落库，且不留 failed 提案。
+  {
+    const ctx = newSession('史官回灌');
+    const r = await using({
+      'fake-archivist': (body, nth) => (nth === 1 ? '好的，我记录如下：' : JSON.stringify(OK_UPDATE)),
+    }, (fake) => call(ctx).then((x) => ({ ...x, calls: fake.count('fake-archivist') })));
+    eq(r.calls, 2, '解析失败后回灌重问（共 2 次调用）');
+    eq(r.parse_failed, undefined, '第二次解析成功，不算 parse_failed');
+    eq(r.applied.assertions, 1, '重问之后照常落库');
+    eq(store.listPatches(ctx.session.id, { branchId: 'main', kind: 'archivist_parse_failed' }).length,
+      0, '没有留下 archivist_parse_failed');
+  }
+
+  // ③ 两次都不是 JSON → 记 failed 提案并返回全零，而不是静默当「本轮无变化」。
+  {
+    const ctx = newSession('史官两fail');
+    const r = await using({ 'fake-archivist': '我不能输出 JSON。' }, (fake) => call(ctx).then((x) => ({ ...x, calls: fake.count('fake-archivist') })));
+    eq(r.calls, 2, '回灌只重问一次（不做无限重试）');
+    eq(r.parse_failed, true, '返回 parse_failed=true');
+    eq(r.applied.assertions, 0, 'applied 全零');
+    const failed = store.listPatches(ctx.session.id, { branchId: 'main', kind: 'archivist_parse_failed' });
+    eq(failed.length, 1, '落 1 条 archivist_parse_failed（报告看得见「这一轮记忆没落」）');
+    eq(failed[0].status, 'failed', '提案状态是 failed');
+    eq(failed[0].payload?.retried, true, 'payload.retried=true 证明是重问过的');
+  }
+
+  // ④ guard 变假（调用期间分支被 rollback / rewrite）→ 整批丢弃，不写任何记忆。
+  {
+    const ctx = newSession('史官stale');
+    const r = await using({ 'fake-archivist': JSON.stringify(OK_UPDATE) }, () => call(ctx, { guard: () => false }));
+    eq(r.stale, true, '返回 stale=true');
+    eq(r.applied.assertions, 0, 'stale 时不落库');
+    eq(store.getAssertions(ctx.session.id, { branchId: 'main' }).length, 0, '库里 0 条断言');
+    eq(store.listPatches(ctx.session.id, { branchId: 'main', kind: 'stale' }).length, 1,
+       '落 1 条 stale 提案（并发 fork 的审计留痕）');
+  }
+
+  // ⑤ 目标声明生效：没声明过的 subject 必须被拒，并合并成一条 skipped_targets。
+  {
+    const ctx = newSession('史官声明');
+    const declared = buildDeclaredTargets({
+      card: schema.normalizeCard({ title: '只有主角', player: { name: '伍卿' }, entities: [{ id: 'wu-qing', name: '伍卿', type: 'person' }] }),
+      playerName: '伍卿',
+    });
+    ok(!declared.includes('凌玥'), '前置：声明集合里没有凌玥');
+    const r = await using({ 'fake-archivist': JSON.stringify(OK_UPDATE) }, () => call(ctx, { declaredTargets: declared }));
+    eq(r.applied.assertions, 0, '未声明的断言被拒写');
+    ok(r.applied.skipped >= 1, 'skipped 计数 > 0', `got ${r.applied.skipped}`);
+    eq(store.listPatches(ctx.session.id, { branchId: 'main', kind: 'skipped_targets' }).length, 1,
+       '合并成 1 条 skipped_targets（不是每条一条）');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 2. runContinuity：无原文短路 / fix 分流 / 异常降级 / guard ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // ① 没有最近原文就连模型都不该调——这是成本闸门，不是优化。
+  {
+    const ctx = newSession('校勘短路');
+    const r = await using({ 'fake-continuity': '{"issues":[]}' }, (fake) => pipe.runContinuity({
+      session: ctx.session, world: ctx.world, turnNo: 1,
+    }).then((x) => ({ ...x, calls: fake.count('fake-continuity') })));
+    eq(r.calls, 0, '无最近原文时不发模型调用');
+    eq(r.issues, [], '返回空 issues');
+  }
+
+  // ② 合法 fix（set_state 人物::字段）→ 直接落库，applied 计数 +1。
+  {
+    const ctx = newSession('校勘fix');
+    seedTurn(ctx.session.id, 1);
+    const reply = JSON.stringify({
+      issues: [{
+        kind: 'contradiction', severity: 'major', subject: '凌玥',
+        claim: '她上一拍说在城外，这一拍却在茶楼', evidence: '第1轮原文',
+        fix: { action: 'set_state', target: '凌玥::mood', value: '强作镇定' },
+      }],
+      healthy: [],
+    });
+    const r = await using({ 'fake-continuity': reply }, () => pipe.runContinuity({
+      session: ctx.session, world: ctx.world, turnNo: 1,
+    }));
+    eq(r.issues.length, 1, '解析出 1 条 issue');
+    eq(r.applied, 1, '自动修 1 条');
+    const st = store.getCharStateMap(ctx.session.id, { branchId: 'main' });
+    eq(st['凌玥']?.mood, '强作镇定', '人物状态真的改了');
+  }
+
+  // ③ 形态填错的 fix → 拒写，留终态提案。旧实现会兜底成 [subject, 'condition']，
+  //    报告显示「自动修复成功」。两种错形态的 reason 不同，因为修法不同：
+  //    完全没有 `::`（整个「哪个人物的哪个字段」都漏了）vs 有 `::` 但字段空（`凌玥::`）。
+  {
+    const ctx = newSession('校勘坏形态');
+    seedTurn(ctx.session.id, 1);
+    const reply = JSON.stringify({
+      issues: [
+        {
+          kind: 'contradiction', severity: 'major', subject: '凌玥',
+          claim: '状态说法不一致', evidence: '第1轮原文',
+          fix: { action: 'set_state', target: '凌玥', value: '强作镇定' },
+        },
+        {
+          kind: 'contradiction', severity: 'minor', subject: '凌玥',
+          claim: '字段漏了', evidence: '第1轮原文',
+          fix: { action: 'set_state', target: '凌玥::', value: '强作镇定' },
+        },
+      ],
+    });
+    const r = await using({ 'fake-continuity': reply }, () => pipe.runContinuity({
+      session: ctx.session, world: ctx.world, turnNo: 1,
+    }));
+    eq(r.applied, 0, '形态不对 → 一条都不自动落库');
+    const rows = store.listPatches(ctx.session.id, { branchId: 'main', kind: 'contradiction' });
+    eq(rows.length, 2, '两条都落成终态提案');
+    eq(rows.every((p) => p.status === 'failed'), true, '状态都是 failed（不是 open：再等一拍也不会变可执行）');
+    eq(rows.every((p) => p.payload?.fix_result?.state === 'unmatched'), true,
+      'payload.fix_result.state=unmatched');
+    eq(rows.every((p) => p.payload?.fix_result?.retryable === false), true,
+      'payload.fix_result.retryable=false');
+    ok(rows.some((p) => p.payload?.fix_result?.reason === 'bad_target_form'),
+      '字段空的 reason=bad_target_form（模型的错，改提示词能修）',
+      JSON.stringify(rows.map((p) => p.payload?.fix_result?.reason)));
+    eq(store.getCharStateMap(ctx.session.id, { branchId: 'main' })['凌玥']?.condition, undefined,
+       '没有兜底写进 condition（静默失真的老路）');
+  }
+
+  // ④ 模型侧报错 → 降级返回 error，不抛（旁路 Agent 不能阻断回合）。
+  {
+    const ctx = newSession('校勘报错');
+    seedTurn(ctx.session.id, 1);
+    const r = await using({ 'fake-continuity': { error: 400, message: 'bad request' } }, () => pipe.runContinuity({
+      session: ctx.session, world: ctx.world, turnNo: 1,
+    }));
+    ok(r && typeof r.error === 'string' && r.error.length > 0, '返回 error 字符串而不是抛异常');
+    eq(r.issues, [], '降级后 issues 为空');
+  }
+
+  // ⑤ guard 变假 → 不落库（并发 fork 期间）。
+  {
+    const ctx = newSession('校勘stale');
+    seedTurn(ctx.session.id, 1);
+    const reply = JSON.stringify({
+      issues: [{
+        kind: 'contradiction', severity: 'minor', subject: '凌玥', claim: 'x', evidence: 'e',
+        fix: { action: 'set_state', target: '凌玥::mood', value: '平静' },
+      }],
+    });
+    const r = await using({ 'fake-continuity': reply }, () => pipe.runContinuity({
+      session: ctx.session, world: ctx.world, turnNo: 1, guard: () => false,
+    }));
+    eq(r.stale, true, '返回 stale=true');
+    eq(r.applied, 0, 'stale 时不落库');
+    eq(store.listPatches(ctx.session.id, { branchId: 'main', kind: 'contradiction' }).length, 0,
+       '库里没有提案');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 3. runWorldTick：候选闸门 / 事件归一 / patch 形状 / guard ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // ① 有幕外候选：发一次调用，事件归一后写成 offstage_event 提案。
+  //    注意 status 由 visibility 决定——hidden 才算 applied，其余是 open（等场记单渲染压力）。
+  {
+    const ctx = newSession('呼吸正常');
+    const reply = JSON.stringify({
+      events: [
+        { who: ['凌玥'], what: '她在灯下等他回话', visibility: 'rumor', affects: ['伍卿'], pressure: 0.6 },
+        { who: ['凌玥'], what: '她烧掉了旧信', visibility: 'hidden', pressure: 2 },
+      ],
+    });
+    const r = await using({ 'fake-world-tick': reply }, (fake) => pipe.runWorldTick({
+      session: ctx.session, world: ctx.world, turnNo: 3,
+    }).then((x) => ({ ...x, calls: fake.count('fake-world-tick') })));
+    eq(r.calls, 1, '有幕外候选时发 1 次调用');
+    eq(r.events.length, 2, '解析出 2 条事件');
+    eq(r.events[1].pressure, 1, 'pressure 夹在 0..1');
+    const patches = store.listPatches(ctx.session.id, { branchId: 'main', kind: 'offstage_event' });
+    eq(patches.length, 2, '每件事写 1 条 offstage_event');
+    const rumor = patches.find((p) => p.payload?.visibility === 'rumor');
+    const hidden = patches.find((p) => p.payload?.visibility === 'hidden');
+    eq(rumor?.status, 'open', 'rumor 是 open（等场记单渲染成压力）');
+    eq(hidden?.status, 'applied', 'hidden 是 applied（玩家不可见，直接当事实）');
+    ok(String(hidden?.evidence || '').includes('第 3 轮'), 'evidence 带轮次（报告能定位）');
+  }
+
+  // ② 幕外候选为空 → 一次都不调（世界呼吸是最贵的一次调用之一）。
+  {
+    const ctx = newSession('呼吸空转');
+    // 只有主角在场：主角不是 person 实体、也不进候选池。
+    const card = schema.normalizeCard({
+      title: '只有主角', player: { name: '伍卿' },
+      entities: [{ id: 'wu-qing', name: '伍卿', type: 'person' }],
+    });
+    const r = await using({ 'fake-world-tick': '{"events":[{"what":"不该被调用"}]}' }, (fake) => pipe.runWorldTick({
+      session: ctx.session, world: { card }, turnNo: 2,
+    }).then((x) => ({ ...x, calls: fake.count('fake-world-tick') })));
+    eq(r.calls, 0, '没有幕外候选时 0 次调用');
+    eq(r.events, [], 'events 为空');
+  }
+
+  // ③ guard 变假 → 事件不落 patch。
+  {
+    const ctx = newSession('呼吸stale');
+    const reply = JSON.stringify({ events: [{ who: ['凌玥'], what: '她出门去了', visibility: 'rumor' }] });
+    const r = await using({ 'fake-world-tick': reply }, () => pipe.runWorldTick({
+      session: ctx.session, world: ctx.world, turnNo: 4, guard: () => false,
+    }));
+    eq(r.stale, true, '返回 stale=true');
+    eq(store.listPatches(ctx.session.id, { branchId: 'main', kind: 'offstage_event' }).length, 0,
+      'stale 时不写 patch');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 4. runRetrieval：查询词 / 空查询留痕 / 空卡短路 / 失败上抛 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // ① 模型给出辞书查询词 → 确定性检索命中 → 文本带固定前缀进 retrieval 子层。
+  {
+    const ctx = newSession('检索命中');
+    const r = await using({ 'fake-retrieval': '{"codex":["玉佩"],"history":[]}' }, () => runRetrieval({
+      card: ctx.card, playerText: '我想看看那枚玉佩。', sessionId: ctx.session.id, branchId: 'main', atTurn: 0,
+    }));
+    eq(r.queries, ['玉佩'], 'queries 记录模型给的查询词');
+    eq(r.codex_queries, ['玉佩'], 'codex_queries 只有辞书通道');
+    ok(r.entries.length >= 1, '辞书命中 1 条以上', `got ${r.entries.length}`);
+    ok(r.text.startsWith('【设定集检索】'), '文本带固定前缀（装配层靠它归到 retrieval 层）');
+    ok(r.text.includes('无纹玉佩'), '命中的是卡里那条设定原文');
+  }
+
+  // ② 模型这一拍决定不查：仍返回对象（留痕「触发了但没查」），不是 null。
+  {
+    const ctx = newSession('检索空转');
+    const r = await using({ 'fake-retrieval': '{"codex":[],"history":[]}' }, () => runRetrieval({
+      card: ctx.card, playerText: '我坐下喝茶。', sessionId: ctx.session.id, branchId: 'main',
+    }));
+    ok(r !== null, '空查询也返回对象');
+    eq(r.queries, [], 'queries 为空');
+    eq(r.text, '', 'text 为空');
+    eq(r.tokens, { codex: 0, history: 0 }, 'tokens 全零');
+  }
+
+  // ③ 卡里没有任何实体 → 直接 null（不发调用）。
+  {
+    const r = await using({ 'fake-retrieval': '{"codex":["玉佩"]}' }, (fake) => runRetrieval({
+      card: schema.normalizeCard({ title: '空卡', player: { name: '伍卿' } }),
+      playerText: '随便看看。',
+    }).then((x) => ({ x, calls: fake.count('fake-retrieval') })));
+    eq(r.calls, 0, '空卡不发调用');
+    eq(r.x, null, '返回 null');
+  }
+
+  // ④ 模型侧报错：runRetrieval 不吞错——降级由 orchestrator 的 try/catch 负责。
+  //    这条是契约断言：若哪天 Agent 自己吞掉，orchestrator 的告警就永远不触发。
+  {
+    const ctx = newSession('检索报错');
+    let threw = false;
+    await using({ 'fake-retrieval': { error: 400, message: 'bad request' } }, async () => {
+      try {
+        await runRetrieval({ card: ctx.card, playerText: '查玉佩。' });
+      } catch { threw = true; }
+    });
+    eq(threw, true, 'LLM 失败向上抛（由 orchestrator 降级，不在 Agent 内静默吞掉）');
+  }
+
+  // ⑤ 预检闸门：off 永不用；on 永远用；auto 只看实体链接与辞书条数。
+  {
+    const ctx = newSession('预检');
+    eq(shouldPrecheckRetrieval({ mode: 'off', card: ctx.card, playerText: '凌玥在哪？' }), false,
+       "mode=off 一律不预检");
+    eq(shouldPrecheckRetrieval({ mode: 'on', card: ctx.card, playerText: '我坐下。' }), true,
+       'mode=on 一律预检');
+    eq(shouldPrecheckRetrieval({ mode: 'auto', card: ctx.card, playerText: '我问问凌玥。', minCodex: 24 }), true,
+       'auto + 点名人物 → 预检');
+    // 设定集条目只认卡上的完整名/别名（箭头 → 不做同义词映射，红线 2）：
+    // 「玉佩」是「无纹玉佩」的后缀，不算命中；写全名才算。
+    eq(shouldPrecheckRetrieval({ mode: 'auto', card: ctx.card, playerText: '我看看那枚玉佩。', minCodex: 0 }), false,
+       'auto + 只写条目名后缀 → 不算命中（不做同义词映射）');
+    eq(shouldPrecheckRetrieval({ mode: 'auto', card: ctx.card, playerText: '我看看那枚无纹玉佩。', minCodex: 0 }), true,
+       'auto + 点名设定集条目全名 → 预检');
+    eq(shouldPrecheckRetrieval({ mode: 'auto', card: ctx.card, playerText: '我坐下喝茶。', minCodex: 24 }), false,
+       'auto + 无点名且小卡 → 不预检');
+    // 没给 card 时退回「辞书条数」这一条腿（旧调用方的路径）。
+    eq(shouldPrecheckRetrieval({ mode: 'auto', card: null, codexCount: 30, minCodex: 24 }), true,
+       'auto + 未提供卡 + 辞书条数达下限 → 预检');
+    eq(shouldPrecheckRetrieval({ mode: 'auto', card: null, codexCount: 3, minCodex: 24 }), false,
+       'auto + 未提供卡 + 辞书条数不足 → 不预检');
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 5. 管线接线：runTurn 真的按节奏调到了这四个 Agent ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // 前面四块证明的是「函数本身对」，这一块证明「orchestrator 真的会调它、调几次」。
+  // 分派仍按 body.model（协议字段），因此每个 Agent 的调用次数可直接从假上游数出来，
+  // 不依赖调用顺序、不读提示词。
+  //
+  // 节奏被本文件顶部拧成：CONTINUITY_EVERY=2、SCENE_EVERY=2、MIN_SCENE_TURNS=1。
+  // 于是 2 拍里应出现：史官 2 次、场记 2 次（第 1 拍无 prev → 判定切场，第 2 拍按轮数强制封场）、
+  // 世界呼吸 2 次（每拍都有幕外候选）、校勘 1 次（只在第 2 拍）。
+  const handlers = {
+    'fake-narrator': () => ({ content: '他把玉佩搁在桌上，灯影一晃。' }),
+    'fake-archivist': () => '{"scene_change":{"changed":false}}',
+    'fake-scene-keeper': () => JSON.stringify({
+      question: '他来做什么', outcome: '他说明了来意', key_detail: '玉佩摆在桌上',
+      threads: [], hooks: [], life_changes: [],
+    }),
+    'fake-world-tick': () => JSON.stringify({
+      events: [{ who: ['凌玥'], what: '她在灯下等他回话', visibility: 'rumor', pressure: 0.6 }],
+    }),
+    'fake-continuity': () => '{"issues":[],"healthy":[]}',
+    'fake-retrieval': () => '{"codex":[],"history":[]}',
+  };
+  const ctx = newSession('管线接线');
+  const events = [];
+  await using(handlers, async (fake) => {
+    for (const text of ['我向凌玥打听玉佩的来历。', '我把玉佩收进袖中，凌玥看着我没说话。']) {
+      await orch.runTurn({
+        sessionId: ctx.session.id, playerText: text, generateBranches: false,
+        onEvent: (e) => events.push(e),
+      });
+    }
+    eq(fake.count('fake-narrator'), 2, '旁白 2 拍各 1 次');
+    eq(fake.count('fake-archivist'), 2, '史官每拍 1 次');
+    eq(fake.count('fake-scene-keeper'), 2, '场记在切场拍各 1 次');
+    eq(fake.count('fake-world-tick'), 2, '世界呼吸在切场拍各 1 次');
+    eq(fake.count('fake-continuity'), 1, '校勘只在第 2 拍（CONTINUITY_EVERY=2）');
+    eq(fake.count('fake-retrieval'), 2, '检索预检在点名人物的拍触发');
+  });
+
+  ok(events.some((e) => e.type === 'scene'), 'SSE 上有 scene 事件');
+  ok(events.some((e) => e.type === 'world_tick'), 'SSE 上有 world_tick 事件');
+  ok(events.some((e) => e.type === 'continuity'), 'SSE 上有 continuity 事件');
+  const kinds = new Set(store.listPatches(ctx.session.id, { branchId: 'main', limit: 200 }).map((p) => p.kind));
+  ok(kinds.has('scene'), 'patches 里有场记归档（kind=scene）');
+  ok(kinds.has('offstage_event'), 'patches 里有幕后事件（kind=offstage_event）——报告靠它数呼吸产出');
+}
+
+console.log(`\n${'═'.repeat(50)}`);
+console.log(`test-agents: ${pass} passed, ${fail} failed`);
+if (fail > 0) process.exit(1);
