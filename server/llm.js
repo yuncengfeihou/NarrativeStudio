@@ -149,11 +149,19 @@ export async function chat(opts) {
     || (Number.isFinite(budget) && budget > 0 && used >= budget * 0.9);
   if (!exhausted) return first;
 
-  console.warn(`[llm] 空内容且预算耗尽（${used}/${Number.isFinite(budget) ? budget : '?'}），降推理重试一次`);
+  const retryBudget = Math.max(
+    8000, Math.min(64000, Number.isFinite(budget) && budget > 0 ? budget * 2 : 12000),
+  );
+  // 带上 agent 名与重试预算：这条日志出现过「2000/2000」（retrieval）与「12000/12000」
+  // （narrator/continuity），不写 agent 就分不清是哪个调用在烧推理。
+  console.warn(
+    `[llm] ${effective.agent || 'chat'} 空内容且预算耗尽（${used}/${Number.isFinite(budget) ? budget : '?'}），`
+    + `降推理重试一次（预算 ${retryBudget}）`,
+  );
   const retry = await run({
     ...effective,
     reasoningEffort: 'low',
-    maxTokens: Math.max(8000, Math.min(64000, Number.isFinite(budget) && budget > 0 ? budget * 2 : 12000)),
+    maxTokens: retryBudget,
     noEmptyRetry: true,
   });
   return retry.content.trim() ? retry : first;

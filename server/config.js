@@ -84,22 +84,25 @@ export const config = {
   narration: {
     mode: env.NARRATION_MODE || 'single',            // single | segmented
     maxRounds: int(env.NARRATION_MAX_ROUNDS, 6),
-    // 注意：step-5 的推理过程也计入 max_tokens。6000 会在长正文上截断，
-    // 默认与 narrator 上限对齐；需要省成本时再单独调低。
-    roundMaxTokens: int(env.SEGMENTED_ROUND_MAX_TOKENS, 12000),
+    // 注意：step-5 的推理过程也计入 max_tokens，正文在推理之后才输出。
+    // 默认与 narrator 上限对齐（§13 第 19 条）；需要省成本时再单独调低。
+    roundMaxTokens: int(env.SEGMENTED_ROUND_MAX_TOKENS, 20000),
     toolResultMaxTokens: int(env.TOOL_RESULT_MAX_TOKENS, 500),
     toolHistoryTokens: int(env.BUDGET_TOOL_RESULTS, 1200),
   },
 
   // ---- Agent defaults (reasoning_effort: low | medium | high | xhigh | max) ----
   // 注意：上游模型的推理过程计入 max_tokens。旁路 Agent 的 JSON 在推理之后才输出，
-  // 预算必须给推理留足空间；否则会得到「completion_tokens 用满、content 为空」的假成功。
+  // 预算必须给推理留足空间；否则会得到「completion_tokens 用满、content 为空」的假成功
+  // （`llm.js` 会以低推理 + 双倍预算重试一次，日志是「空内容且预算耗尽」）。
   // 分工：narrator 只管正文，永远不输出 JSON；记账全部交给史官与校勘。
+  // 调大 narrator 的 maxTokens 要算两笔账：① 它是 context-plan 的生成预留，直接从
+  // 提示词预算里扣（200K 窗口下每 +1K 就少 1K 可用上下文）；② 上限受模型 maxOutput 约束。
   agents: {
     narrator: {
       reasoningEffort: env.NARRATOR_EFFORT || 'high',
       temperature: float(env.NARRATOR_TEMPERATURE, 0.88),
-      maxTokens: int(env.NARRATOR_MAX_TOKENS, 12000),
+      maxTokens: int(env.NARRATOR_MAX_TOKENS, 20000),
       model: env.NARRATOR_MODEL || null,
     },
     archivist: {
@@ -117,13 +120,15 @@ export const config = {
     retrieval: {
       reasoningEffort: env.RETRIEVAL_EFFORT || 'low',
       temperature: float(env.RETRIEVAL_TEMPERATURE, 0.2),
-      maxTokens: int(env.RETRIEVAL_MAX_TOKENS, 2000),
+      // 输出只有一个短 JSON，但推理先花预算：2000 实测经常「用满且 content 为空」，
+      // 每次都白跑一次重试。4000 留够思考空间、又不会让这一拍变慢。
+      maxTokens: int(env.RETRIEVAL_MAX_TOKENS, 4000),
       model: env.RETRIEVAL_MODEL || null,
     },
     continuity: {
       reasoningEffort: env.CONTINUITY_EFFORT || 'medium',
       temperature: float(env.CONTINUITY_TEMPERATURE, 0.2),
-      maxTokens: int(env.CONTINUITY_MAX_TOKENS, 12000),
+      maxTokens: int(env.CONTINUITY_MAX_TOKENS, 16000),
       model: env.CONTINUITY_MODEL || null,
     },
     librarian: {
