@@ -123,6 +123,30 @@ function isDeclaredTarget(target, declaredSet, aliasIndex) {
   return false;
 }
 
+/**
+ * 同一件东西被模型换称呼（D13，2026-10-31）。
+ *
+ * 卡/运行期里的实体叫「旧围棋盒」，提案写的是「围棋盒」——`linkEntities` 认不出
+ * （简称不在别名里），于是这个物件的每一次 change 都被当成「没登场过的东西」拒掉。
+ * 实测 94 条 `skipped_targets` 里有 12 条是这个形状（围棋盒/药罐/提亲帖/侍从官/竹院…）。
+ *
+ * 只拿**声明集合里的规范名**比，且只认「提案名是声明名的前后缀」（不是任意子串）：
+ * 反方向不认——实测「黑色无牌车」包含别名「黑色」、「车灯」包含「车」，那是把别的
+ * 东西并进来，不是简称。两边都要 ≥2 字，且必须**唯一**；多命中/无命中一律保持拒绝。
+ * 宁可不写，也不能把两件东西并成一件。
+ */
+function affixDeclaredMatch(name, declaredSet) {
+  const raw = str(name);
+  if (!raw || raw.length < 2 || !declaredSet) return '';
+  const hits = [];
+  for (const c of declaredSet) {
+    const cand = str(c);
+    if (!cand || cand.length < 2 || cand === raw) continue;
+    if (cand.endsWith(raw) || cand.startsWith(raw)) hits.push(cand);
+  }
+  return hits.length === 1 ? hits[0] : '';
+}
+
 /** 校验并清洗一条断言。不合法返回 null。 */
 export function sanitizeAssertion(a, aliasIndex) {
   const o = obj(a);
@@ -275,7 +299,7 @@ const rejectChange = (reason, o, extra = {}) => {
  * 只放行 state-paths 白名单；身份根（id/name/identity）不可写。
  * 未知实体默认当作「本世界线临时登场」，不会写回世界卡。
  */
-export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrative = '' } = {}) {
+export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrative = '', declaredSet = null } = {}) {
   const o = obj(raw);
   let op = str(o.op) || (o.fields ? 'introduce' : 'set');
   const reject = (reason, extra = {}) => rejectChange(reason, o, { op, ...extra });
@@ -316,6 +340,8 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
   // 卡里该实体的**真实类型**：白名单是按它查的，留痕里必须带上，否则「模型声明 person、
   // 卡里是 concept」这类撞名在报告里会看起来像路径写错。
   let entityType = '';
+  // D13：目标名被前后缀归一过时记原始写法，落库时合并成一条 patches(kind='target_aliased')。
+  let targetNote = null;
   if (kind === 'player') {
     entityId = 'player';
   } else if (playerName && rawName === playerName) {
@@ -339,6 +365,22 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
           kind = hit.type;
           entityId = hit.id;
           entityType = hit.type;
+        }
+      }
+      // D13：简称既不是别名也不在链接索引里（「围棋盒」对「旧围棋盒」）。只按**规范名的
+      // 前后缀**唯一匹配放行，且必须已声明；见 affixDeclaredMatch 的取舍说明。
+      if (entityId === rawName) {
+        const affixName = affixDeclaredMatch(rawName, declaredSet);
+        if (affixName) {
+          const hit = resolveEntity(affixName, aliasIndex);
+          if (hit.type) {
+            kind = hit.type;
+            entityId = hit.id;
+            entityType = hit.type;
+          } else {
+            entityId = affixName;
+          }
+          targetNote = { target_from: rawName };
         }
       }
     }
@@ -393,7 +435,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
       ? o.value
       : (typeof o.value === 'string' && o.value.trim() !== '' ? Number(o.value) : NaN);
     if (!Number.isFinite(n)) return reject('not_a_number', numMismatch);
-    return { kind, entity_id: entityId, path, op, value: Math.round(n * 100) / 100, ...(aliasNote || {}) };
+    return { kind, entity_id: entityId, path, op, value: Math.round(n * 100) / 100, ...(aliasNote || {}), ...(targetNote || {}) };
   }
 
   let value = o.value;
@@ -410,7 +452,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
     if (!state) {
       const raw = str(value);
       if (!raw) return reject('empty_value', enumMismatch);
-      return { kind, entity_id: entityId, path: 'status', op: 'set', value: raw.slice(0, 300), ...(aliasNote || {}) };
+      return { kind, entity_id: entityId, path: 'status', op: 'set', value: raw.slice(0, 300), ...(aliasNote || {}), ...(targetNote || {}) };
     }
     value = state;
   }
@@ -420,7 +462,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
     if (!text) return reject('empty_value', enumMismatch);
     value = text.slice(0, 300);
   }
-  return { kind, entity_id: entityId, path, op, value, ...(aliasNote || {}) };
+  return { kind, entity_id: entityId, path, op, value, ...(aliasNote || {}), ...(targetNote || {}) };
 }
 
 /**
@@ -861,13 +903,16 @@ export function applyArchivistUpdate({
   // 由 `normalizePlayerChange` 归一后**照常落库**。归一必须留痕，否则「代码改了模型提案」
   // 又变成一次静默失真——合并成一条 patches(kind='path_aliased')，与 rejected_change 同形。
   const aliasedChanges = [];
+  // D13：目标名按**规范名前后缀**归一过的提案（同一件东西被换了称呼）。
+  // 与 path_aliased 同形：status=applied、severity=info，报告里和 rejected_change 并排读。
+  const aliasedTargets = [];
 
   // 同一批提案里，模型可能先写新角色的账本/状态/关系，再把 introduce 放进 changes。
   // 先扫一遍 introduce 纳入声明集合，避免「同拍引入的实体被自己的提案拒掉」。
   // 被拒的返回值没有 entity_id 语义（它的 op 可能根本不是 introduce），不能进集合。
   if (declaredSet) {
     for (const raw of update.changes || []) {
-      const c = sanitizeChange(raw, { aliasIndex, playerName, narrative });
+      const c = sanitizeChange(raw, { aliasIndex, playerName, narrative, declaredSet });
       if (c && !c.rejected && c.op === 'introduce' && c.entity_id) declaredSet.add(c.entity_id);
     }
   }
@@ -1041,10 +1086,17 @@ export function applyArchivistUpdate({
 
   /* ---- 实体变更：世界线自己的运行期状态 ---- */
   for (const raw of update.changes || []) {
-    const c = sanitizeChange(raw, { aliasIndex, playerName, narrative });
+    const c = sanitizeChange(raw, { aliasIndex, playerName, narrative, declaredSet });
     // D35：被拒的提案不再静默 continue。留痕只让「不写」变成**可见的不写**，
     // 不加任何纠正/兜底逻辑——越界写入仍然不落库（A3）。
     if (c?.rejected) { recordRejection(c, raw); continue; }
+    // D13：目标名被前后缀归一过（「围棋盒」→「旧围棋盒」）。留痕，不改变写入语义。
+    if (c.target_from) {
+      aliasedTargets.push({
+        target_from: c.target_from, entity_id: c.entity_id, kind: c.kind,
+        path: c.path, op: c.op, turn_no: turnNo,
+      });
+    }
     // 归一过的玩家提案：留痕但不拦（值已按 player 的真实字段形状写对了）。
     if (c.path_from || c.op_from) {
       aliasedChanges.push({
@@ -1210,6 +1262,20 @@ export function applyArchivistUpdate({
       status: 'applied', severity: 'info',
       evidence: `玩家路径归一 ${aliasedChanges.length} 条：${brief}`,
       payload: { count: aliasedChanges.length, items: aliasedChanges.slice(0, 50) },
+    });
+  }
+
+  /* ---- 目标名归一留痕（D13）：模型对同一件东西换了称呼 ---- */
+  applied.target_aliased = aliasedTargets.length;
+  if (aliasedTargets.length) {
+    const brief = aliasedTargets.slice(0, 5)
+      .map((a) => `${a.target_from}→${a.entity_id}`)
+      .join('、');
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'target_aliased', turn_no: turnNo,
+      status: 'applied', severity: 'info',
+      evidence: `目标名归一 ${aliasedTargets.length} 条：${brief}`,
+      payload: { count: aliasedTargets.length, items: aliasedTargets.slice(0, 50) },
     });
   }
 

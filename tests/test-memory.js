@@ -925,6 +925,74 @@ console.log('\n=== 简称指代：introduce 吸收正文前缀 + 变更能对上
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 目标名前后缀归一：同一件东西被换了称呼（D13b） ===');
+{
+  const sid = `d13b-${Date.now()}`;
+  const world = {
+    id: `w13b-${Date.now()}`, title: 't',
+    card: schema.normalizeCard({
+      title: 't',
+      entities: [
+        { type: 'person', name: '伍卿' },
+        { type: 'item', name: '旧围棋盒', summary: '一只旧木盒' },
+        { type: 'item', name: '黑色' },
+      ],
+    }),
+  };
+  store.saveWorld(world);
+  store.createSession({ id: sid, title: 't', worldId: world.id });
+  store.createBranch(sid, { branchId: 'main' });
+  const aliasIndex = schema.buildAliasIndex(world.card);
+  const declaredTargets = arch.buildDeclaredTargets({
+    card: world.card, present: [], codex: [], ledgerCharacters: [], playerName: '伍卿',
+  });
+
+  // ① 简称（提案名是声明名的后缀）→ 归一到卡里的规范名并留痕。
+  const r1 = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex, declaredTargets,
+    update: { scene_change: {}, changes: [{ kind: 'item', op: 'set', id: '围棋盒', path: 'status', value: '被磨得发亮' }] },
+  });
+  eq(r1.changes, 1, '简称变更落库（旧实现被 skipped_targets 静默拒）');
+  eq(r1.skipped, 0, '不再记为越界目标');
+  eq(r1.target_aliased, 1, '归一计入 target_aliased');
+  const ws1 = store.getWorldState(sid, { branchId: 'main', atTurn: 1 });
+  ok(ws1.some((d) => d.entity_id === '旧围棋盒' && d.path === 'status'), '写到规范实体上');
+  const tp = store.listPatches(sid, { limit: 20 }).filter((p) => p.kind === 'target_aliased');
+  eq(tp.length, 1, '归一落一条 patch（不静默改提案）');
+  eq(tp[0].status, 'applied', '归一是成功不是失败');
+  eq(tp[0].payload.items[0].target_from, '围棋盒', '模型原本的称呼留在 payload 里');
+
+  // ② 多命中不猜：两个声明名都以后缀命中时保持拒绝。
+  const amb = arch.sanitizeChange(
+    { kind: 'item', op: 'set', id: '棋盘', path: 'status', value: 'x' },
+    { aliasIndex: [], declaredSet: ['旧棋盘', '新棋盘'] },
+  );
+  ok(!amb.target_from, '多命中不归一');
+  eq(amb.entity_id, '棋盘', '保持模型原写法，交给白名单判');
+
+  // ③ 反方向不认：包含关系不等于简称（「黑色无牌车」不是「黑色」的简称）。
+  const rev = arch.sanitizeChange(
+    { kind: 'item', op: 'set', id: '黑色无牌车', path: 'status', value: 'x' },
+    { aliasIndex: [], declaredSet: ['黑色'] },
+  );
+  ok(!rev.target_from, '「黑色无牌车」不并到「黑色」');
+
+  // ④ 精确命中不留痕：本来就能解析的名字不该出现归一记录。
+  const exact = arch.sanitizeChange(
+    { kind: 'item', op: 'set', id: '旧围棋盒', path: 'status', value: 'x' },
+    { aliasIndex, declaredSet: declaredTargets },
+  );
+  ok(!exact.target_from, '精确命中不算归一');
+
+  // ⑤ 一字提案不猜：短到无法判断的写法保持原样。
+  const short = arch.sanitizeChange(
+    { kind: 'item', op: 'set', id: '盒', path: 'status', value: 'x' },
+    { aliasIndex: [], declaredSet: ['旧围棋盒'] },
+  );
+  ok(!short.target_from, '一字提案不归一');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 提案审计表 ===');
 {
   const sid = `s-${Date.now()}`;

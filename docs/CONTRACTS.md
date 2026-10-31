@@ -252,6 +252,21 @@ reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summa
 （`psyche.hides`、`life_state`）仍被白名单拒。归一在 `sanitizeChange` 里发生、照常过白名单，
 返回值带 `path_from` / `op_from`，落库时汇总成 `patches(kind='path_aliased')`（见史官一节）。
 
+**目标名的前后缀归一（2026-10-31，D13 噪声收敛）**：同一件东西被模型换了称呼时（卡/运行期
+实体叫「旧围棋盒」，提案写「围棋盒」），`sanitizeChange()` 在 `resolveEntity` 与
+`linkEntities` 都失败后，用 `affixDeclaredMatch(name, declaredSet)` 尝试唯一匹配。
+规则是**拒绝优先**的：
+
+- 只拿 `declaredTargets` 里的**规范名**比，且只认「提案名是声明名的前缀或后缀」
+  （`旧围棋盒`.endsWith(`围棋盒`)）；反方向不认（「黑色无牌车」不并到「黑色」）。
+- 两边都要 ≥2 字，且必须**唯一命中**；多命中/无命中一律保持拒绝，仍记
+  `patches(kind='skipped_targets')`。
+- 命中时返回值带 `target_from`（模型原本的写法），落库照常过白名单，并汇总成一条
+  `patches(kind='target_aliased', status='applied', severity='info', payload={count, items})`。
+  报告把它和 `skipped_targets` 并排读：「被拒变少」可能只是代码开始吸收，不是模型不换称呼了。
+- 实测分布（9 局 94 条被拒）：74 条无任何匹配（模型给没 introduce 过的道具记账，拒得对）、
+  12 条可归一（围棋盒/药罐/提亲帖/侍从官/竹院/嘉桌/马灯…）、其余多命中或过短。
+
 **路径白名单按实体真实类型取（D34）**：`applyDelta` 解析出目标实体后，用
 `entity.type`（而不是 `delta.entity_kind`，即模型这一拍声明的类型）去查 `pathsFor()`；
 与「路径是不是数值由白名单决定、不由模型吐出的字面量类型决定」同源。
@@ -772,10 +787,11 @@ parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → �
 //   只供 gone 回程第二路（reviveOnstageGone）与审计用，不进提示词、不占预算、不落库。
 parseArchivistUpdateStrict(content) // -> {ok, error, update}；只有顶层 JSON 对象才算成功（供重试/留痕）
 sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
-sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, delta, {aliasIndex})
+sanitizeChange(raw, { aliasIndex, playerName, narrative, declaredSet }) / mergeLedger(old, delta, {aliasIndex})
 // 成功返回值形状（逐字段冻结，D35 未改）：普通 `{kind, entity_id, path, op, value}`；
 //   introduce 多两个键 `{kind, entity_id, path:'', op:'introduce', value, name, aliases_from_narrative?}`；
-//   数值路径提前返回、`value` 已 round 到两位；玩家路径归一时多 `path_from` / `op_from`（见下）。
+//   数值路径提前返回、`value` 已 round 到两位；玩家路径归一时多 `path_from` / `op_from`（见下）；
+//   目标名按前后缀归一时多 `target_from`（模型的原始写法，见「目标名的前后缀归一」）。
 // **丢弃不再返回 null（D35）**，返回 `{rejected:true, reason, op, kind, entity_id, path,
 //   entity_kind?, entity_type?}`——丢弃时**不能**静默消失：越界提案连 `world_state` 行都没有、
 //   patch 也没有、计数也没有，报告只看得到「这一拍没变化」，状态于是悄悄停在错值上而全绿。
@@ -811,6 +827,11 @@ sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, de
 //   中段省略的简称（蛇纹纸 ← 蛇纹圆印纸）抓不到，由 patches(kind='skipped_targets') 兜住可见化。
 //   非 introduce 分支还有一条兜底：resolveEntity 查不到时用 linkEntities，
 //   唯一命中才归一 kind/entityId（多命中保持原样，不猜）。
+// declaredSet（D13）：非空时，`linkEntities` 也认不出的写法再试一次 `affixDeclaredMatch`——
+//   只认同前后缀（「围棋盒」← 「旧围棋盒」）、两边 ≥2 字、唯一命中；命中时归一实体并返回
+//   可选键 `target_from`（模型原本的写法）。`applyArchivistUpdate` 汇总成
+//   `applied.target_aliased: n` 与一条 `patches(kind='target_aliased', status='applied',
+//   severity='info', payload:{count, items})`。反方向不认、多命中不归一（见「目标名的前后缀归一」）。
 // isDeclaredTarget 同样接受「实体链接能解析到已声明实体」的写法，否则简称会被目标声明挡掉。
 // buildEffectiveWorld(cardSnapshot, deltas, fates) 在 server/world/effective.js，纯函数
 // -> world；除卡形状外还带两个「投影期副作用记录」（不进提示词、不占预算）：

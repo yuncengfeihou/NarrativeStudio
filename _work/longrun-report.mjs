@@ -2137,6 +2137,17 @@ try {
     return { turn_no: Number(p.turn_no), count: Number(pl.count || 0), items: arr(pl.items) };
   });
   const pathAliasedTotal = pathAliasedRows.reduce((s, r) => s + r.count, 0);
+  // D13（2026-10-31）：目标名按规范名前后缀归一（「围棋盒」→「旧围棋盒」）后**照常落库**，
+  // 留一条 `target_aliased`。和 path_aliased 同理：必须与 skipped_targets 并排读，
+  // 否则「代码开始吸收」会被误读成「模型不换称呼了」。
+  const targetAliasedRows = (all(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'target_aliased' order by turn_no asc, id asc",
+    { sid: sessionId }
+  ) || []).map((p) => {
+    const pl = safeJson(p.payload_json);
+    return { turn_no: Number(p.turn_no), count: Number(pl.count || 0), items: arr(pl.items) };
+  });
+  const targetAliasedTotal = targetAliasedRows.reduce((s, r) => s + r.count, 0);
   // D34 回溯探针：patch 只在新会话才有，老会话要看「本来会不会被丢」得从原始数据复算。
   // 判据：world_state 里 `op='introduce'` 且声明 person 的行，其 name 若在卡里是**非人物**
   // 条目 → 修复后该条目会被升级；修复前它的 person 运行态会被 concept 白名单吃掉。
@@ -2294,6 +2305,9 @@ try {
       by_target: skippedByTarget,
       repeated: skippedRepeat,
       rows: skippedTargetRows,
+      // D13（2026-10-31）：按规范名前后缀归一后**照常落库**的条数。与上面并排读：
+      // 「被拒减少」有可能只是「代码开始吸收」，不一定是模型不换称呼了。
+      target_aliased: { total: targetAliasedTotal, rows: targetAliasedRows },
       // D25：`world` 被拒**不是**别名问题。它是和 `player` 同级的投影目标
       // （`world/status` → `world.runtime.status` → 场记单「局势」行 + 常驻笔记），
       // 但 `buildDeclaredTargets()` 曾经只 add 了 `player`、漏了 `world`，
@@ -3229,7 +3243,10 @@ try {
         (skippedRepeat.length
           ? `｜反复被拒：${skippedRepeat.slice(0, 5).map((x) => `${x.target}×${x.n}`).join('、')}` +
             '｜这些实体在正文里活着、在账本里是黑的（简称不在别名索引里，见 D13）'
-          : '｜都是一次性提及，无反复被拒的实体')
+          : '｜都是一次性提及，无反复被拒的实体') +
+        (targetAliasedTotal > 0
+          ? `｜另有 ${targetAliasedTotal} 条按规范名前后缀归一后落库（${targetAliasedRows.length} 拍，patch kind='target_aliased'）`
+          : '')
   );
 
   // D25：world / player 被目标声明拦下是**结构性缺口**，不是别名问题。
