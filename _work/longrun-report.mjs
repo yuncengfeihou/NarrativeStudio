@@ -2214,8 +2214,58 @@ try {
     const k = String(i.target ?? '?');
     skippedByTarget[k] = (skippedByTarget[k] || 0) + 1;
   }
-  const skippedRepeat = Object.entries(skippedByTarget).filter(([, n]) => n >= 2)
-    .sort((a, b) => b[1] - a[1]).map(([target, n]) => ({ target, n }));
+  // 同一拍内同一条提案写两遍（模型重复）不是「反复被拒」：它只说明这一段里模型把同一处
+  // 写了两次。旧口径直接按 items 计数，于是一拍里出现 旧麻绳×2 就被判成「反复指向同一实体」，
+  // 判据自己造出了那个形状。（同族：offstage_cited 的样本量问题。）
+  const skippedAliasItemsDeduped = [];
+  for (const r of skippedTargetRows) {
+    const seen = new Set();
+    for (const i of r.items) {
+      if (i.target === 'world' || i.target === 'player') continue;
+      const k = `${i.kind || ''}|${i.target}`;
+      if (seen.has(k)) continue;
+      seen.add(k);
+      skippedAliasItemsDeduped.push({ turn_no: r.turn_no, ...i });
+    }
+  }
+  const skippedDupInTurn = skippedAliasItems.length - skippedAliasItemsDeduped.length;
+  const skippedTurnsByTarget = new Map();
+  for (const i of skippedAliasItemsDeduped) {
+    const k = String(i.target ?? '?');
+    if (!skippedTurnsByTarget.has(k)) skippedTurnsByTarget.set(k, new Set());
+    skippedTurnsByTarget.get(k).add(i.turn_no);
+  }
+  // 真信号：同一个目标在**不同拍**被拒 ≥2 次——它在正文里活着、账本里永远是黑的。
+  const skippedRepeatTurns = [...skippedTurnsByTarget.entries()]
+    .filter(([, turns]) => turns.size >= 2)
+    .map(([target, turns]) => ({ target, turns: turns.size }))
+    .sort((a, b) => b.turns - a.turns);
+  const skippedRepeat = skippedRepeatTurns.map((x) => ({ target: x.target, n: x.turns }));
+  // D13b（2026-10-31）：被拒目标里有多少条「本可以被前后缀归一吸收」。
+  // 必须单独记数：0 → 规则不适用（这些名字不是任何已声明名字的简称，拒得对）；
+  // >0 → 规则漏了（唯一前后缀却没归），那是回退，判据必须红。
+  const declaredNames = new Set();
+  for (const e of arr((safeJson(session?.card_snapshot_json) || {}).entities)) {
+    if (e?.name) declaredNames.add(String(e.name));
+    for (const a of arr(e?.aliases)) declaredNames.add(String(a));
+  }
+  for (const r of all(
+    "select value_json from world_state where session_id = :sid and op = 'introduce'",
+    { sid: sessionId }
+  ) || []) {
+    const v = safeJson(r.value_json) || {};
+    if (v.name) declaredNames.add(String(v.name));
+    for (const a of arr(v.aliases)) declaredNames.add(String(a));
+  }
+  const affixCandidates = (target) => {
+    const raw = String(target || '');
+    if (raw.length < 2) return [];
+    return [...declaredNames].filter((c) => c.length >= 2 && c !== raw && (c.endsWith(raw) || c.startsWith(raw)));
+  };
+  const skippedAffixMisses = skippedAliasItemsDeduped
+    .map((x) => ({ target: String(x.target ?? '?'), turn_no: x.turn_no, cands: affixCandidates(x.target) }))
+    .filter((x) => x.cands.length === 1)
+    .map((x) => ({ target: x.target, turn_no: x.turn_no, declared: x.cands[0] }));
 
   report.memory = {
     counts,
@@ -2305,6 +2355,12 @@ try {
       by_target: skippedByTarget,
       repeated: skippedRepeat,
       rows: skippedTargetRows,
+      // 同一拍内同一条提案写两遍的条数：不是「反复被拒」，只是模型重复写了一处。
+      duplicated_in_turn: skippedDupInTurn,
+      repeated_across_turns: skippedRepeatTurns,
+      // D13b（2026-10-31）：被拒目标里「本可被唯一前后缀归一吸收」的条数。
+      // 0 = 规则不适用（这些名字不是任何已声明名字的简称）；>0 = 规则漏了 = 回退。
+      affix_eligible: skippedAffixMisses,
       // D13（2026-10-31）：按规范名前后缀归一后**照常落库**的条数。与上面并排读：
       // 「被拒减少」有可能只是「代码开始吸收」，不一定是模型不换称呼了。
       target_aliased: { total: targetAliasedTotal, rows: targetAliasedRows },
@@ -2316,11 +2372,13 @@ try {
       // 把结构性缺口说成了模型措辞问题——方向错了。现在单列出来。
       structural: skippedStructuralItems,
       alias_total: skippedAliasItems.length,
-      note: 'D13：被目标声明拦下的写入。多数是模型用简称指代长名实体（「蛇纹纸」→「蛇纹圆印纸」），'
-        + '简称不在别名索引里，整条写入被拒；正文继续按它推进，账本里永远没有它。'
-        + 'repeated 里出现「同一目标被拒 ≥2 次」＝这个实体在本局实际上是黑的。'
-        + '但 target=world/player 的被拒属于结构性缺口（D25，已修），不是别名问题——'
-        + '老会话里出现它们，说明那一局跑在 D25 之前。',
+      note: 'D13：被目标声明拦下的写入。三种性质必须分开读：'
+        + '① 简称指代长名实体（「围棋盒」→「旧围棋盒」）——D13b 之后应由前后缀唯一归一吸收，'
+        + '`affix_eligible` 里还出现就是回退；'
+        + '② 模型给从未登记的物件记账（「木盒」「药罐盖」）——拒得对，它们从来不是别名；'
+        + '③ 同一拍内重复提案——模型重复写一处，`duplicated_in_turn` 单独记，不计入反复被拒。'
+        + '真信号是 `repeated_across_turns`：同一目标在**不同拍**被拒 ≥2 次＝这个实体在本局实际上是黑的。'
+        + 'target=world/player 的被拒属于结构性缺口（D25，已修），单列在 structural。',
     },
     uncertain: {
       n: Number(uncertainRows || 0),
@@ -2637,10 +2695,12 @@ try {
       + `｜第二路净贡献 ${onlyOnstage.length}${onlyOnstage.length ? `（${onlyOnstage.join('、')}）` : ''}`
       + `｜${[...new Set(revivedRows.map((r) => `t${r.turn_no} ${r.who}`))].slice(0, 6).join('，')}`);
   }
-  console.log(`目标越界     ${skippedTargetItems.length} 条（${skippedTargetRows.length} 拍）` +
-    (skippedTargetItems.length
+  console.log(`目标越界     ${skippedAliasItemsDeduped.length} 条（${skippedTargetRows.length} 拍）` +
+    (skippedAliasItemsDeduped.length
       ? '｜' + Object.entries(skippedByTarget).sort((a, b) => b[1] - a[1]).slice(0, 6).map(([t, n]) => `${t}×${n}`).join(' ') +
-        (skippedRepeat.length ? `  ← 反复被拒：${skippedRepeat.slice(0, 4).map((x) => `${x.target}×${x.n}`).join(' ')}` + (skippedRepeat.length === 0 ? '（结构性：投影目标被拦，D25）' : '（D13：简称不在别名索引里）') : '')
+        `｜可归一形状 ${skippedAffixMisses.length} 次（应为 0）` +
+        (skippedRepeatTurns.length ? `｜跨拍反复被拒：${skippedRepeatTurns.slice(0, 4).map((x) => `${x.target}×${x.turns}拍`).join(' ')}` : '｜无跨拍反复被拒') +
+        (skippedDupInTurn ? `｜同拍重复 ${skippedDupInTurn} 条（不计）` : '')
       : '｜应为 0（非 0 说明有实体被目标声明挡住）'));
 
   /* ────────────────────────────────────────────────────────────────────
@@ -3229,21 +3289,30 @@ try {
     );
   }
 
-  // D13：目标越界。判 WARN 而不是 FAIL——拒写本身是白名单在正常工作；
-  // 但「同一个目标被拒 ≥2 次」说明它在正文里反复出现、账本里却永远没有，
-  // 那是实质性的记忆缺口，单列出来。
+  // D13：目标越界。判 WARN 而不是 FAIL——拒写本身是白名单在正常工作。
+  // 但判据必须分三种性质（2026-10-31 修口径）：①「本可唯一前后缀归一却没归」= 代码回退，WARN；
+  // ② 同一目标在**不同拍**被拒 ≥2 次 = 这个实体在本局是黑的，WARN；
+  // ③ 同一拍内重复提案 / 从未登记的物件 = 拒得对，不判。
+  // 旧口径按 items 计数，一拍里模型把同一处写两遍就会自己造出「反复被拒」的形状——
+  // 那个 WARN 有一半是判据造成的（实测：45 拍局 12 条里 8 条是这种重复对）。
   add(
     'target_declaration_rejections',
     '目标声明拦下的写入不应反复指向同一实体（D13）',
-    skippedAliasItems.length === 0 ? 'PASS'
-      : skippedRepeat.length === 0 ? 'PASS' : 'WARN',
-    skippedAliasItems.length === 0
+    skippedAffixMisses.length > 0 ? 'WARN'
+      : skippedRepeatTurns.length > 0 ? 'WARN' : 'PASS',
+    skippedAliasItemsDeduped.length === 0
       ? '没有被目标声明拦下的别名写入'
-      : `${skippedAliasItems.length} 条被拒（${skippedTargetRows.length} 拍）` +
-        (skippedRepeat.length
-          ? `｜反复被拒：${skippedRepeat.slice(0, 5).map((x) => `${x.target}×${x.n}`).join('、')}` +
-            '｜这些实体在正文里活着、在账本里是黑的（简称不在别名索引里，见 D13）'
-          : '｜都是一次性提及，无反复被拒的实体') +
+      : `${skippedAliasItemsDeduped.length} 条被拒（${skippedTargetRows.length} 拍）` +
+        (skippedAffixMisses.length > 0
+          ? `｜⚠ ${skippedAffixMisses.length} 条本可唯一前后缀归一却没归（D13b 回退）：` +
+            skippedAffixMisses.slice(0, 4).map((x) => `${x.target}→${x.declared}`).join('、')
+          : `｜可归一的形状 0 次（这 ${skippedAliasItemsDeduped.length} 条都不是简称：` +
+            '它们既不在卡里、也没有哪条 introduce 的名字以它为前后缀，拒得对）') +
+        (skippedRepeatTurns.length
+          ? `｜跨拍反复被拒：${skippedRepeatTurns.slice(0, 5).map((x) => `${x.target}×${x.turns}拍`).join('、')}`
+            + '｜这些实体在正文里活着、在账本里是黑的'
+          : '｜无跨拍反复被拒的实体') +
+        (skippedDupInTurn > 0 ? `｜另有 ${skippedDupInTurn} 条是同拍内重复提案（模型写了同一处两遍，不计入反复被拒）` : '') +
         (targetAliasedTotal > 0
           ? `｜另有 ${targetAliasedTotal} 条按规范名前后缀归一后落库（${targetAliasedRows.length} 拍，patch kind='target_aliased'）`
           : '')
