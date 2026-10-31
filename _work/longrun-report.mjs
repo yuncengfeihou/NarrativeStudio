@@ -3696,7 +3696,7 @@ try {
     emptyTurns.length === 0
       ? `${narr.length} 拍全部有正文`
         + (retriedHealedTurns.length
-          ? `｜其中 ${retriedHealedTurns.length} 拍（t${retriedHealedTurns.join(',')}）首次为空、关推理重试后救回`
+          ? `｜其中 ${retriedHealedTurns.length} 拍（t${retriedHealedTurns.join(',')}）首次为空、同等级加倍预算重试后救回`
           : '')
       : `${emptyTurns.length}/${narr.length} 拍正文为空：`
         + emptyTurns.map((e) => `t${e.turn_no}(ct=${num(e.completion_tokens)}${e.retried ? ',首次也空' : ''}${e.fed_into_next ? ',已进下一拍上下文' : ''})`).join(' ')
