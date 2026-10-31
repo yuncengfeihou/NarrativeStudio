@@ -89,7 +89,7 @@ const ACTIONS = [
   '我直接点破刚才被含糊带过的那句话，等对方解释。',
 ];
 
-const ALLOWED_TOOLS = new Set(['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup', 'recall_history']);
+const ALLOWED_TOOLS = new Set(['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup', 'recall_history', 'technique_lookup']);
 
 /* ------------------------------- 断言 ------------------------------- */
 

@@ -1717,8 +1717,8 @@ console.log('\n=== 分段演绎：草稿工作区与工具协议（纯函数） 
 
   eq(
     loop.SEGMENTED_TOOLS.map((t) => t.function.name),
-    ['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup', 'recall_history'],
-    '五个工具：草稿工作区 + 辞书/历史两个取证通道',
+    ['draft_append', 'draft_edit', 'draft_seal', 'codex_lookup', 'recall_history', 'technique_lookup'],
+    '六个工具：草稿工作区 + 辞书/历史两个取证通道 + 一个写法通道',
   );
   eq(loop.resolveNarrationMode({ narration_mode: 'segmented' }, 'single'), 'segmented', '会话可开启分段模式');
   eq(loop.resolveNarrationMode({ narration_mode: 'single' }, 'segmented'), 'single', '会话可显式关闭分段模式');
@@ -1765,6 +1765,35 @@ console.log('\n=== 分段演绎：草稿工作区与工具协议（纯函数） 
   const sealEmpty = loop.runSegmentedTool({ name: 'draft_seal', args: {}, draft: '', card });
   ok(sealEmpty.error, '空草稿不能定稿');
   ok(!loop.runSegmentedTool({ name: 'draft_seal', args: {}, draft: '正文', card }).error, '有正文可以定稿');
+
+  // 技法库（P1，2026-11-01）：模型判断「要不要学」，代码只做确定性检索；无命中就不注入。
+  const tech = await import('../server/world/techniques.js');
+  eq(tech.TECHNIQUES.length, 15, '技法库内置 15 条');
+  eq(new Set(tech.TECHNIQUES.map((t) => t.id)).size, 15, '技法 id 唯一');
+  ok(tech.TECHNIQUES.every((t) => t.text.length <= tech.TECHNIQUE_TEXT_MAX), '单条技法正文不超上限');
+  ok(tech.TECHNIQUES.every((t) => t.label && t.when && t.tags.length), '每条都有标签名/用途/标签');
+  eq(tech.rankTechniques('对白太直白')[0].id, 'dialogue-subtext', '意图词命中对应技法');
+  eq(tech.rankTechniques('时间不知道怎么跳').map((t) => t.id), ['time-jump'], '只返回相关技法，不夹带高频虚词的误命中');
+  eq(tech.rankTechniques('量子力学'), [], '无关 query 不返回任何技法（宁可不给）');
+  eq(tech.rankTechniques(''), [], '空 query 不匹配');
+  ok(tech.rankTechniques('对白太直白', { limit: 99 }).length <= tech.TECHNIQUE_MATCH_MAX, 'limit 上限夹到 TECHNIQUE_MATCH_MAX');
+  const twice = JSON.stringify(tech.rankTechniques('收尾太满'));
+  eq(JSON.stringify(tech.rankTechniques('收尾太满')), twice, '同 query 结果可复现');
+  ok(tech.renderTechniques([], '量子力学').includes('不要为了套技法'), '无命中时明确不要硬套');
+  const techText = tech.renderTechniques(tech.rankTechniques('场景发空'), '场景发空');
+  ok(techText.includes('【技法检索：') && techText.includes('感官锚定'), '有命中时带上技法正文');
+  ok(!techText.includes('"') && !techText.includes('{'), '技法结果不含 JSON');
+
+  const techTool = loop.runSegmentedTool({ name: 'technique_lookup', args: { query: '时间不知道怎么跳' }, draft: '', card });
+  ok(!techTool.error, '技法工具正常返回');
+  ok(techTool.text.includes('时间跳切'), '技法工具按意图取到对应写法');
+  eq(techTool.techniques, ['time-jump'], '命中技法 id 透出给 meta');
+  const techMiss = loop.runSegmentedTool({ name: 'technique_lookup', args: { query: '量子力学' }, draft: '', card });
+  ok(!techMiss.error && techMiss.text.includes('未匹配到'), '没有命中时给「按自己判断写」而不是硬凑');
+  eq(techMiss.techniques, [], '未命中不记技法');
+  ok(loop.runSegmentedTool({ name: 'technique_lookup', args: {}, draft: '', card }).error, '空 query 报错而不是随便给一条');
+  const { segmentedInstruction } = await import('../server/prompts/narrator.js');
+  ok(segmentedInstruction({ maxRounds: 4 }).includes('technique_lookup'), '分段说明里提到写法通道');
 
   const u1 = loop.mergeUsage(null, {
     prompt_tokens: 10, completion_tokens: 5, total_tokens: 15, cached_tokens: 5,
@@ -1927,6 +1956,20 @@ console.log('\n=== 分段演绎：完整工具循环（假流，无网络） ===
   eq(r5.narration.tools, 1, '历史检索计入工具调用次数');
   eq(r5.content, '她想起来了。', '历史检索结果不混进正文');
   ok(events5.some((e) => e.type === 'tool_call' && e.name === 'recall_history' && e.ok), '历史检索发出工具状态事件');
+
+  // 5b) 技法检索：命中只影响写法提示，不外泄到正文；命中 id 记进 narration 供 meta 留痕。
+  const events5b = [];
+  const r5b = await runNarratorSegmented({
+    ...base,
+    stream: fakeStream([
+      [toolEv(0, 'technique_lookup', { query: '时间不知道怎么跳' }, 'call_tech'), metaEv(usage(3, 1))],
+      [contentEv('三天后，雨停了。'), metaEv(usage(3, 2))],
+    ]),
+    onEvent: (e) => events5b.push(e),
+  });
+  eq(r5b.content, '三天后，雨停了。', '技法结果不混进正文');
+  eq(r5b.narration.techniques, ['time-jump'], '命中的技法 id 记进 narration（只作 meta 留痕）');
+  ok(events5b.some((e) => e.type === 'tool_call' && e.name === 'technique_lookup' && e.ok), '技法检索发出工具状态事件');
 
   // 6) 取消必须向上抛，不能吞掉后继续写库。
   let abortName = '';

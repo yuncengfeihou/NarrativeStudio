@@ -19,6 +19,7 @@ import { chatStream } from '../llm.js';
 import { resolveAgent } from '../model-registry.js';
 import { estimateTokens } from '../tokens.js';
 import { lookupCodex, renderCodexHit } from '../world/scene-sheet.js';
+import { rankTechniques, renderTechniques } from '../world/techniques.js';
 import { buildNarratorMessages } from './narrator.js';
 import { segmentedInstruction } from '../prompts/narrator.js';
 import { CRAFT_CHECKLIST } from '../world/craft.js';
@@ -33,7 +34,14 @@ export function resolveNarrationMode(settings, defaultMode = config.narration.mo
   return defaultMode === 'segmented' ? 'segmented' : 'single';
 }
 
-/** 第一阶段暴露五个工具；ask 属于 P1-3，等循环稳定后再加。 */
+/**
+ * 第一阶段暴露六个工具；ask 属于 P1-3，等循环稳定后再加。
+ *
+ * 六个工具分三类：草稿工作区（draft_*）、取证（codex_lookup / recall_history）、
+ * 写法（technique_lookup）。第三类只回答「怎么写」，不回答「发生了什么」，
+ * 所以它的结果同样只进当拍工具消息、当拍蒸发（红线 1 允许的唯一例外：
+ * 模型判断要不要查，代码执行确定性检索）。
+ */
 export const SEGMENTED_TOOLS = [
   {
     type: 'function',
@@ -97,6 +105,21 @@ export const SEGMENTED_TOOLS = [
         properties: {
           query: { type: 'string', description: '要检索的原文关键词：人名、地名、物件，或一句记得的原话。' },
           limit: { type: 'integer', description: '最多返回几条，1-6。', minimum: 1, maximum: 6 },
+        },
+        required: ['query'],
+      },
+    },
+  },
+  {
+    type: 'function',
+    function: {
+      name: 'technique_lookup',
+      description: '当你不确定怎么写（对白发直、场景发空、时间推不动、收尾太满、几个人说话一个味）时，可以取一条具体写法。它只讲写法，不含这个世界的信息；普通推进不要查。',
+      parameters: {
+        type: 'object',
+        properties: {
+          query: { type: 'string', description: '你卡在哪：例如「对白太直白」「时间不知道怎么跳」「收尾太满」。' },
+          limit: { type: 'integer', description: '最多返回几条，1-3。', minimum: 1, maximum: 3 },
         },
         required: ['query'],
       },
@@ -314,6 +337,18 @@ export function runSegmentedTool({ name, args, draft, card, recall }) {
         label: `历史检索：${query}`,
       };
     }
+    case 'technique_lookup': {
+      const query = typeof args?.query === 'string' ? args.query.trim() : '';
+      if (!query) return { text: '错误：query 不能为空。', draft: src, error: true };
+      const limit = Math.max(1, Math.min(3, Number(args?.limit) || 2));
+      const entries = rankTechniques(query, { limit });
+      return {
+        text: renderTechniques(entries, query),
+        draft: src,
+        label: entries.length ? `技法：${entries[0].label}` : `技法：未命中`,
+        techniques: entries.map((t) => t.id),
+      };
+    }
     default:
       return { text: `错误：未知工具 ${name}。`, draft: src, error: true };
   }
@@ -362,6 +397,8 @@ export async function runNarratorSegmented({
   let rounds = 0;
   let tools = 0;
   let sealed = false;
+  // 技法检索命中的条目 id：只作 meta 留痕（模型学了哪条写法），不进提示词、不进下一拍。
+  const techniques = [];
 
   emit({ type: 'draft_start', turn_no: turnNo, mode: 'segmented', max_rounds: maxRounds });
 
@@ -426,6 +463,7 @@ export async function runNarratorSegmented({
           recall,
         });
       tools += 1;
+      if (result.techniques?.length) techniques.push(...result.techniques);
 
       if (result.draft !== draft) {
         draft = result.draft;
@@ -474,6 +512,6 @@ export async function runNarratorSegmented({
     usage,
     model,
     finishReason,
-    narration: { mode: 'segmented', rounds, tools, sealed },
+    narration: { mode: 'segmented', rounds, tools, sealed, techniques: techniques.length ? techniques : undefined },
   };
 }
