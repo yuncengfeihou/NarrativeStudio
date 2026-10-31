@@ -1702,6 +1702,82 @@ console.log('\n=== D35：sanitizeChange 的丢弃必须留痕（带 reason 的�
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== D35b：主角路径归一（模型写 person 的写法 → player 的真实字段） ===');
+{
+  // 病灶来自 45 拍实测：`rejected_change` 26 条里 19 条是主角——
+  // `psyche.wants` / `psyche.fears` / `psyche.afraid`（person 写法）和
+  // `add` 打在标量 `wants` / `afraid` 上。提示词已写清「主角是 player、字段扁平」，
+  // 模型先验仍照写，于是每拍白丢几条。归一是**确定性**的：同一个人、同一个字段。
+  const card = schema.normalizeCard({
+    title: 't',
+    player: { name: '伍卿' },
+    entities: [{ id: 'wu-qing', name: '伍卿', type: 'person' }],
+  });
+  const idx = schema.buildAliasIndex(card);
+  const clean = (raw) => arch.sanitizeChange(raw, { aliasIndex: idx, playerName: '伍卿' });
+
+  // ① person 写法 + list 语义：两个都归一，且原值留在 path_from / op_from。
+  const a = clean({ kind: 'player', id: 'player', path: 'psyche.wants', op: 'add', value: '弄清十年前的事' });
+  ok(!a.rejected, '① psyche.wants + add 不再被拒');
+  eq([a.path, a.op, a.value], ['wants', 'set', '弄清十年前的事'], '① 落到 player.wants，按标量写');
+  eq([a.path_from, a.op_from], ['psyche.wants', 'add'], '① 归一留痕（path_from / op_from）');
+
+  // ② 三个同义写法都收：fears / afraid 都映射到 afraid。
+  const b = clean({ kind: 'player', id: 'player', path: 'psyche.fears', op: 'add', value: '被认出来' });
+  eq([b.path, b.op], ['afraid', 'set'], '② psyche.fears → afraid');
+  const c = clean({ kind: 'player', id: 'player', path: 'psyche.afraid', op: 'add', value: '露馅' });
+  eq([c.path, c.op], ['afraid', 'set'], '② psyche.afraid → afraid');
+
+  // ③ 只错 op 不算错 path：path 照旧，只记 op_from。
+  const d = clean({ kind: 'player', id: 'player', path: 'wants', op: 'add', value: '攒钱' });
+  eq([d.path, d.op, d.path_from, d.op_from], ['wants', 'set', '', 'add'], '③ 标量上的 add → set，path 不动');
+
+  // ④ 归一不是放水：主角没有的字段照旧被拒；remove 不猜（清空标量的意图不明确）。
+  eq(clean({ kind: 'player', id: 'player', path: 'psyche.hides', op: 'add', value: 'x' })?.reason,
+    'path_not_allowed', '④ 主角没有 psyche.hides，归一后仍被白名单拒');
+  eq(clean({ kind: 'player', id: 'player', path: 'life_state', op: 'set', value: 'gone' })?.reason,
+    'path_not_allowed', '④ 主角没有 life_state（D14），照旧拒');
+  eq(clean({ kind: 'player', id: 'player', path: 'wants', op: 'remove', value: '攒钱' })?.reason,
+    'op_path_mismatch', '④ 标量上的 remove 不兜底，继续拒');
+
+  // ⑤ 人物不受影响：person 的 psyche.wants 本来就是 list，add 是对的。
+  const p = clean({ kind: 'person', id: 'wu-qing', path: 'psyche.wants', op: 'add', value: '活着' });
+  eq([p.path, p.op], ['psyche.wants', 'add'], '⑤ 人物的 psyche.wants 保持 list-add 语义');
+  ok(!p.path_from && !p.op_from, '⑤ 人物不产生归一留痕');
+
+  /* ---- 集成级：归一后必须真的落库，且留痕进 patches ---- */
+  const sid = `s-d35b-${Date.now()}`;
+  store.createSession({ id: sid, title: 't' });
+  store.createBranch(sid, { branchId: 'main' });
+  const applied = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 1, aliasIndex: idx, playerName: '伍卿',
+    update: {
+      changes: [
+        { kind: 'player', id: 'player', path: 'psyche.wants', op: 'add', value: '弄清十年前的事' },
+        { kind: 'player', id: 'player', path: 'psyche.fears', op: 'add', value: '被认出来' },
+        { kind: 'player', id: 'player', path: 'wants', op: 'add', value: '攒钱' },
+      ],
+    },
+  });
+  eq(applied.changes, 3, '三条归一后全部落库（改前一条都进不去）');
+  eq(applied.path_aliased, 3, 'applied.path_aliased 可被单测直读');
+  eq(applied.rejected_changes?.count, 0, '归一后不再产生 rejected_change 噪音');
+  const ap = store.listPatches(sid, { branchId: 'main', kind: 'path_aliased' });
+  eq(ap.length, 1, '留痕合并成 1 条 patch（不是每条一条）');
+  eq([ap[0]?.status, ap[0]?.severity], ['applied', 'info'], '不是失败：applied + info');
+  eq(ap[0]?.payload?.count, 3, 'payload.count 是报告只需读的那一个数');
+  eq(ap[0]?.payload?.items?.[0]?.path_from, 'psyche.wants', 'payload 带原始写法');
+  ok(String(ap[0]?.evidence || '').includes('玩家路径归一 3 条'), 'evidence 有人能读的摘要');
+  eq(store.countPatches(sid, { branchId: 'main', kind: 'rejected_change' }), 0,
+    '同批没有 rejected_change');
+
+  // 投影侧：玩家字段读得到归一后的值（wants 是标量，最后一条 set 覆盖前一条）。
+  const proj = effective.buildEffectiveWorld(card, store.getWorldState(sid, { branchId: 'main', atTurn: 1 }));
+  eq(proj.player.wants, '攒钱', '投影里的 player.wants 是最后写的那条（标量覆盖）');
+  eq(proj.player.afraid, '被认出来', '投影里的 player.afraid 也有值');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 数值账本：模型只报变化量，加减与余额由代码算 ===');
 {
   const paths = await import('../server/world/state-paths.js');

@@ -242,6 +242,16 @@ reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summa
 `LIFE_STATES` 里的四个值，代码据此判定死亡/离场（自由文本只作 `status` 展示）。
 新条目第一次 `introduce` 时可以一次写清定义。
 
+**主角路径的确定性别名（2026-10-31，D35 噪声收敛）**：`normalizePlayerChange({path, op})` 与模块内常量
+`PLAYER_PATH_ALIASES` 在 `server/world/state-paths.js`。史官会把主角当 person 写
+（`psyche.wants` / `psyche.fears` / `psyche.afraid`）、也会在标量字段上用 `op='add'`；
+提示词已写明「主角是 player、动机字段是扁平的 `wants` / `afraid`」，45 拍实测仍被挡 19 条。
+归一是确定性的（同一个人、同一个字段，语义不变）：`psyche.wants` → `wants`，
+`psyche.fears` / `psyche.afraid` → `afraid`，`wants` / `afraid` 上的 `add` → `set`（标量没有追加）。
+`remove` 不猜（清空标量的意图不明确），继续按 `op_path_mismatch` 拒；主角没有的路径
+（`psyche.hides`、`life_state`）仍被白名单拒。归一在 `sanitizeChange` 里发生、照常过白名单，
+返回值带 `path_from` / `op_from`，落库时汇总成 `patches(kind='path_aliased')`（见史官一节）。
+
 **路径白名单按实体真实类型取（D34）**：`applyDelta` 解析出目标实体后，用
 `entity.type`（而不是 `delta.entity_kind`，即模型这一拍声明的类型）去查 `pathsFor()`；
 与「路径是不是数值由白名单决定、不由模型吐出的字面量类型决定」同源。
@@ -765,7 +775,7 @@ sanitizeAssertion(raw, aliasIndex) / sanitizeState(raw, aliasIndex)
 sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, delta, {aliasIndex})
 // 成功返回值形状（逐字段冻结，D35 未改）：普通 `{kind, entity_id, path, op, value}`；
 //   introduce 多两个键 `{kind, entity_id, path:'', op:'introduce', value, name, aliases_from_narrative?}`；
-//   数值路径提前返回、`value` 已 round 到两位。
+//   数值路径提前返回、`value` 已 round 到两位；玩家路径归一时多 `path_from` / `op_from`（见下）。
 // **丢弃不再返回 null（D35）**，返回 `{rejected:true, reason, op, kind, entity_id, path,
 //   entity_kind?, entity_type?}`——丢弃时**不能**静默消失：越界提案连 `world_state` 行都没有、
 //   patch 也没有、计数也没有，报告只看得到「这一拍没变化」，状态于是悄悄停在错值上而全绿。
@@ -785,6 +795,16 @@ sanitizeChange(raw, { aliasIndex, playerName, narrative }) / mergeLedger(old, de
 //   `empty_value` 值缺失或被裁空
 // **`life_state` 枚举外不是丢弃**：退回 `{path:'status', op:'set', value:<原文>}`，与 sanitizeState 同口径。
 // 调用方判据是 `if (c?.rejected) { …; continue; }`——**不要改回 `if (!c)`**，那会把留痕吞掉。
+// **主角路径归一（2026-10-31，D35 噪声收敛）**：目标解析之后、白名单之前，`kind='player'` 会过一遍
+//   `normalizePlayerChange({path, op})`（`server/world/state-paths.js` 的 `PLAYER_PATH_ALIASES`）：
+//   `psyche.wants` → `wants`、`psyche.fears` / `psyche.afraid` → `afraid`（主角的动机字段是**扁平标量**，
+//   `normalizePlayer` 里就是 `wants` / `afraid`）；`wants` / `afraid` 上的 `add` → `set`
+//   （标量没有「追加」；`remove` 不猜，继续按 `op_path_mismatch` 拒）。归一后照常过白名单——
+//   主角没有的字段（`psyche.hides`、`life_state`）仍然被拒并留痕。返回值多两个**可选**键
+//   `path_from` / `op_from`（只有真改过的那一维非空）。`applyArchivistUpdate` 汇总成
+//   `applied.path_aliased: n` 与一条 `patches(kind='path_aliased', status='applied', severity='info',
+//   payload:{count, items})`。**归一不许静默**：报告要把「噪声被吸收」与「噪声仍被拒」并排读，
+//   只看 `rejected_change` 下降会把「代码开始吸收」误读成「模型变乖了」。
 // narrative（D13）：introduce 时若新名字的前缀（≥2 字、且不等于正经别名）出现在本拍正文里，
 //   就把它 absorbed 成别名（返回值多一个 aliases_from_narrative），让后文的简称能对上实体。
 //   只收**前缀**，不做「首 2 + 末 1」组合——那是 §1.2 禁止的识别器堆叠；

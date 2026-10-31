@@ -13,7 +13,7 @@ import {
   ENTITY_TYPES, PERSON_TYPE, buildAliasIndex, linkEntities, normalizeCard, resolveEntity, slugify,
 } from '../world/schema.js';
 import {
-  ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, isNumberPath, pathsFor,
+  ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, isNumberPath, normalizePlayerChange, pathsFor,
 } from '../world/state-paths.js';
 import {
   addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, findDuplicateAssertion,
@@ -277,12 +277,12 @@ const rejectChange = (reason, o, extra = {}) => {
  */
 export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrative = '' } = {}) {
   const o = obj(raw);
-  const op = str(o.op) || (o.fields ? 'introduce' : 'set');
+  let op = str(o.op) || (o.fields ? 'introduce' : 'set');
   const reject = (reason, extra = {}) => rejectChange(reason, o, { op, ...extra });
   if (!['set', 'add', 'remove', 'introduce', 'delta'].includes(op)) return reject('bad_op');
   let kind = str(o.kind);
   if (!ENTITY_KINDS.includes(kind)) return reject('bad_kind', { kind });
-  const path = str(o.path);
+  let path = str(o.path);
 
   if (op === 'introduce') {
     if (!ENTITY_TYPES.includes(kind)) return reject('bad_introduce', { kind });
@@ -344,6 +344,22 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
     }
   }
 
+  // 主角路径归一（2026-10-31，D35 噪声收敛）：史官会把主角当 person 写
+  // （`psyche.wants`），也会按 list 语义用 `add` 写标量字段。提示词已列清扁平字段，
+  // 实测仍挡下 19 条/44 拍——模型的 schema 先验只能由代码吸收，见 state-paths.js。
+  // 归一过的提案在返回值里带 `path_from` / `op_from`，落库时合并成一条 patch，
+  // 保证「代码改了模型的提案」这件事在报告里看得见（不静默失真）。
+  let aliasNote = null;
+  if (kind === 'player') {
+    const norm = normalizePlayerChange({ path, op });
+    if (norm.path_from || norm.op_from) {
+      // 只记真的改过的那一维（未改的那维留空字符串，调用方按键是否存在判断即可）。
+      aliasNote = { path_from: norm.path_from ? path : '', op_from: norm.op_from ? op : '' };
+      path = norm.path;
+      op = norm.op;
+    }
+  }
+
   // 事实实体的定义（summary/detail/facets.history）是作者公理：已有条目只能写运行态，
   // 想新增定义必须走 introduce（上面已返回）。人物没有这个限制。
   if (kind !== PERSON_TYPE && FACT_CANON_PATHS.has(path)) {
@@ -377,7 +393,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
       ? o.value
       : (typeof o.value === 'string' && o.value.trim() !== '' ? Number(o.value) : NaN);
     if (!Number.isFinite(n)) return reject('not_a_number', numMismatch);
-    return { kind, entity_id: entityId, path, op, value: Math.round(n * 100) / 100 };
+    return { kind, entity_id: entityId, path, op, value: Math.round(n * 100) / 100, ...(aliasNote || {}) };
   }
 
   let value = o.value;
@@ -394,7 +410,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
     if (!state) {
       const raw = str(value);
       if (!raw) return reject('empty_value', enumMismatch);
-      return { kind, entity_id: entityId, path: 'status', op: 'set', value: raw.slice(0, 300) };
+      return { kind, entity_id: entityId, path: 'status', op: 'set', value: raw.slice(0, 300), ...(aliasNote || {}) };
     }
     value = state;
   }
@@ -404,7 +420,7 @@ export function sanitizeChange(raw, { aliasIndex = [], playerName = '', narrativ
     if (!text) return reject('empty_value', enumMismatch);
     value = text.slice(0, 300);
   }
-  return { kind, entity_id: entityId, path, op, value };
+  return { kind, entity_id: entityId, path, op, value, ...(aliasNote || {}) };
 }
 
 /**
@@ -841,6 +857,10 @@ export function applyArchivistUpdate({
   const recordRejection = (c, raw) => {
     rejectedChanges.push({ ...c, turn_no: turnNo, evidence: str(obj(raw).evidence).slice(0, 120) });
   };
+  // D35 噪声收敛（2026-10-31）：player 被写成人格路径（`psyche.wants`）或标量用 add，
+  // 由 `normalizePlayerChange` 归一后**照常落库**。归一必须留痕，否则「代码改了模型提案」
+  // 又变成一次静默失真——合并成一条 patches(kind='path_aliased')，与 rejected_change 同形。
+  const aliasedChanges = [];
 
   // 同一批提案里，模型可能先写新角色的账本/状态/关系，再把 introduce 放进 changes。
   // 先扫一遍 introduce 纳入声明集合，避免「同拍引入的实体被自己的提案拒掉」。
@@ -1025,6 +1045,17 @@ export function applyArchivistUpdate({
     // D35：被拒的提案不再静默 continue。留痕只让「不写」变成**可见的不写**，
     // 不加任何纠正/兜底逻辑——越界写入仍然不落库（A3）。
     if (c?.rejected) { recordRejection(c, raw); continue; }
+    // 归一过的玩家提案：留痕但不拦（值已按 player 的真实字段形状写对了）。
+    if (c.path_from || c.op_from) {
+      aliasedChanges.push({
+        entity_id: c.entity_id,
+        path: c.path,
+        path_from: c.path_from || '',
+        op: c.op,
+        op_from: c.op_from || '',
+        turn_no: turnNo,
+      });
+    }
     // introduce 是唯一允许新实体的入口（且已限定 cast/codex）；其余变更受目标声明约束。
     if (declaredSet && c.op !== 'introduce' && !isDeclaredTarget(c.entity_id, declaredSet, aliasIndex)) {
       skipTarget('change', c.entity_id);
@@ -1162,6 +1193,23 @@ export function applyArchivistUpdate({
         by_reason: rejectedByReason,
         items: rejectedChanges.slice(0, 50),
       },
+    });
+  }
+
+  /* ---- 玩家路径归一留痕：模型写了 person 的写法，代码换成 player 的字段后照常落库 ---- */
+  // 与 rejected_change 同形（一条合并 patch），但 status 是 applied、severity info：
+  // 这不是失败，是「代码替模型翻译了一次」。报告把它和 rejected_change 并排读，
+  // 才能分清「噪声被吸收」与「噪声仍被拒」。
+  applied.path_aliased = aliasedChanges.length;
+  if (aliasedChanges.length) {
+    const brief = aliasedChanges.slice(0, 5)
+      .map((a) => `${a.path_from || a.path}→${a.path}${a.op_from ? `(${a.op_from}→${a.op})` : ''}`)
+      .join('、');
+    addPatch(sessionId, {
+      branch_id: branchId, agent: 'archivist', kind: 'path_aliased', turn_no: turnNo,
+      status: 'applied', severity: 'info',
+      evidence: `玩家路径归一 ${aliasedChanges.length} 条：${brief}`,
+      payload: { count: aliasedChanges.length, items: aliasedChanges.slice(0, 50) },
     });
   }
 

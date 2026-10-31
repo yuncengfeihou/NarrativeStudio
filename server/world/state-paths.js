@@ -100,3 +100,46 @@ export function pathsFor(kind) {
 export function isNumberPath(kind, path) {
   return NUMBER_PATH_SET.has(path) && !!pathsFor(kind)?.has(path);
 }
+
+/**
+ * 主角路径的**确定性别名**（2026-10-31，D35 噪声收敛）。
+ *
+ * 史官把主角当 person 写：`psyche.wants` / `psyche.fears` / `psyche.afraid`。
+ * 而主角的动机字段是**扁平**的（`normalizePlayer` 里的 `wants` / `afraid`，标量字符串）——
+ * 提示词里已经明确写「不带 psyche. 前缀，主角是 player 不是 person」，45 拍实测仍有
+ * 16 条被 `path_not_allowed` 挡掉。这不是提示词漏项，是模型的 schema 先验，
+ * 只能由代码一次性吸收（同 D13-A1 的简称、D34 的同名升级）。
+ *
+ * 别名不改语义：同一个人、同一个字段，只是接受了 person 的写法。不新增注入点、
+ * 不进提示词；归一后照样过白名单，写不进去的（`psyche.hides` 之类主角没有的字段）
+ * 仍然被拒并留痕。
+ */
+const PLAYER_PATH_ALIASES = {
+  'psyche.wants': 'wants',
+  'psyche.fears': 'afraid',
+  'psyche.afraid': 'afraid',
+};
+
+/**
+ * 主角这两个字段是**标量**（`normalizePlayer` 的 `str()`），模型常按 person 的 list 语义
+ * 写 `op='add'`。标量没有「追加」，只有「此刻是什么」，所以 add 落到 set；
+ * `remove` 不猜（清空一个标量的意图不明确），继续按 `op_path_mismatch` 拒。
+ */
+const PLAYER_SCALAR_LIST_PATHS = new Set(['wants', 'afraid']);
+
+/**
+ * 归一玩家的 (path, op)。返回的 `path_from` / `op_from` 只有真的改过时才非空——
+ * 调用方据此留痕，避免「代码悄悄改了模型的提案」变成新的不可见失真。
+ */
+export function normalizePlayerChange({ path, op }) {
+  const rawPath = String(path || '');
+  const rawOp = String(op || '');
+  const mapped = PLAYER_PATH_ALIASES[rawPath] || rawPath;
+  const nextOp = PLAYER_SCALAR_LIST_PATHS.has(mapped) && rawOp === 'add' ? 'set' : rawOp;
+  return {
+    path: mapped,
+    op: nextOp,
+    path_from: mapped !== rawPath ? rawPath : '',
+    op_from: nextOp !== rawOp ? rawOp : '',
+  };
+}

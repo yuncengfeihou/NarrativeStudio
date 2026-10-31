@@ -2109,6 +2109,17 @@ try {
   for (const r of rejectedChangeRows) {
     for (const [k, v] of Object.entries(r.by_reason)) rejectedChangeByReason[k] = (rejectedChangeByReason[k] || 0) + Number(v || 0);
   }
+  // D35 噪声收敛（2026-10-31）：模型把主角写成人格写法（`psyche.wants` / 标量上用 `add`）时，
+  // 代码归一后**照常落库**并留一条 `path_aliased`。它必须与 rejected_change 并排读：
+  // 只看 rejected 下降，会把「代码开始吸收噪声」误读成「模型变乖了」。
+  const pathAliasedRows = (all(
+    "select turn_no, payload_json from patches where session_id = :sid and kind = 'path_aliased' order by turn_no asc, id asc",
+    { sid: sessionId }
+  ) || []).map((p) => {
+    const pl = safeJson(p.payload_json);
+    return { turn_no: Number(p.turn_no), count: Number(pl.count || 0), items: arr(pl.items) };
+  });
+  const pathAliasedTotal = pathAliasedRows.reduce((s, r) => s + r.count, 0);
   // D34 回溯探针：patch 只在新会话才有，老会话要看「本来会不会被丢」得从原始数据复算。
   // 判据：world_state 里 `op='introduce'` 且声明 person 的行，其 name 若在卡里是**非人物**
   // 条目 → 修复后该条目会被升级；修复前它的 person 运行态会被 concept 白名单吃掉。
@@ -3161,6 +3172,10 @@ try {
   {
     const reasonStr = Object.entries(rejectedChangeByReason)
       .sort((a, b) => b[1] - a[1]).map(([k, n]) => `${k}×${n}`).join('、');
+    // 归一留痕与拒写并排给出（口径见上）：只报 rejected 会漏掉「同一条噪声其实被吸收了」。
+    const aliasStr = pathAliasedTotal > 0
+      ? `｜另有 ${pathAliasedTotal} 条按 player 真实字段归一后落库（${pathAliasedRows.length} 拍，patch kind='path_aliased'）`
+      : '';
     add(
       'rejected_change_visible',
       '越界变更必须留痕，不许静默丢弃（D35）',
@@ -3170,9 +3185,11 @@ try {
           '｜' + rejectedChangeRows.flatMap((r) => r.items).slice(0, 6)
             .map((i) => `t${i.turn_no || '?'} ${i.reason} ${i.entity_id || '?'}/${i.path || '?'}`).join('，') +
           '｜它们不会写进 world_state、不进 rejected_delta——拒写本身正确，' +
-          '但若原因集中在 path_not_allowed，说明史官在按错误的白名单写（提示词或卡里类型判错）'
+          '但若原因集中在 path_not_allowed，说明史官在按错误的白名单写（提示词或卡里类型判错）' +
+          aliasStr
         : '本局 0 条｜本局没有 changes 提案在 sanitizeChange 阶段被拒；' +
-          '注意老会话（D35 之前）这条通道完全无痕，0 不等于没有越界提案'
+          '注意老会话（D35 之前）这条通道完全无痕，0 不等于没有越界提案' +
+          aliasStr
     );
   }
 
