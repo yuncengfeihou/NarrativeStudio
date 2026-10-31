@@ -723,6 +723,14 @@ export async function runLibrarian({ session, question, signal }) {
 
   let calls = 0;
   for (let round = 0; round < 4; round++) {
+    // 工具预算用完时，必须在调用**之前**把这个事实说清：旧实现把这句话推在调用之后，
+    // 永远发不出去——模型照常吐工具调用，被静默丢弃后才落到「检索超时」。
+    if (calls >= 3) {
+      messages.push({
+        role: 'user',
+        content: '工具调用已达上限。本轮必须用 {"done":true,"found":...,"answer":...,"citations":[...]} 交答案。',
+      });
+    }
     const res = await chat({
       agent: 'librarian',
       messages,
@@ -748,10 +756,11 @@ export async function runLibrarian({ session, question, signal }) {
 
     const name = str(parsed.action);
     const fn = TOOLS[name];
-    if (!fn || calls >= 3) {
-      messages.push({ role: 'user', content: '工具不存在或已达调用上限。请立即用 {"done":true,...} 交答案。' });
+    if (!fn) {
+      messages.push({ role: 'user', content: '工具不存在。请立即用 {"done":true,...} 交答案。' });
       continue;
     }
+    if (calls >= 3) continue; // 预算已用完（调用前已告知），这一轮的工具调用丢弃
     calls++;
     const result = fn(sessionId, branchId, obj(parsed.args));
     messages.push({

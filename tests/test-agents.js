@@ -721,6 +721,81 @@ console.log('\n=== 8. 提示词白名单与 state-paths 同构 ===');
   eq(personPaths.filter((p) => !pathsFor('person').has(p)), [], '人物白名单同理（含 life_state / psyche.*）');
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 9. runLibrarian：工具循环 / 调用上限 / 超时兜底 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // 资料员是唯一「模型自己决定查几次」的旁路 Agent：最多 3 次工具调用、之后必须交答案。
+  // 单个工具的 SQL 包装由 store 层覆盖，这里测的是**循环与降级**——它一旦不收敛，
+  // 这一拍就没有结论；而把「超时」写成「找到」会让下游把空答案当事实。
+  const { librarianSystemPrompt } = await import('../server/prompts/archivist.js');
+  const ctx = newSession('资料员');
+  const ask = (question = '伍卿的玉佩去哪了？') => pipe.runLibrarian({ session: ctx.session, question });
+
+  // ① 一枪交答案：不调工具，calls=0。
+  await using({ 'fake-librarian': JSON.stringify({
+    done: true, found: true, answer: '在凌玥手里。',
+    citations: [{ turn_no: 3, quote: '她把玉佩收进袖中。' }],
+  }) }, async (fake) => {
+    const r = await ask();
+    eq(fake.count('fake-librarian'), 1, '① 交答案只需一次模型调用');
+    eq(r.calls, 0, '① 没调工具 → calls=0');
+    eq(r.found, true, '① found 透传');
+    eq(r.answer, '在凌玥手里。', '① answer 透传');
+    eq(r.citations, [{ turn_no: 3, quote: '她把玉佩收进袖中。' }], '① citations 透传');
+    const msgs = fake.calls[0].body.messages;
+    eq(msgs[0].content, librarianSystemPrompt(), '① 首条 system 就是 librarianSystemPrompt()');
+    ok(msgs[1].content.includes('伍卿的玉佩去哪了？'), '① 问题进 user 消息');
+  });
+
+  // ② 先调一次工具再交答案：calls=1，工具结果回灌。
+  await using({ 'fake-librarian': (body, nth) => nth === 1
+    ? JSON.stringify({ action: 'get_threads', args: { status: 'open' } })
+    : JSON.stringify({ done: true, found: false, answer: '没有记录。' }) }, async (fake) => {
+    const r = await ask();
+    eq(fake.count('fake-librarian'), 2, '② 一次工具 + 一次交答案 = 两次调用');
+    eq(r.calls, 1, '② calls=1');
+    eq(r.found, false, '② found=false 原样返回（「查了但没找到」也是结论）');
+    const second = fake.calls[1].body.messages;
+    ok(second.some((m) => String(m.content).startsWith('【工具结果 get_threads】')), '② 工具结果以【工具结果】回灌');
+  });
+
+  // ③ 一直不交答案：最多 3 次工具调用，第 4 轮被逼收尾，返回超时兜底。
+  await using({ 'fake-librarian': JSON.stringify({ action: 'get_threads', args: { status: 'all' } }) }, async (fake) => {
+    const r = await ask();
+    eq(fake.count('fake-librarian'), 4, '③ 循环上限 4 轮（模型调用 4 次）');
+    eq(r.calls, 3, '③ 工具最多调 3 次');
+    eq(r.found, false, '③ 超时不冒充「找到了」');
+    eq(r.answer, '检索超时，没有结论。', '③ 超时有确定的兜底文案');
+    const last = fake.calls[3].body.messages;
+    ok(last.some((m) => String(m.content).includes('工具调用已达上限')), '③ 第 4 轮在调用**之前**就要求交答案（旧实现把这句话推在调用之后，永远发不出去）');
+  });
+
+  // ④ 模型编了个不存在的工具：不计数、不崩，逼它重说。
+  await using({ 'fake-librarian': (body, nth) => nth === 1
+    ? JSON.stringify({ action: 'search_everything', args: {} })
+    : JSON.stringify({ done: true, found: false, answer: '无。' }) }, async (fake) => {
+    const r = await ask();
+    eq(r.calls, 0, '④ 不存在的工具不计入调用上限');
+    eq(fake.count('fake-librarian'), 2, '④ 被逼重说一次');
+  });
+
+  // ⑤ citations 清洗：没有 quote 的丢掉，最多 5 条。
+  await using({ 'fake-librarian': JSON.stringify({
+    done: true, found: true, answer: '有。',
+    citations: [
+      { turn_no: 1, quote: '甲' }, { turn_no: 2, quote: '乙' }, { turn_no: 3, quote: '丙' },
+      { turn_no: 4, quote: '丁' }, { turn_no: 5, quote: '戊' }, { turn_no: 6, quote: '己' },
+      { turn_no: 7 },
+    ],
+  }) }, async () => {
+    const r = await ask();
+    eq(r.citations.length, 5, '⑤ 最多 5 条引用');
+    ok(r.citations.every((c) => c.quote && c.quote.length <= 120), '⑤ 每条都有 quote 且截断到 120 字');
+    ok(r.citations.every((c) => Number.isInteger(c.turn_no)), '⑤ turn_no 归一成整数');
+  });
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-agents: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
