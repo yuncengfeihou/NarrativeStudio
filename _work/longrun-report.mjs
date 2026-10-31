@@ -159,6 +159,18 @@ const h = (s) => `\n${'═'.repeat(12)} ${s} ${'═'.repeat(12)}`;
 // 单值百分比（已经是 0..1 的比例）：pct(a, b) 是「a 占 b 的百分比」，
 // 不能把比例当成 a 传进去，否则会显示成 —（分母缺失）。
 const pctv = (r) => (typeof r === 'number' && Number.isFinite(r) ? `${(r * 100).toFixed(1)}%` : '(缺失)');
+// Wilson 95% 区间（小样本比例）。45 拍局的可外泄 offstage 事件只有 20–30 条，
+// 17.9%（5/28）与 33%（8/24）在统计上分不开——判据要说「确实低」还是「样本不够」，
+// 不能拿点估计跟阈值比大小就下结论（同 D7 的教训：判据要带不确定性）。
+const wilson = (hit, n) => {
+  if (!n) return null;
+  const z = 1.96;
+  const p = hit / n;
+  const d = 1 + (z * z) / n;
+  const center = (p + (z * z) / (2 * n)) / d;
+  const half = (z * Math.sqrt((p * (1 - p)) / n + (z * z) / (4 * n * n))) / d;
+  return { lo: Math.max(0, center - half), hi: Math.min(1, center + half) };
+};
 // null/undefined 必须显示成 (缺失) 而不是 0：0 是一个真实的测量值，
 // 用它冒充「没测到」会让「峰值 0 tok」看起来像一次成功的空跑。
 const num = (v) => (v === null || v === undefined || v === '' || !Number.isFinite(Number(v)) ? MISSING : String(Number(v)));
@@ -1907,12 +1919,17 @@ try {
   // 所以同时记一个「按正文拍」的口径（点中 ≥1 个可外泄事件的正文拍数），
   // 两个口径差得远时说明是指标被少数拍放大，不是世界呼吸真的被读了。
   const offstageCitedBodyTurns = new Set();
+  // 机会窗口：写在世界线最后一拍的事件没有「后文」可被引用，不该进分母。
+  // 这是本判据唯一的结构性缺陷（其余是样本量），所以单独计数并在 detail 里写明。
+  const offstageLastTurn = narr.length ? Number(narr[narr.length - 1].turn_no) : 0;
+  let offstageOpp = 0;
   for (const p of offstageRows) {
     const pl = safeJson(p.payload_json);
     const names = [].concat(pl.who ?? []).map(String).filter(Boolean);
     const visible = pl.visibility === 'rumor' || pl.visibility === 'public';
     if (visible) offstageVisible += 1;
     else offstageHidden += 1;
+    if (visible && Number(p.turn_no) < offstageLastTurn) offstageOpp += 1;
     const hitTurn = visible && names.length
       ? narr.find((t) => Number(t.turn_no) > Number(p.turn_no) && names.some((w) => String(t.content || '').includes(w)))?.turn_no ?? null
       : null;
@@ -2471,6 +2488,10 @@ try {
       total: offstageRows.length, cited: offstageCited,
       rate: offstageRows.length ? offstageCited / offstageRows.length : null,
       visible: offstageVisible, hidden: offstageHidden,
+      // 可测分母 = 可外泄且写完之后还有后文的事件；rate_testable 是判据实际用的口径。
+      testable: offstageOpp,
+      rate_testable: offstageOpp ? offstageCited / offstageOpp : null,
+      ci95: offstageOpp ? wilson(offstageCited, offstageOpp) : null,
       cited_body_turns: offstageCitedBodyTurns.size,
       detail: offstageDetail,
     },
@@ -2522,6 +2543,7 @@ try {
   }
   console.log(`重复开头     ${dupOpenings.length ? dupOpenings.map(([head, n]) => `${n}×「${clip(head, 20)}」`).join(' · ') : '无'}`);
   console.log(`场外引用     ${offstageRows.length} 条（可进提示词 ${offstageVisible} / hidden ${offstageHidden}）｜被后文点名 ${offstageCited}（${pct(offstageCited, offstageVisible)} of visible）` +
+    `｜可测 ${offstageOpp} 条（去掉写在最后一拍的）→ ${pct(offstageCited, offstageOpp)}` +
     `｜按正文拍 ${offstageCitedBodyTurns.size}/${narr.length}（${pct(offstageCitedBodyTurns.size, narr.length)}）` +
     (offstageDetail.length ? '｜' + offstageDetail.slice(0, 6).map((o) => `t${o.turn_no}:${o.who.join('/') || '?'}${o.cited_at ? '✓' : '✗'}`).join(' ') : ''));
   console.log(`校勘         ${contRows.length} 条（major ${contMajor.length}｜contradiction+state_jump ${contMajorAbsorb.length} 条挂 open ${contMajorAbsorbOpen.length}｜其余 kind major ${contMajorOther.length} 条挂 open ${contMajorOtherOpen.length}｜minor ${contMinor.length}）` +
@@ -3693,25 +3715,38 @@ try {
   );
 
   // 7.10 场外事件引用率
-  // 分母只算 rumor/public（hidden 按设计永不进提示词，见上方口径修正）。
+  // 分母只算 rumor/public 且**写完之后还有后文**的事件（hidden 按设计永不进提示词；
+  // 最后一拍写的没有机会被引用）。见上方口径修正。
   //
-  // 两个口径同时给：按事件（沿用阈值）与按正文拍（点中 ≥1 个可外泄事件的正文拍）。
-  // 前者会被单拍放大——一条正文拍一次点名 5 个事件就贡献 5，长跑实测见过
-  // 63.2%(事件) vs 11.1%(正文拍) 的差，读起来像「世界呼吸被读了一半」，实际是
-  // 结尾两拍把几个名字一起写进去了。差得远时明写在 detail 里，别让人只看前一个数。
+  // 判据用 Wilson 95% 区间而不是点估计：可测样本只有 20–30 条，5/28（17.9%）与
+  // 8/24（33%）的差别可能是噪声。**区间上界仍低于阈值**才算「确实读得少」；
+  // 点估计低但区间跨过阈值时记 PASS 并在 detail 里注明「样本不足以下结论」。
+  // 同时给「按正文拍」口径（点中 ≥1 个可外泄事件的正文拍数）作 INFO：
+  // 它回答的是「引用面有多宽」，不是「事件有没有被读」，两者差得远不是缺陷。
   const offRate = offstageVisible ? offstageCited / offstageVisible : null;
+  const offOppRate = offstageOpp ? offstageCited / offstageOpp : null;
   const offTurnRate = narr.length ? offstageCitedBodyTurns.size / narr.length : null;
+  const offCi = offOppRate === null ? null : wilson(offstageCited, offstageOpp);
+  const offBelow = offCi !== null && offCi.hi < TH.OFFSTAGE_CITE_MIN;
   const offInflation = offRate !== null && offTurnRate !== null && offTurnRate > 0 && offRate >= offTurnRate * 2;
   add(
     'offstage_cited',
     `场外事件（rumor/public）被后文点名 ≥ ${(TH.OFFSTAGE_CITE_MIN * 100).toFixed(0)}%`,
-    offRate === null ? 'WARN' : offRate >= TH.OFFSTAGE_CITE_MIN ? 'PASS' : 'WARN',
-    offRate === null
-      ? '没有可进提示词的 offstage_event'
-      : `${offstageCited}/${offstageVisible}（${pct(offstageCited, offstageVisible)}）` +
+    offOppRate === null ? 'WARN' : offBelow ? 'WARN' : 'PASS',
+    offOppRate === null
+      ? (offstageVisible > 0
+        ? `可外泄 ${offstageVisible} 条，但都写在世界线最后一拍，没有后文可引用`
+        : '没有可进提示词的 offstage_event')
+      : `${offstageCited}/${offstageOpp}（${pct(offstageCited, offstageOpp)}｜95% 区间 ${pctv(offCi.lo)}–${pctv(offCi.hi)}）` +
         `｜按正文拍 ${offstageCitedBodyTurns.size}/${narr.length}（${pct(offstageCitedBodyTurns.size, narr.length)}）` +
-        (offInflation ? ' ⚠ 两个口径差 ≥2×：是少数拍一次点名多个事件放大的，不是引用面真的这么宽' : '') +
-        `｜另 hidden ${offstageHidden} 条按设计永不外泄，不计入`
+        (offBelow
+          ? ' ⚠ 区间上界仍在阈值下：确实读得少，不是样本问题'
+          : offOppRate < TH.OFFSTAGE_CITE_MIN
+            ? ' ｜点估计低于阈值但样本不足以下结论'
+            : '') +
+        (offInflation ? '｜两个口径差 ≥2×：是少数拍一次点名多个事件放大的' : '') +
+        (offstageVisible > offstageOpp ? `｜另 ${offstageVisible - offstageOpp} 条写在最后一拍，无后文` : '') +
+        `｜另 hidden ${offstageHidden} 条按设计永不外泄`
   );
 
   const tally = { PASS: 0, WARN: 0, FAIL: 0 };
