@@ -902,6 +902,135 @@ console.log('\n=== 10. 回放校验：把上一拍整段重演时同等级重写
   }
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 11. 定点改稿的片段模式：模型只写片段，拼接与重跑记忆是确定性的 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  const { cleanFragment, composeFragmentGuidance, spliceFragment, MAX_FRAGMENT_CHARS }
+    = await import('../server/agents/fragment.js');
+
+  // ① 包装清洗：模型爱加的代码块 / 前缀 / 外层引号要剥掉，正文内部的对白引号必须保留。
+  eq(cleanFragment('```\n他推门进来，灯火一晃。\n```'), '他推门进来，灯火一晃。', '① 剥掉代码块围栏');
+  eq(cleanFragment('改写：他推门进来，灯火一晃。'), '他推门进来，灯火一晃。', '① 剥掉「改写：」前缀');
+  eq(cleanFragment('「他推门进来，灯火一晃。」'), '他推门进来，灯火一晃。', '① 剥掉把整段包住的外层引号');
+  eq(cleanFragment('他说：「别动。」'), '他说：「别动。」', '① 正文内部的对白引号原样保留（只剥最外层）');
+  eq(cleanFragment('   '), '', '① 空白片段洗成空串 → 后面会被拒写');
+
+  // ② 拼接：范围外一个字节都不动，这是片段模式存在的唯一理由。
+  const BEFORE = '他推门进来，灯影一晃。他把伞靠在门边，雨水顺着伞骨滴在青砖上。';
+  // 定位由前端给（选中的字符偏移 + 原文快照）；测试里用 indexOf 算，别手数汉字。
+  const targetStart = BEFORE.indexOf('灯影');
+  const TARGET = { start: targetStart, end: targetStart + 2, expect: '灯影' };
+  const spliced = spliceFragment({ before: BEFORE, target: TARGET, piece: '灯火' });
+  eq(spliced.ok, true, '② 合法片段可以拼接');
+  eq(spliced.text, '他推门进来，灯火一晃。他把伞靠在门边，雨水顺着伞骨滴在青砖上。',
+    '② 只有 target 圈住的两个字被替换，其余逐字不变');
+  eq(spliced.piece, '灯火', '② 返回清洗后的片段（前端要展示它）');
+  eq(spliceFragment({ before: BEFORE, target: TARGET, piece: '   ' }).error, 'empty_fragment', '② 空片段拒写');
+  eq(spliceFragment({ before: BEFORE, target: TARGET, piece: '灯影' }).error, 'unchanged', '② 与原文相同拒写');
+  eq(spliceFragment({ before: BEFORE, target: TARGET, piece: '灯'.repeat(MAX_FRAGMENT_CHARS + 1) }).error,
+    'fragment_too_long', '② 超长片段拒写（一次只改一屏以内）');
+  eq(spliceFragment({ before: BEFORE, target: null, piece: '灯火' }).error, 'no_target', '② 没有定位信息拒写');
+
+  // ③ 送模指令只写这种写法特有的要求：不重写整段、只给那一小段。
+  const guidance = composeFragmentGuidance({ target: TARGET, instruction: '把「灯影」改成「灯火」' });
+  ok(guidance.includes('【待改片段】灯影'), '③ 指令里带原文片段（模型才知道在改哪句）');
+  ok(guidance.includes('把「灯影」改成「灯火」'), '③ 作者的要求原样带上');
+  ok(!/JSON|schema|patch/i.test(guidance), '③ 不让旁白输出结构化内容（红线 8）');
+
+  const { config } = await import('../server/config.js');
+  const prevWorldTick = config.context.worldTickEvery;
+  const prevSceneEvery = config.context.sceneEvery;
+  config.context.worldTickEvery = 0;
+  config.context.sceneEvery = 0;
+  const handlers = {
+    'fake-narrator': () => ({ content: '灯火' }),
+    'fake-archivist': () => JSON.stringify({
+      scene_change: { changed: false },
+      assertions: [{ subject: '凌玥', predicate: '知道', object: '玉佩在桌上' }],
+    }),
+    'fake-scene-keeper': () => JSON.stringify({
+      question: '他在等什么', outcome: '他等着天亮', key_detail: '伞立在门边',
+      threads: [], hooks: [], life_changes: [],
+    }),
+    'fake-world-tick': () => JSON.stringify({ events: [] }),
+    'fake-continuity': () => '{"issues":[],"healthy":[]}',
+    'fake-retrieval': () => '{"codex":[],"history":[]}',
+  };
+  try {
+    // ④ 片段模式：模型只写「灯火」，落库的是拼好的全文。
+    {
+      const ctx = newSession('片段改稿');
+      const events = [];
+      await using(handlers, async (fake) => {
+        await orch.runTurn({
+          sessionId: ctx.session.id,
+          playerText: '我推门进去。',
+          generateBranches: false,
+          fragment: { ...TARGET, before: BEFORE },
+          onEvent: (e) => events.push(e),
+        });
+        eq(fake.count('fake-narrator'), 1, '④ 只调一次旁白');
+        const sent = fake.calls.find((c) => c.model === 'fake-narrator');
+        const flat = JSON.stringify(sent?.body?.messages || []);
+        ok(flat.includes('【待改片段】灯影'), '④ 片段指令真的进了送模消息（走既有 guidance 通道）');
+      });
+      const row = store.getTurn(ctx.session.id, 1, 'narrator');
+      eq(row.content, '他推门进来，灯火一晃。他把伞靠在门边，雨水顺着伞骨滴在青砖上。',
+        '④ 落库的是拼接后的全文，不是模型只写的那两个字');
+      ok(events.some((e) => e.type === 'rewrite_fragment' && e.piece === '灯火'),
+        '④ SSE 把片段与前后字数回给前端（要能展示「只改了这两个字」）');
+      eq(store.getAssertions(ctx.session.id, { branchId: 'main' }).length, 1,
+        '④ 记忆照常重建（拼接后的正文进了史官）');
+    }
+
+    // ⑤ 只重跑记忆：正文不进模型，史官照跑。手工改完正文用它补记忆。
+    {
+      const ctx = newSession('重跑记忆');
+      await using(handlers, async (fake) => {
+        await orch.runTurn({
+          sessionId: ctx.session.id,
+          playerText: '我推门进去。',
+          generateBranches: false,
+          narrativeOverride: '他把伞立在门边，转身看着我。',
+        });
+        eq(fake.count('fake-narrator'), 0, '⑤ 不调旁白（正文由作者定稿）');
+        eq(fake.count('fake-archivist'), 1, '⑤ 史官照跑');
+      });
+      eq(store.getTurn(ctx.session.id, 1, 'narrator').content, '他把伞立在门边，转身看着我。',
+        '⑤ 落库的正文就是作者给的那一段（不重新演绎）');
+      eq(store.getAssertions(ctx.session.id, { branchId: 'main' }).length, 1, '⑤ 记忆真的重建了');
+    }
+
+    // ⑥ 片段拼接失败 = 拒写：这一拍一行都不落库，玩家那句话还能重发。
+    {
+      const ctx = newSession('片段拒写');
+      const events = [];
+      // 模型原样吐回「灯影」→ 拼接结果与原文相同 → unchanged → 拒写。
+      await using({ ...handlers, 'fake-narrator': () => ({ content: '灯影' }) }, async () => {
+        let threw = null;
+        try {
+          await orch.runTurn({
+            sessionId: ctx.session.id,
+            playerText: '我推门进去。',
+            generateBranches: false,
+            fragment: { ...TARGET, before: BEFORE },
+            onEvent: (e) => events.push(e),
+          });
+        } catch (err) { threw = err; }
+        ok(!!threw, '⑥ 拼接失败要抛错（不静默落一版坏正文）');
+      });
+      eq(store.getTurnsForBranch(ctx.session.id, 'main', null, { from: 1, to: 9 }).length, 0,
+        '⑥ 一个字都没落库（半截正文比失败更坏）');
+      ok(events.some((e) => e.type === 'error' && e.not_persisted),
+        '⑥ error 事件带 not_persisted，前端才能把玩家行动还回输入框');
+    }
+  } finally {
+    config.context.worldTickEvery = prevWorldTick;
+    config.context.sceneEvery = prevSceneEvery;
+  }
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-agents: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);

@@ -174,6 +174,51 @@ export default {
     }, { passive: true });
 
     /* =====================================================================
+     * 选中正文 → 改写这一段（S2 片段模式）
+     * 定位由前端给：选中文字 + 它在原文里唯一出现的位置。服务端再逐字核对一遍快照。
+     * ===================================================================== */
+    const fragBtn = el('button.frag-rewrite', { type: 'button', title: '只改写选中的这一段' }, '改写这段');
+    fragBtn.hidden = true;
+    view.appendChild(fragBtn);
+    let fragPick = null;
+    const clearFrag = () => { fragBtn.hidden = true; fragPick = null; };
+
+    scroll.addEventListener('mouseup', () => {
+      // 等浏览器把选区定下来（mouseup 时 selection 有时还没更新）
+      setTimeout(() => {
+        const sel = window.getSelection();
+        const text = String(sel && sel.rangeCount ? sel.toString() : '').trim();
+        if (!text || text.length < 2) return clearFrag();
+        const range = sel.getRangeAt(0);
+        const startEl = range.startContainer.nodeType === 1
+          ? range.startContainer
+          : range.startContainer.parentElement;
+        const prose = startEl && startEl.closest ? startEl.closest('.prose') : null;
+        const narr = prose && prose.closest ? prose.closest('.narr') : null;
+        const turnNo = Number(narr?.dataset?.turn || 0);
+        if (!prose || !turnNo) return clearFrag();
+        const row = (detail?.turns || []).find((t) => t.turn_no === turnNo && t.kind === 'narrator');
+        const src = String(row?.content || '');
+        const at = src.indexOf(text);
+        if (at < 0) { clearFrag(); return toast('这一段在原文里定位不到（可能是渲染差异），换一小段再试', { type: 'error' }); }
+        if (src.indexOf(text, at + 1) !== -1) {
+          clearFrag();
+          return toast('这段文字在原文里出现了多次，请多选几个字', { type: 'error' });
+        }
+        const rect = range.getBoundingClientRect();
+        fragBtn.style.left = `${Math.max(12, Math.min(rect.left, window.innerWidth - 120))}px`;
+        fragBtn.style.top = `${Math.max(12, rect.top - 38)}px`;
+        fragBtn.hidden = false;
+        fragPick = { turnNo, target: { start: at, end: at + text.length, expect: text } };
+      }, 0);
+    });
+    fragBtn.addEventListener('click', () => {
+      const pick = fragPick;
+      clearFrag();
+      if (pick) openFragmentRewrite(pick);
+    });
+
+    /* =====================================================================
      * 载入
      * ===================================================================== */
     showLoading();
@@ -325,6 +370,9 @@ export default {
       const { label = '旁白', usage = null, host = null, noUsage = false } = opts;
       const target = host || scroll.querySelector('.play-body');
       const node = el('div.narr');
+      // 选中正文改写要用它反查回合：DOM 里是渲染后的 markdown，字符偏移不能直接用，
+      // 靠「选中文字在原文里唯一出现」定位（见 fragPick）。
+      if (turnNo) node.dataset.turn = String(turnNo);
 
       node.appendChild(el('div.narr-head', {}, narratorGlyph(), el('span.narr-label', {}, label)));
 
@@ -1090,8 +1138,100 @@ export default {
       }
     }
 
-    async function editTurn(turnNo, kind, text) {
-      const ta = el('textarea.field', { rows: 8 });
+    /* ---------------------------------------------------------------
+     * 片段改写：模型只写选中的那一小段，正文由服务端确定性拼接。
+     * 与「重写」的区别：重写是整拍重新演绎，这里是「只换这一段，其余逐字不动」。
+     * --------------------------------------------------------------- */
+    function openFragmentRewrite({ turnNo, target }) {
+      if (streaming) return toast('正在演绎中');
+      const ta = el('textarea.field', {
+        rows: 3,
+        placeholder: '要让这一段变成什么？（可留空，只让模型按上文重写这一段）',
+      });
+      openSheet({
+        title: `改写第 ${turnNo} 轮的一段（${target.expect.length} 字）`,
+        confirmText: '改写这一段',
+        render(body) {
+          body.appendChild(el('div', {},
+            el('div.frag-quote', {}, target.expect),
+            ta,
+            el('div.field-hint', {},
+              '只重写选中的这一小段，其余正文逐字不动；记忆会按新正文重跑。'),
+          ));
+          setTimeout(() => ta.focus(), 200);
+        },
+        async onConfirm() {
+          runFragmentRewrite(turnNo, target, ta.value.trim());
+          return true;
+        },
+      });
+    }
+
+    async function runFragmentRewrite(turnNo, target, instruction) {
+      if (streaming) return;
+      streaming = true;
+      abortCtl = new AbortController();
+      paintSend();
+      const pending = el('div.gen-pending', {},
+        el('span.typing-dots', {}, el('i'), el('i'), el('i')),
+        el('span', {}, '改写这一段中'),
+      );
+      const host = scroll.querySelector('.play-body');
+      host.insertBefore(pending, branchHost);
+      try {
+        await api.rewriteFragment(sessionId, turnNo, { target, instruction }, {
+          signal: abortCtl.signal,
+          onEvent: () => {},
+        });
+        pending.remove();
+        detail = await api.getSession(sessionId);
+        renderTurns();
+        updateSub();
+        paintRing();
+        toast('已改写这一段（记忆已按新正文重跑）', { type: 'success' });
+      } catch (err) {
+        pending.remove();
+        if (err?.name !== 'AbortError') toast(err.message || '改写失败', { type: 'error' });
+      } finally {
+        streaming = false;
+        abortCtl = null;
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
+        paintSend();
+      }
+    }
+
+    /** 正文手改过之后，按新正文重跑这一拍的记忆（不重新演绎、不改字）。 */
+    async function rebuildMemory(turnNo) {
+      if (streaming) return toast('正在演绎中');
+      if (!turnNo) return toast('无法定位该轮');
+      streaming = true;
+      abortCtl = new AbortController();
+      paintSend();
+      const pending = el('div.gen-pending', {},
+        el('span.typing-dots', {}, el('i'), el('i'), el('i')),
+        el('span', {}, '重跑这一拍记忆'),
+      );
+      const host = scroll.querySelector('.play-body');
+      host.insertBefore(pending, branchHost);
+      try {
+        await api.rebuildMemory(sessionId, turnNo, { signal: abortCtl.signal, onEvent: () => {} });
+        pending.remove();
+        detail = await api.getSession(sessionId);
+        renderTurns();
+        updateSub();
+        toast('记忆已按当前正文重跑', { type: 'success' });
+      } catch (err) {
+        pending.remove();
+        if (err?.name !== 'AbortError') toast(err.message || '重跑记忆失败', { type: 'error' });
+      } finally {
+        streaming = false;
+        abortCtl = null;
+        scroll.querySelectorAll('.gen-pending').forEach((n) => n.remove());
+        paintSend();
+      }
+    }
+
+    async function editTurn(turnNo, kind, text) {      const ta = el('textarea.field', { rows: 8 });
       ta.value = text;
       openSheet({
         title: `编辑第 ${turnNo} 轮 · ${kind === 'player' ? '你的行动' : '旁白'}`,
@@ -1112,6 +1252,16 @@ export default {
           } catch (err) {
             toast(err.message, { type: 'error' });
             return false;
+          }
+          // 改字不会自动重跑记忆（红线 4 的唯一例外就是这么定的）。缺的那一半在这里补：
+          // 不重跑 = 正文和账本长期不一致，后面的旁白会按旧记忆演。
+          if (kind === 'narrator') {
+            const redo = await confirmDialog({
+              title: '按新正文重跑记忆？',
+              message: '会从这一拍之前开一条新分支，用当前正文重跑史官与场记（不重新演绎正文）。',
+              confirmText: '重跑记忆',
+            });
+            if (redo) rebuildMemory(turnNo);
           }
           return true;
         },

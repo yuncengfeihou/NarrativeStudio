@@ -768,3 +768,34 @@
   .narr { padding: 12px 14px 8px; border-radius: var(--r-lg); }
   .turn-mark { margin: 22px 0 10px; }
 }
+
+/* 选中正文后浮出的「改写这段」：定位由选区 rect 算，只覆盖在正文上方一小块 */
+.frag-rewrite {
+  position: fixed;
+  z-index: 60;
+  padding: 6px 12px;
+  border-radius: 999px;
+  border: 1px solid var(--line-strong);
+  background: var(--bg-elev);
+  color: var(--fg);
+  font-size: 12.5px;
+  cursor: pointer;
+  box-shadow: var(--shadow-md);
+}
+.frag-rewrite[hidden] { display: none; }
+.frag-rewrite:hover { background: var(--bg-hover); }
+
+/* 改写抽屉里回显选中的原文片段 */
+.frag-quote {
+  margin: 0 0 10px;
+  padding: 8px 10px;
+  border-left: 2px solid var(--accent);
+  background: var(--bg-sunken);
+  border-radius: 0 var(--r-sm) var(--r-sm) 0;
+  font-size: 13px;
+  line-height: 1.7;
+  color: var(--fg-dim);
+  white-space: pre-wrap;
+  max-height: 160px;
+  overflow: auto;
+}

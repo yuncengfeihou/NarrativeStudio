@@ -467,6 +467,16 @@ export const api = {
     return runStream(`/api/sessions/${encodeURIComponent(id)}/rewrite`, body, handlers);
   },
 
+  /** POST /api/sessions/:id/turns/:turnNo/rewrite-fragment -> SSE（只改圈住的那一段） */
+  rewriteFragment(id, turnNo, body = {}, handlers = {}) {
+    return runStream(`/api/sessions/${encodeURIComponent(id)}/turns/${turnNo}/rewrite-fragment`, body, handlers);
+  },
+
+  /** POST /api/sessions/:id/turns/:turnNo/rebuild-memory -> SSE（正文不动，只重跑记忆） */
+  rebuildMemory(id, turnNo, handlers = {}) {
+    return runStream(`/api/sessions/${encodeURIComponent(id)}/turns/${turnNo}/rebuild-memory`, {}, handlers);
+  },
+
   /* ---------------- 预设种子 ---------------- */
 
   listPresets(signal) {

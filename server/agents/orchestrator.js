@@ -86,6 +86,9 @@ export async function runTurn(opts) {
 async function runTurnInner({
   sessionId, playerText = '', images = null, branchChoice = null,
   generateBranches = true, isOpening = false, options = {}, onEvent = () => {}, signal = null,
+  // 定点改稿（S2）的两个入口：`narrativeOverride` = 正文已由作者定好，只重跑记忆；
+  // `fragment` = 模型只写替换片段，这里做确定性拼接。两者都不再调 narrator 写整段。
+  narrativeOverride = null, fragment = null,
 }) {
   const emit = (evt) => { try { onEvent(evt); } catch { /* 监听器错误不影响管线 */ } };
 
@@ -113,6 +116,7 @@ async function runTurnInner({
   const { runNarrator } = await import('./narrator.js');
   const { resolveNarrationMode, runNarratorSegmented } = await import('./narrator-loop.js');
   const { buildDeclaredTargets, runArchivist } = await import('./archivist.js');
+  const { composeFragmentGuidance, spliceFragment } = await import('./fragment.js');
   const { runBranchAgent } = await import('./branch.js');
   const { closeScene, detectSceneChange, runContinuity, runWorldTick } = await import('./memory-pipeline.js');
 
@@ -246,6 +250,13 @@ async function runTurnInner({
 
   // 3) 演绎
   const narratorOptions = { ...options, guidance: options.narrator?.guidance };
+  // 片段模式：让模型只写替换片段（走既有 guidance 通道，不新增注入点）。
+  if (fragment) {
+    narratorOptions.guidance = [
+      narratorOptions.guidance,
+      composeFragmentGuidance({ target: fragment, instruction: fragment.instruction }),
+    ].filter(Boolean).join('\n');
+  }
   const runSingleNarrator = () => runNarrator({
     session, world: effectiveWorld, context, turnNo,
     options: narratorOptions,
@@ -294,8 +305,11 @@ async function runTurnInner({
     }));
   } catch { /* 归因失败不影响回合 */ }
 
+  // 「只重跑记忆」：正文不进模型，直接当这一拍的产出（作者已经定稿）。
+  const fixedNarrative = typeof narrativeOverride === 'string' ? narrativeOverride : null;
   let narrator;
-  for (let attempt = 1; ; attempt++) {
+  if (fixedNarrative !== null) narrator = { content: fixedNarrative, usage: null, finishReason: 'reuse' };
+  for (let attempt = 1; !narrator; attempt++) {
     try {
       narrator = await runNarration();
       // 空正文：上游偶发只产出 reasoning、content 为空 → 关闭推理重试一次。
@@ -314,7 +328,7 @@ async function runTurnInner({
               // 预算与推理等级是同一件事的两端，只动能变的那一端。
               maxTokens: Math.max(resolveAgent('narrator').maxTokens, 8000),
               guidance: [
-                options.narrator?.guidance,
+                narratorOptions.guidance,
                 '上一轮只输出了思考而没有任何正文。这次请直接输出剧情正文，不要输出思考过程。',
               ].filter(Boolean).join('\n'),
             },
@@ -376,6 +390,36 @@ async function runTurnInner({
     }
   }
 
+  // 片段模式：模型只写了替换片段，正文由代码拼接（范围外的文字一个字节都不动）。
+  // 拼接失败 = 拒写，这一拍不落库（比落一版「模型自作主张的整段重写」好）。
+  if (fragment && fixedNarrative === null) {
+    const spliced = spliceFragment({ before: fragment.before, target: fragment, piece: narrator.content });
+    if (!spliced.ok) {
+      emit({
+        type: 'error',
+        message: `片段改写失败（${spliced.error}），这一拍没有改动`,
+        turn_no: turnNo,
+        not_persisted: true,
+        empty_narration: true,
+        retryable: true,
+      });
+      throw new Error(`片段改写失败：${spliced.error}`);
+    }
+    emit({
+      type: 'rewrite_fragment',
+      turn_no: turnNo,
+      piece: spliced.piece,
+      before_chars: String(fragment.before || '').length,
+      after_chars: spliced.text.length,
+      delta: spliced.delta,
+    });
+    narrator = {
+      ...narrator,
+      content: spliced.text,
+      narration: { ...(narrator.narration || {}), fragment: true },
+    };
+  }
+
   let narrative = narrator.content || '';
   let narratorUsage = narrator.usage || null;
 
@@ -406,6 +450,8 @@ async function runTurnInner({
   // 命中 → 用 **narrator 既有的 guidance 通道**同等级重写一次（不新增注入点、不降推理等级）；
   // 重写仍照搬就取「照搬更少」的那一版并如实记 patch，绝不静默改写正文。
   let replayInfo = null;
+  // 作者定稿或片段拼接的正文不参与回放校验：那不是「模型回放」，改了也不该被重写。
+  if (!fixedNarrative && !fragment)
   try {
     const recentNarrators = getRecentTurnsForBranch(
       sessionId, branchId, branch?.fork_turn ?? null, REPLAY_WINDOW_TURNS + 1,

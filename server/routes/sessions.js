@@ -420,6 +420,116 @@ sessionsRouter.post('/sessions/:id/rewrite', async (req, res) => {
   }
 });
 
+/**
+ * POST /api/sessions/:id/turns/:turnNo/rewrite-fragment
+ *
+ * 定点改稿的**片段模式**（S2）：模型只写替换片段，正文由代码确定性拼接。
+ * 与 `/rewrite` 的区别只在「模型写多少」：`/rewrite` 让模型重写整段（可能顺带改范围外），
+ * 这里只让它写 `target` 圈住的那一小段，范围外一个字节都不动。
+ *
+ * body：`{ target: {start, end, expect}, instruction? }`。`target` 必填，服务端逐字核对
+ * 原文快照（不符 409 让用户重选）。拼接失败（空片段 / 超长 / 与原文相同）= 拒写，这一拍不落库。
+ * 仍然从 `turnNo - 1` 开新分支：`turns` 只追加（红线 4/6）。
+ */
+sessionsRouter.post('/sessions/:id/turns/:turnNo/rewrite-fragment', async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const turnNo = Number(req.params.turnNo);
+  if (!Number.isInteger(turnNo) || turnNo < 1) {
+    return res.status(400).json({ error: { message: 'turn_no must be a positive integer' } });
+  }
+  const parsedTarget = parseRewriteTarget(req.body?.target);
+  if (!parsedTarget.ok) return res.status(400).json({ error: { message: parsedTarget.error } });
+  const target = parsedTarget.target;
+  if (!target) return res.status(400).json({ error: { message: 'target required' } });
+
+  const playerRow = getTurn(session.id, turnNo, 'player');
+  const narratorRow = getTurn(session.id, turnNo, 'narrator');
+  if (!narratorRow) return res.status(404).json({ error: { message: 'turn not found' } });
+  const check = checkRewriteTarget({ content: narratorRow.content || '', target });
+  if (!check.ok) {
+    return res.status(409).json({
+      error: { message: '正文已变，请重新选择要改的段落', code: check.code },
+    });
+  }
+
+  sseHead(res);
+  const send = (evt) => { if (!res.writableEnded) res.write(`data: ${JSON.stringify(evt)}\n\n`); };
+  const heartbeat = setInterval(() => send({ type: 'ping' }), 15000);
+  const aborter = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
+
+  try {
+    const fork = await forkSessionSafe({ sessionId: session.id, toTurn: turnNo - 1, note: `改写第 ${turnNo} 轮的片段` });
+    send({ type: 'fork', branch: fork.branch_id, fork_turn: fork.fork_turn });
+    await runTurn({
+      sessionId: session.id,
+      playerText: playerRow?.content || '',
+      images: playerRow?.images || null,
+      branchChoice: playerRow?.branch_choice || null,
+      generateBranches: false,
+      fragment: { ...target, before: narratorRow.content || '', instruction: req.body?.instruction || '' },
+      onEvent: send,
+      signal: aborter.signal,
+    });
+  } catch (err) {
+    send({ type: 'error', message: err.message || String(err) });
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
+});
+
+/**
+ * POST /api/sessions/:id/turns/:turnNo/rebuild-memory
+ *
+ * 正文已定稿（作者手改过、或片段拼接完成）时**只重跑记忆**：不调 narrator，直接拿这一拍
+ * 现有的正文跑史官 + 场记判据，写到新分支上。`PATCH /turns/:turnNo` 改字不会重跑记忆，
+ * 这个接口就是补那一半——否则正文和账本会长期不一致。
+ */
+sessionsRouter.post('/sessions/:id/turns/:turnNo/rebuild-memory', async (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const turnNo = Number(req.params.turnNo);
+  if (!Number.isInteger(turnNo) || turnNo < 1) {
+    return res.status(400).json({ error: { message: 'turn_no must be a positive integer' } });
+  }
+  const playerRow = getTurn(session.id, turnNo, 'player');
+  const narratorRow = getTurn(session.id, turnNo, 'narrator');
+  if (!narratorRow) return res.status(404).json({ error: { message: 'turn not found' } });
+
+  sseHead(res);
+  let rebuiltTurnNo = turnNo;
+  const send = (evt) => {
+    if (evt?.type === 'done' && Number(evt.turn_no) > 0) rebuiltTurnNo = Number(evt.turn_no);
+    if (!res.writableEnded) res.write(`data: ${JSON.stringify(evt)}\n\n`);
+  };
+  const heartbeat = setInterval(() => send({ type: 'ping' }), 15000);
+  const aborter = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) aborter.abort(); });
+
+  try {
+    const fork = await forkSessionSafe({ sessionId: session.id, toTurn: turnNo - 1, note: `重跑第 ${turnNo} 轮记忆` });
+    send({ type: 'fork', branch: fork.branch_id, fork_turn: fork.fork_turn });
+    await runTurn({
+      sessionId: session.id,
+      playerText: playerRow?.content || '',
+      images: playerRow?.images || null,
+      branchChoice: playerRow?.branch_choice || null,
+      generateBranches: false,
+      narrativeOverride: narratorRow.content || '',
+      onEvent: send,
+      signal: aborter.signal,
+    });
+    send({ type: 'rebuild_memory', turn_no: rebuiltTurnNo, source_turn: turnNo });
+  } catch (err) {
+    send({ type: 'error', message: err.message || String(err) });
+  } finally {
+    clearInterval(heartbeat);
+    if (!res.writableEnded) res.end();
+  }
+});
+
 /** 回滚 = 开新分支。旧分支标 abandoned，历史不删。 */
 sessionsRouter.post('/sessions/:id/rollback', async (req, res) => {
   const session = getSession(req.params.id);

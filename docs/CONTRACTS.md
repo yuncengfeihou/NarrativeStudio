@@ -948,6 +948,18 @@ assessRewrite({before, after, target}) -> {out_of_range, changed:{from,old_end,n
 // 没给 target 永远 false。越界只报不拦：路由落 patches(kind='rewrite_out_of_range')
 // 并在 SSE 末尾补 {type:'rewrite_check'}，不自动回滚、不重试。
 
+// 定点改稿的**片段模式**（server/agents/fragment.js；S2，2026-10-31）
+// 模型只写替换片段，放哪里由代码定：范围外一个字节都不动，拼接失败 = 拒写（这一拍不落库）。
+MAX_FRAGMENT_CHARS = 4000
+composeFragmentGuidance({target, instruction}) -> string
+// 拼进 narrator 既有的 guidance 通道（不新增注入点）：只输出替换【待改片段】的那一小段。
+cleanFragment(text) -> string
+// 剥掉模型爱加的包装（代码块围栏 / 「改写：」前缀 / 把整段包住的外层引号）。
+// 只剥最外层——正文内部的对白引号原样保留。
+spliceFragment({before, target, piece})
+  -> {ok:true, text, piece, delta} | {ok:false, error:'no_target'|'empty_fragment'|'fragment_too_long'|'unchanged'}
+// before 只被 target 圈定的一段替换成 piece；其余逐字不变。每个 ok:false 都是拒写。
+
 // 历史检索（server/memory/recall-history.js；与 codex_lookup 同构的第五个分段工具）
 // recallHistory({ sessionId, branchId, forkTurn, atTurn, excludeFrom, query, limit, kinds, maxTokens })
 // -> { text, hits:[{turn_no, kind, snippet, token_count}],
@@ -1095,6 +1107,12 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 {type:'world_tick', events}              // 幕后推演
 {type:'continuity', report}              // 校勘
 {type:'branches', branches, scene_summary, stale?}
+{type:'rewrite_fragment', turn_no, piece, before_chars, after_chars, delta}
+// 只在 /turns/:turnNo/rewrite-fragment 出现：piece 是洗干净的替换片段（前端要展示「只改了这几个字」），
+// delta 是拼接后正文的字数变化。正文本身仍以 narrative_done 为准（那是拼好的全文）。
+{type:'rebuild_memory', turn_no, source_turn}
+// 只在 /turns/:turnNo/rebuild-memory 结束时出现：turn_no 是新分支上落库的回合号（全局递增，
+// 可能不等于 source_turn），source_turn 是被重跑记忆的那一拍。
 {type:'rewrite_check', turn_no, out_of_range, changed, outside}
 // 只在 /rewrite 带 target（定点改稿）时出现，在 done 之后：这是**确定性 diff 的结论**，不是模型输出。
 // changed = {from, old_end, new_end}：公共前后缀之差（旧文本被换掉的 [from,old_end)、新文本换上的
@@ -1188,6 +1206,16 @@ POST   /api/sessions/:id/rewrite          -> SSE（自动开新分支）
        // 改完做确定性 diff，越界只报不拦：SSE 末尾补 {type:'rewrite_check'}（见 SSE 协议）+
        // patches(kind='rewrite_out_of_range')。改中间某拍仍然是「从这一拍之前开新分支」，
        // 后面的拍留在旧线（红线 6）；「上一拍修订」= 对最后一拍调同一个接口。
+POST   /api/sessions/:id/turns/:turnNo/rewrite-fragment  -> SSE（片段模式，自动开新分支）
+       body:{target:{start,end,expect}, instruction?}
+       // target 必填（缺了 400，不会退回整段重写）；快照不符 409 text_mismatch。
+       // 模型只写 target 圈住的那一段，服务端用 spliceFragment 确定性拼接；拼接失败
+       // （空片段 / 超长 / 与原文相同）= 拒写并抛错，这一拍一行不落库。
+       // narrative 事件里流的是片段，narrative_done 给的是**拼好的全文**；
+       // 另发 {type:'rewrite_fragment', piece, before_chars, after_chars, delta}。
+POST   /api/sessions/:id/turns/:turnNo/rebuild-memory  -> SSE（正文不动，只重跑记忆）
+       // 不调 narrator：把这一拍现有 narrator 正文当定稿，开新分支后跑史官 + 场记判据。
+       // 补的是「PATCH /turns 改字不重跑记忆」那一半；结束时发 {type:'rebuild_memory', turn_no, source_turn}。
 POST   /api/sessions/:id/rollback         body:{turn_no}   -> 新分支
 GET    /api/sessions/:id/branches         -> {branches, current, turn_count}
        // 每条线带自己的 turn_count（按祖先链算的可见回合数）与 is_current。

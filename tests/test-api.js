@@ -403,6 +403,29 @@ console.log('\n=== 定点改稿的参数校验（不调模型：校验在 SSE �
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 定点改稿 S2：片段改写 / 只重跑记忆 的参数校验 ===');
+{
+  const fragUrl = `/api/sessions/${SESSION_ID}/turns/1/rewrite-fragment`;
+  const noTarget = await req('POST', fragUrl, {});
+  ok(noTarget.status === 400, '片段模式必填 target → 400（不会退回整段重写）');
+  const badShape = await req('POST', fragUrl, { target: { start: 0, end: 2 } });
+  ok(badShape.status === 400, 'target 缺 expect → 400');
+  const badTurnNo = await req('POST', `/api/sessions/${SESSION_ID}/turns/0/rewrite-fragment`,
+    { target: { start: 0, end: 2, expect: '一二' } });
+  ok(badTurnNo.status === 400, 'turnNo 非正整数 → 400');
+  const noTurn = await req('POST', `/api/sessions/${SESSION_ID}/turns/99999/rewrite-fragment`,
+    { target: { start: 0, end: 2, expect: '一二' } });
+  ok(noTurn.status === 404, '回合不存在 → 404（不开流）');
+
+  const rebuildUrl = `/api/sessions/${SESSION_ID}/turns/99999/rebuild-memory`;
+  ok((await req('POST', rebuildUrl, {})).status === 404, '只重跑记忆：回合不存在 → 404');
+  ok((await req('POST', `/api/sessions/${SESSION_ID}/turns/0/rebuild-memory`, {})).status === 400,
+    '只重跑记忆：turnNo 非正整数 → 400');
+  ok((await req('POST', '/api/sessions/nope/rebuild-memory', {})).status === 404,
+    '只重跑记忆：会话不存在 → 404');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 404 与错误 ===');
 {
   ok((await req('GET', '/api/worlds/nope')).status === 404, '未知世界卡 404');
