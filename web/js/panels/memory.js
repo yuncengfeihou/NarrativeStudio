@@ -200,6 +200,23 @@ export async function openMemoryPanel(sessionId, opts = {}) {
           },
         }, '切到这条线'));
       }
+      // 命名 = 存档点：只改 note（给人看的索引），不新建分支、不动回合，所以当前线也能改名。
+      row.appendChild(el('button.mem-branch-name', {
+        type: 'button',
+        title: '给这条世界线起名（存档点名字，最多 60 字）',
+        onclick: async (e) => {
+          e.stopPropagation();
+          const next = window.prompt('给这条世界线起个名字（最多 60 字，留空表示清除）', b.note || '');
+          if (next === null) return;
+          try {
+            await api.renameBranch(sessionId, b.branch_id, next.trim());
+            await refresh();
+            opts.onUpdate?.();
+          } catch (err) {
+            toast(err.message, { type: 'error' });
+          }
+        },
+      }, b.note ? '改名' : '命名'));
       branchList.appendChild(row);
     }
     body.appendChild(branchList);

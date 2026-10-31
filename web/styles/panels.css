@@ -916,6 +916,18 @@
   cursor: pointer;
 }
 .mem-branch-go:hover { border-color: var(--ok); color: var(--ink); }
+/* 命名（存档点名字）：不改状态、只改标签，所以视觉上比「切过去」轻一档。 */
+.mem-branch-name {
+  justify-self: start;
+  padding: 3px 8px;
+  border: 1px dashed var(--line);
+  border-radius: var(--r-sm);
+  background: transparent;
+  color: var(--ink-4);
+  font-size: 11px;
+  cursor: pointer;
+}
+.mem-branch-name:hover { border-color: var(--ink-4); color: var(--ink-2); }
 
 .mem-scene {
   display: grid;

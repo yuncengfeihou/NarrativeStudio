@@ -2035,6 +2035,16 @@ console.log('\n=== D33：切回旧线（checkout）与回合数是派生值 ==='
   eq(store.getBranch(sid, 'main').status, 'active', '切回来的线重新标 active');
   eq(store.getBranch(sid, f.branch_id).status, 'abandoned', '被顶下去的那条线标 abandoned（不删）');
 
+  // 命名存档点：只改 note，不新建分支、不动回合、不改可见回合数。
+  const named = store.renameBranch(sid, f.branch_id, '  雨夜分岔  ');
+  eq(named.note, '雨夜分岔', '改名去首尾空白');
+  eq(named.fork_turn, 4, '改名不动分叉轮次');
+  eq(store.countVisibleTurns(sid, f.branch_id), 5, '改名不影响可见回合数');
+  eq(store.listBranches(sid).length, 2, '改名不新建分支');
+  eq(store.renameBranch(sid, 'no-such-branch', 'x'), null, '不存在的线返回 null（不是静默创建）');
+  eq(store.renameBranch(sid, f.branch_id, '').note, '', '空名字表示清除');
+  eq(store.getBranch(sid, f.branch_id).status, 'abandoned', '改名不改线的状态');
+
   // 再切回去，还能继续写：turn_no 不连续是允许的（分支继承本来就这样）
   const again = store.checkoutBranch(sid, f.branch_id);
   eq(again.switched, true, '可以再切回刚才那条线');

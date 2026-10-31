@@ -1133,6 +1133,7 @@ forkSession({ sessionId, toTurn, note })                            // 回滚 = 
 forkSessionSafe({ sessionId, toTurn, note })                        // 路由必须走：会话锁内 fork
 checkoutBranch({ sessionId, branchId })                             // 切回已有世界线（不新建分支）
 checkoutBranchSafe({ sessionId, branchId })                         // 路由必须走：会话锁内切
+renameBranch(sessionId, branchId, note)                      // 命名存档点：只改 note，不动回合/分支身份；未知线返回 null
 getSessionSnapshot(sessionId) / getMemoryStats(sessionId)   // snapshot 含 playerView（展示层投影）
 recallSession({ sessionId, question }) / auditSession({ sessionId })
 ```
@@ -1289,6 +1290,9 @@ POST   /api/sessions/:id/checkout         body:{branch_id} -> {branch_id, switch
        // 当前线标 abandoned、目标线标 active，sessions.branch_id 跟着换；一条行都不删。
        // 切到自己返回 switched:false 且不改任何状态；未知分支 404。
        // 走 checkoutBranchSafe()＝在会话锁内切，不会和正在跑的回合交错。
+PATCH  /api/sessions/:id/branches/:branchId body:{note} -> {branch_id, note, fork_turn, status}
+       // 命名存档点：只改 branches.note（给人看的索引），不新建分支、不动回合、不改可见回合数。
+       // note 必填（空字符串 = 清除名字），最多 60 字；未知会话/未知线 404，缺 note 或超长 400。
 POST   /api/sessions/:id/canonize         body:{title?, anchor_label?, opening_seed?} -> 新世界卡
 
 GET    /api/sessions/:id/memory           -> 完整统计

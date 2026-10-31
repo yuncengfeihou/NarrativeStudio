@@ -19,7 +19,7 @@ import {
   getBranch, getCharStates, getDb, getMaxTurnNo, getNotes, getScenes, getSession, getState, getThreads,
   getTurnsForBranch, getTurn, getVoices, getWorld, getWorldState, listBranches, listPatches, listSessions,
   countPatches, patchKindCounts, countVoices, getPatch,
-  retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
+  renameBranch, retractAssertion, setPatchStatus, setState, setVoicePinned, updateNote, updateSession,
   updateTurnContent,
 } from '../memory/store.js';
 import { applyPatchAction } from '../memory/patch-apply.js';
@@ -557,6 +557,23 @@ sessionsRouter.get('/sessions/:id/branches', (req, res) => {
     is_current: b.branch_id === current,
   }));
   res.json({ branches, current, turn_count: countVisibleTurns(session.id, current) });
+});
+
+/**
+ * 给一条世界线命名（存档点名字）。
+ *
+ * 只改 `branches.note`：不新建分支、不动回合、不影响可见性——名字是给人看的索引，
+ * 不是身份。空字符串表示清掉名字。
+ */
+sessionsRouter.patch('/sessions/:id/branches/:branchId', (req, res) => {
+  const session = getSession(req.params.id);
+  if (!session) return res.status(404).json({ error: { message: 'session not found' } });
+  const note = typeof req.body?.note === 'string' ? req.body.note.trim() : null;
+  if (note === null) return res.status(400).json({ error: { message: 'note is required' } });
+  if (note.length > 60) return res.status(400).json({ error: { message: 'note 最多 60 字' } });
+  const updated = renameBranch(session.id, String(req.params.branchId || ''), note);
+  if (!updated) return res.status(404).json({ error: { message: 'branch not found' } });
+  res.json({ branch_id: updated.branch_id, note: updated.note, fork_turn: updated.fork_turn, status: updated.status });
 });
 
 /**

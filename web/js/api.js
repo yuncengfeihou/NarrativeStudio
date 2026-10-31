@@ -436,6 +436,12 @@ export const api = {
   getBranches(id, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/branches`, { signal });
   },
+  /** PATCH /api/sessions/:id/branches/:branchId body:{note} -> 给一条世界线起名（改名不新建分支） */
+  renameBranch(id, branchId, note, signal) {
+    return request(`/api/sessions/${encodeURIComponent(id)}/branches/${encodeURIComponent(branchId)}`, {
+      method: 'PATCH', body: { note }, signal,
+    });
+  },
   /** POST /api/sessions/:id/checkout body:{branch_id} -> 切到另一条已有世界线（不新建分支） */
   checkoutBranch(id, branchId, signal) {
     return request(`/api/sessions/${encodeURIComponent(id)}/checkout`, {

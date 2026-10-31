@@ -1140,6 +1140,20 @@ export function listBranches(sessionId) {
 }
 
 /**
+ * 给一条世界线起名（「存档点」的名称）。
+ *
+ * 只改 `note`：分支的身份是 `branch_id + fork_turn`，改名不能改历史、也不能改变可见回合。
+ * 名字为空表示清掉名字（回到默认显示）。返回 null 表示这条线不存在。
+ */
+export function renameBranch(sessionId, branchId, note = '') {
+  const row = getBranch(sessionId, branchId);
+  if (!row) return null;
+  getDb().prepare(`UPDATE branches SET note=? WHERE session_id=? AND branch_id=?`)
+    .run(String(note || '').trim(), sessionId, branchId);
+  return getBranch(sessionId, branchId);
+}
+
+/**
  * 当前分支可见的回合数（按 turn_no 去重，含祖先继承部分）。
  *
  * `sessions.turn_count` 是**缓存**，`touchSession()` 每写一拍就刷新一次；

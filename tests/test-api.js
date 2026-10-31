@@ -362,6 +362,33 @@ console.log('\n=== D33：切回旧线（checkout） ===');
 }
 
 /* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 命名存档点：给世界线起名 ===');
+{
+  const noSession = await req('PATCH', '/api/sessions/nope/branches/main', { note: 'x' });
+  ok(noSession.status === 404, '未知会话 404');
+
+  const missing = await req('PATCH', `/api/sessions/${SESSION_ID}/branches/main`, {});
+  ok(missing.status === 400, '缺 note 返回 400');
+
+  const tooLong = await req('PATCH', `/api/sessions/${SESSION_ID}/branches/main`, { note: 'x'.repeat(61) });
+  ok(tooLong.status === 400, '名字超过 60 字返回 400');
+
+  const badBranch = await req('PATCH', `/api/sessions/${SESSION_ID}/branches/no-such-branch`, { note: 'x' });
+  ok(badBranch.status === 404, '不存在的世界线 404');
+
+  const named = await req('PATCH', `/api/sessions/${SESSION_ID}/branches/main`, { note: '  雨夜分岔  ' });
+  ok(named.status === 200 && named.data.note === '雨夜分岔', '起名成功并去掉首尾空白');
+  ok(named.data.fork_turn === 0, '改名不动分叉轮次');
+
+  const listed = await req('GET', `/api/sessions/${SESSION_ID}/branches`);
+  ok(listed.data.branches.find((b) => b.branch_id === 'main')?.note === '雨夜分岔', '列表里读得到名字');
+
+  const cleared = await req('PATCH', `/api/sessions/${SESSION_ID}/branches/main`, { note: '' });
+  ok(cleared.status === 200 && cleared.data.note === '', '空字符串表示清除名字');
+  ok(cleared.data.status === 'active', '改名不影响线的状态');
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
 console.log('\n=== 历史检索接口 ===');
 {
   const missing = await req('POST', '/api/sessions/nope/recall-history', { query: '雨' });
