@@ -23,10 +23,11 @@ import { branchSnapshot, guardOf, hashFingerprint, isBranchCurrent, makeEffectId
 import { buildPlayerView } from '../memory/player-view.js';
 import { recallHistory } from '../memory/recall-history.js';
 import { recallVisibleFrom } from '../memory/context-engine.js';
+import { detectReplay, REPLAY_WINDOW_TURNS } from '../memory/replay.js';
 import {
   accumulateUsage, addPatch, addTurnPair, checkoutBranch, copyBranchState, countVisibleTurns,
   createBranch, createSession,
-  getBranch, getDb, getMaxTurnNo, getNotes, getRelations, getScenes, getSession, latestScene,
+  getBranch, getDb, getMaxTurnNo, getNotes, getRecentTurnsForBranch, getRelations, getScenes, getSession, latestScene,
   getState, getThreads, getTurnsForBranch, getWorld, getWorldState, listBranches, saveWorld,
   setBranchStatus, setSessionAnchor, setSessionBranch, setState, touchSession, touchWorld,
   upsertRelation,
@@ -308,7 +309,9 @@ async function runTurnInner({
             session, world: effectiveWorld, context, turnNo,
             options: {
               ...options,
-              reasoningEffort: 'low',
+              // 只加预算，**不动推理等级**（m03068）：降推理会直接压低正文质量，
+              // 比多花一次调用贵得多。空正文的原因通常是推理吃满了预算，
+              // 预算与推理等级是同一件事的两端，只动能变的那一端。
               maxTokens: Math.max(resolveAgent('narrator').maxTokens, 8000),
               guidance: [
                 options.narrator?.guidance,
@@ -373,8 +376,8 @@ async function runTurnInner({
     }
   }
 
-  const narrative = narrator.content || '';
-  const narratorUsage = narrator.usage || null;
+  let narrative = narrator.content || '';
+  let narratorUsage = narrator.usage || null;
 
   // 3) 正文与玩家行动**同一个事务**落库。空正文不写：那一拍的玩家行动在账本上不该发生，
   // 写了空 narrator 行的后果是三重的——①字数统计被拉低 ②局部重复率分母虚高（指标虚好）
@@ -398,6 +401,84 @@ async function runTurnInner({
     throw new Error(`空正文：${detail}`);
   }
 
+  // 3.5) 回放校验（D7 基线局 `ade41ef2` t42→t44 实测：整段重演上一拍，逐字 244 字，时间还倒退）。
+  // 判据是确定性的（CJK 最长公共子串），只在旁白产出后跑一次，不进提示词：
+  // 命中 → 用 **narrator 既有的 guidance 通道**同等级重写一次（不新增注入点、不降推理等级）；
+  // 重写仍照搬就取「照搬更少」的那一版并如实记 patch，绝不静默改写正文。
+  let replayInfo = null;
+  try {
+    const recentNarrators = getRecentTurnsForBranch(
+      sessionId, branchId, branch?.fork_turn ?? null, REPLAY_WINDOW_TURNS + 1,
+    )
+      .filter((r) => r.kind === 'narrator' && r.turn_no < turnNo)
+      .slice(-REPLAY_WINDOW_TURNS)
+      .map((r) => ({ turn_no: r.turn_no, content: r.content || '' }));
+    const replay = detectReplay({ content: narrative, recent: recentNarrators });
+    if (replay.hit) {
+      // 分段模式的草稿已经边写边上了屏，重跑一次工具循环代价与风险都太大：只记录，不重写。
+      const canRetry = narrationMode !== 'segmented' && !signal?.aborted;
+      replayInfo = { ...replay, resolved: false, retried: canRetry };
+      if (canRetry) {
+        console.warn(
+          `[orchestrator] 第 ${turnNo} 轮正文与第 ${replay.turn_no} 拍重复 ${replay.length} 字，同等级重写一次`,
+        );
+        emit({ type: 'narrative_reset', reason: 'replay', message: '上一拍的内容被复用，正在重写这一拍' });
+        try {
+          const retry = await runNarrator({
+            session, world: effectiveWorld, context, turnNo,
+            options: {
+              ...narratorOptions,
+              guidance: [
+                narratorOptions.guidance,
+                `第 ${replay.turn_no} 拍已经写过这段（与这一稿重复 ${replay.length} 字）。`,
+                '这一拍要往前推进：不要复用上一拍的句子、动作顺序或收尾，从玩家这一拍的行动写出新的场景。',
+              ].filter(Boolean).join('\n'),
+            },
+            onDelta: (d) => emit({ type: d.type === 'reasoning' ? 'reasoning' : 'narrative', delta: d.delta }),
+            signal,
+          });
+          if (String(retry.content || '').trim()) {
+            const again = detectReplay({ content: retry.content, recent: recentNarrators });
+            // 取舍只看「照搬多少字」，不猜哪一版更好看。
+            if (!again.hit || again.length < replay.length) {
+              narrator = { ...retry, narration: { ...(narrator.narration || {}), replay_rewritten: true } };
+              narrative = retry.content;
+              narratorUsage = retry.usage || narratorUsage;
+              replayInfo = { ...replayInfo, resolved: true, retry_longest: again.length };
+            } else {
+              replayInfo = { ...replayInfo, retry_longest: again.length };
+            }
+          }
+        } catch (err) {
+          if (err?.name === 'AbortError' || signal?.aborted) throw err;
+          console.warn(`[orchestrator] 第 ${turnNo} 轮回放重写失败（保留原稿）：${err.message}`);
+          replayInfo = { ...replayInfo, error: err.message };
+        }
+      }
+      addPatch(sessionId, {
+        branch_id: branchId,
+        agent: 'narrator',
+        kind: 'narrator_replay',
+        turn_no: turnNo,
+        status: replayInfo.resolved ? 'applied' : 'open',
+        severity: 'warn',
+        payload: {
+          longest: replay.length,
+          prev_turn: replay.turn_no,
+          ratio: Number(replay.ratio.toFixed(3)),
+          retried: canRetry,
+          resolved: !!replayInfo.resolved,
+          ...(replayInfo.retry_longest != null ? { retry_longest: replayInfo.retry_longest } : {}),
+          ...(replayInfo.error ? { error: replayInfo.error } : {}),
+        },
+        evidence: `与第 ${replay.turn_no} 拍重复 ${replay.length} 字`,
+      });
+    }
+  } catch (err) {
+    // 校验只是护栏：它自己出错不许把这一拍拦掉。
+    console.warn(`[orchestrator] 回放校验失败（忽略）：${err?.message || err}`);
+  }
+
   addTurnPair(sessionId, [
     playerTurn,
     {
@@ -415,6 +496,15 @@ async function runTurnInner({
         completion_tokens: narratorUsage?.completion_tokens,
         // 装配清单随回合持久化：刷新后仍能回答「这一轮为什么是这些内容」。
         assembly: buildAssemblyMeta(context, narrator),
+        // 回放校验的读数也随回合落库：不记录的话「这一拍被重写过」只有 console 里有。
+        ...(replayInfo ? {
+          replay: {
+            longest: replayInfo.length,
+            prev_turn: replayInfo.turn_no,
+            resolved: !!replayInfo.resolved,
+            retried: !!replayInfo.retried,
+          },
+        } : {}),
       },
     },
   ]);

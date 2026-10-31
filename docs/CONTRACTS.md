@@ -684,6 +684,22 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 runNarrator({ session, world, context, turnNo, options, onDelta, signal })
 // -> {content, reasoning, usage, model, finishReason}
 
+// 回放校验（D7；`server/memory/replay.js`，纯函数）
+cjkOnly(text) -> 只留 \u4e00-\u9fff 的串
+longestCommonCjk(a, b) -> {length, text}       // 滚动 DP，中文最长公共子串
+detectReplay({content, recent:[{turn_no,content}], min=REPLAY_MIN_CJK, window=REPLAY_WINDOW_TURNS})
+// -> {hit, length, text, turn_no, ratio}
+// REPLAY_MIN_CJK=100（与报告 repeat_longest 的 FAIL 线同一个数）、REPLAY_WINDOW_TURNS=2
+//   （隔一拍回放也要抓：基线局 t42→t44 就是这样）。
+// 落点：orchestrator 在空正文守卫之后、落库之前跑一次；命中时用 **narrator 既有 guidance 通道**
+//   同等级重写一次（不新增注入点、不降推理等级），只在「重写稿照搬更少」时采用，
+//   否则保留首稿并把两稿的照搬长度都记下来——绝不静默改写正文，也不假装修好了。
+// 留痕：patches(kind='narrator_replay', status= resolved?'applied':'open', severity='warn',
+//   payload:{longest, prev_turn, ratio, retried, resolved, retry_longest?, error?})；
+//   回合 meta 增 `replay:{longest, prev_turn, resolved, retried}`；
+//   重写前推 SSE `{type:'narrative_reset', reason:'replay'}`（阅读区已上屏的错稿要能被替换）。
+//   分段模式（草稿已边写边上屏）只记录不重写。
+
 // 旁白（分段演绎，P1-1 第一阶段；会话 settings.narration_mode='segmented' 才走）
 runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal })
 // -> {content, reasoning, usage, model, finishReason,

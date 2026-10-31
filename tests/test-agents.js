@@ -796,6 +796,112 @@ console.log('\n=== 9. runLibrarian：工具循环 / 调用上限 / 超时兜底 
   });
 }
 
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 10. 回放校验：把上一拍整段重演时同等级重写一次（D7 基线局 t42→t44）===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  const { cjkOnly, longestCommonCjk, detectReplay, REPLAY_MIN_CJK } = await import('../server/memory/replay.js');
+
+  // ① 判据本身是确定性的：CJK 去标点后取最长公共子串，阈值 100 字（与报告 repeat_longest 的 FAIL 线同一个数）。
+  eq(cjkOnly('他的刀，在桌上！ok 3'), '他的刀在桌上', '① 只留汉字：标点、拉丁字母、数字、空白都剔掉');
+  eq(longestCommonCjk('他推门进来，灯影一晃。', '他推门进来，灯火一晃。').length, 6,
+    '① 最长公共子串口径（「他推门进来灯」6 字）');
+  eq(REPLAY_MIN_CJK, 100, '① 阈值与报告 repeat_longest 的 FAIL 线一致');
+  eq(detectReplay({ content: '短句', recent: [{ turn_no: 1, content: '短句' }] }).hit, false,
+    '① 低于阈值不算回放（短句重复不是回放，是中文的正常现象）');
+
+  // 两条长正文：LONG 会被整段重演，CLEAN 与上一拍几乎无重叠。
+  const LONG = '他把药碗搁回床头的矮几上，碗底还剩小半口，药面结了一层薄皮。黎婆的手压在枕边的包袱上，'
+    + '五指扣着那个绳结，也不知是睡着了还是怕人夜里拿走。他抬手抹了把嘴，苦味顺着舌根往喉咙里钻。'
+    + '窗外的雨丝斜着扫过纸窗，灯芯爆了一下，把影子推到墙根去。他退开半步，左脚拖过地面，蹭出一点灰。'
+    + '门外传来谁家孩子的哭声，隔着雨声听不真切。';
+  const CLEAN = '天色忽然放亮，他推门出去，院子里积了半尺深的水。牛车歪在门口，绳子松了，'
+    + '车辕上落着一只湿透的草鞋。他弯腰去解绳结，指头冻得发僵，解了三次才松开。'
+    + '远处田埂上有个人影走过，扛着锄头，没回头。';
+  ok(cjkOnly(LONG).length > REPLAY_MIN_CJK, '夹具：LONG 的汉字数过阈值（'
+    + `${cjkOnly(LONG).length} > ${REPLAY_MIN_CJK}）`);
+  ok(detectReplay({ content: CLEAN, recent: [{ turn_no: 1, content: LONG }] }).hit === false,
+    '夹具：CLEAN 与 LONG 不算回放');
+
+  const baseHandlers = (narrator) => ({
+    'fake-narrator': narrator,
+    'fake-archivist': () => '{"scene_change":{"changed":false}}',
+    'fake-scene-keeper': () => JSON.stringify({
+      question: '他在等什么', outcome: '他等着天亮', key_detail: '药碗搁在矮几上',
+      threads: [], hooks: [], life_changes: [],
+    }),
+    'fake-world-tick': () => JSON.stringify({ events: [] }),
+    'fake-continuity': () => '{"issues":[],"healthy":[]}',
+    'fake-retrieval': () => '{"codex":[],"history":[]}',
+  });
+  const { config } = await import('../server/config.js');
+  const prevWorldTick = config.context.worldTickEvery;
+  const prevSceneEvery = config.context.sceneEvery;
+  config.context.worldTickEvery = 0;
+  config.context.sceneEvery = 0;
+  try {
+    // ② 命中 → 重写一次 → 采用重写稿，且全过程留痕（patch + meta + SSE）。
+    {
+      const ctx = newSession('回放重写');
+      const events = [];
+      // 第 1 拍产出 LONG；第 2 拍首次照搬 LONG（触发回放），重写返回 CLEAN。
+      await using(baseHandlers((body, nth) => ({ content: nth === 3 ? CLEAN : LONG })), async (fake) => {
+        await orch.runTurn({
+          sessionId: ctx.session.id, playerText: '我把药碗推到一边，坐在床边等天亮。',
+          generateBranches: false, onEvent: (e) => events.push(e),
+        });
+        await orch.runTurn({
+          sessionId: ctx.session.id, playerText: '天快亮了，我起身推门。',
+          generateBranches: false, onEvent: (e) => events.push(e),
+        });
+        eq(fake.count('fake-narrator'), 3, '② 第 2 拍被重写一次（1 拍 1 次 + 第 2 拍 2 次）');
+        const narratorCalls = fake.calls.filter((c) => c.model === 'fake-narrator');
+        eq(narratorCalls[2].body.messages.some((m) => String(m.content).includes('已经写过这段')), true,
+          '② 重写走的是既有 guidance 通道（不新增注入点），且告诉模型重复了哪一拍');
+      });
+      const row = store.getTurn(ctx.session.id, 2, 'narrator');
+      eq(row.content, CLEAN, '② 落库的是重写稿，不是照搬稿');
+      const meta = JSON.parse(row.meta_json || '{}');
+      eq(meta.replay?.resolved, true, '② meta.replay.resolved=true（这一拍被重写过）');
+      eq(meta.replay?.prev_turn, 1, '② meta.replay.prev_turn 指出重复的是第 1 拍');
+      const patches = store.listPatches(ctx.session.id, { branchId: 'main', kind: 'narrator_replay' });
+      eq(patches.length, 1, '② 每次命中写 1 条 narrator_replay');
+      eq(patches[0].status, 'applied', '② 重写解决了 → patch applied');
+      ok(patches[0].payload?.longest >= REPLAY_MIN_CJK, '② patch 记下重复字数（报告靠它数发生率）');
+      eq(patches[0].payload?.prev_turn, 1, '② patch 记下被重复的回合号');
+      ok(events.some((e) => e.type === 'narrative_reset' && e.reason === 'replay'),
+        '② SSE 通知前端「这一拍在重写」（否则阅读区已经上屏的错稿不会消失）');
+      ok(events.some((e) => e.type === 'narrative_done' && e.content === CLEAN),
+        '② narrative_done 给的是最终采用的那一版');
+    }
+
+    // ③ 两次都照搬 → 不采用第二稿、不静默改写，如实记 open。
+    {
+      const ctx = newSession('回放未解决');
+      await using(baseHandlers(() => ({ content: LONG })), async (fake) => {
+        await orch.runTurn({
+          sessionId: ctx.session.id, playerText: '我把药碗推到一边，坐在床边等天亮。',
+          generateBranches: false,
+        });
+        await orch.runTurn({ sessionId: ctx.session.id, playerText: '天快亮了，我起身推门。', generateBranches: false });
+        eq(fake.count('fake-narrator'), 3, '③ 只重写一次就停（不无限重试）');
+      });
+      const row = store.getTurn(ctx.session.id, 2, 'narrator');
+      eq(row.content, LONG, '③ 两稿一样烂时保留首稿（不为了「看起来改善」而换稿）');
+      const patches = store.listPatches(ctx.session.id, { branchId: 'main', kind: 'narrator_replay' });
+      eq(patches.length, 1, '③ 仍然留痕');
+      eq(patches[0].status, 'open', '③ 没解决 → status=open（报告会把它数成 WARN，而不是假装修好了）');
+      eq(patches[0].payload?.resolved, false, '③ payload.resolved=false');
+      ok(patches[0].payload?.retry_longest >= REPLAY_MIN_CJK, '③ 记下第二稿的照搬长度（两稿可比较）');
+      const meta = JSON.parse(row.meta_json || '{}');
+      eq(meta.replay?.resolved, false, '③ meta.replay.resolved=false');
+    }
+  } finally {
+    config.context.worldTickEvery = prevWorldTick;
+    config.context.sceneEvery = prevSceneEvery;
+  }
+}
+
 console.log(`\n${'═'.repeat(50)}`);
 console.log(`test-agents: ${pass} passed, ${fail} failed`);
 if (fail > 0) process.exit(1);
