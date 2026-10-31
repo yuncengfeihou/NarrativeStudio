@@ -401,8 +401,15 @@ export function buildEffectiveWorld(card, deltas = [], fates = []) {
     .sort((a, b) => (Number(a.valid_from) || 0) - (Number(b.valid_from) || 0)
       || (Number(a.id) || 0) - (Number(b.id) || 0));
 
-  // 运行期增量先落，因为 introduce 会创建后续阶段要作用的实体。
-  for (const d of ordered) applyDelta(world, d);
+  // introduce 一律先应用：史官的 `states` 循环写在 `changes` 之前，同拍里「先写运行态、
+  // 后写 introduce」是常态，delta id 也自然排在前。撞名实体在 introduce 之前还是概念/
+  // 地点，它的运行态会按**原类型**的白名单被丢掉（D34 同类静默失真）；引入之后再应用就
+  // 全部成立。真实跑里 45 拍局的一拍里 2 条 mood/location 就是这样被丢的。
+  const applies = [
+    ...ordered.filter((d) => d.op === 'introduce'),
+    ...ordered.filter((d) => d.op !== 'introduce'),
+  ];
+  for (const d of applies) applyDelta(world, d);
 
   // 优先级：运行期 world_state > fates > 卡初始值。
   // fates 代表「按条件解锁的预置增量」，语义上就是 valid_from 由条件表达式决定的

@@ -539,6 +539,39 @@ console.log('\n=== 史官：确定性落库 ===');
   const hist = store.getAssertions(sid, { branchId: 'main', atTurn: 3 });
   eq(hist[0].object, '帝都', '回溯第 3 轮仍是帝都');
 
+  /* ---- 复述不新增行（2026-10-31，D7 复核） ----
+   * 长跑实测同一句事实被反复上报（「黎婆|位于|竹屋帘子后」4 行、「伍卿|拥有|缺角木牌」3 行），
+   * 场记单把同一句渲染多遍、正文跟着复读同一批道具。复述不是矛盾：不新增行，
+   * 也不能丢（丢＝静默失忆），只刷新「最近一次被告知」的证据。 */
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 7,
+    aliasIndex: [],
+    update: {
+      scene_change: {}, ledger: {},
+      assertions: [
+        { subject: '凌玥', predicate: '位于', object: '湘曲', confidence: 0.7, evidence: '她还在茶楼' },
+        { subject: '凌玥', predicate: '知道', object: '玉佩在伍卿身上', confidence: 0.9, evidence: '她看见了' },
+      ],
+    },
+  });
+  eq(r.assertions, 1, '新增 1 条多值断言（知道）');
+  eq(r.assertions_deduped, 1, '同一句「位于 湘曲」判为复述，不新增行');
+  eq(store.getAssertions(sid, { branchId: 'main' }).length, 2, '复述后有效集仍是 2 行');
+  const dedupRow = store.getAssertions(sid, { branchId: 'main', subject: '凌玥', predicate: '位于' })[0];
+  eq(dedupRow.source_turn, 7, '复述刷新 source_turn 到本轮');
+  eq(dedupRow.valid_from, 5, 'valid_from 仍是第一次成立的那一轮');
+
+  r = arch.applyArchivistUpdate({
+    sessionId: sid, branchId: 'main', turnNo: 8,
+    aliasIndex: [],
+    update: {
+      scene_change: {}, ledger: {},
+      assertions: [{ subject: '凌玥', predicate: '知道', object: '玉佩在伍卿身上', confidence: 0.95 }],
+    },
+  });
+  eq(r.assertions_deduped, 1, '多值谓词的同一对象也算复述');
+  eq(store.getAssertions(sid, { branchId: 'main', predicate: '知道' }).length, 1, '多值谓词不堆重复行');
+
   r = arch.applyArchivistUpdate({
     sessionId: sid, branchId: 'main', turnNo: 9,
     aliasIndex: [],
@@ -1395,11 +1428,10 @@ console.log('\n=== D34 端到端：撞名升级与投影丢弃必须经 runTurn 
   // body.stream 这两个协议字段，不用提示词首行——提示词一改就会假红。
   //
   // 两处构造约束（不是风格问题）：
-  // ① 正向必须跨拍：`states` 循环写在 `changes` 循环之前，同拍里 states 先生成、
-  //    introduce 后到，撞名首拍的人物运行态一定按 concept 白名单被丢——那正是**反向**
-  //    用例的形状，拿它验正向会永远验不到「四条运行态全部落地」。
+  // ① 正向用例分拍写：同拍也能落地（投影把 introduce 提前应用，见下方同拍用例），但分拍
+  //    才能分开验证「升级」与「四条运行态落地」两件事，别把闸门顺序当契约来依赖。
   // ② 每拍都必须有投影理由：orchestrator 只在「本轮有数值路径或 introduce」时才重投影，
-  //    t1 的 introduce 就是 t2 之前那次投影的理由；同拍反向用例则靠 introduce 触发。
+  //    t1 的 introduce 就是 t2 之前那次投影的理由；同拍用例则靠 introduce 触发。
   const realFetch = globalThis.fetch;
   const encoder = new TextEncoder();
   const streamOf = (frames) => new ReadableStream({
@@ -1510,7 +1542,10 @@ console.log('\n=== D34 端到端：撞名升级与投影丢弃必须经 runTurn 
     eq(store.countPatches(sid, { branchId: 'main', kind: 'rejected_change' }), 0,
       '全部合法提案，不产生 rejected_change 噪音');
 
-    /* ---- 反向：同一拍里 introduce 与人物运行态同时出现 → 后者按 concept 白名单被丢 ---- */
+    /* ---- 同一拍：introduce 之前写的运行态不再被丢（2026-10-31，D34 真验补） ---- */
+    // 真实跑里史官先写运行态、后写 introduce（`states` 循环在 `changes` 之前），id 也排在
+    // 前面。投影若严格按 id 顺序应用，撞名实体在 introduce 之前还是 concept，运行态会被
+    // 概念白名单丢掉——但引入之后它就该成立。所以投影把 introduce 提到最前应用。
     const wid2 = `w-d34-drop-${Date.now()}`;
     store.saveWorld({ id: wid2, title: 'D34 同拍', card });
     const sess2 = orch.createSessionWithSettings({ title: 'D34 同拍局', worldId: wid2 });
@@ -1519,23 +1554,25 @@ console.log('\n=== D34 端到端：撞名升级与投影丢弃必须经 runTurn 
       [1, {
         changes: [
           { kind: 'person', id: 'gong-nan', path: 'life_state', op: 'set', value: 'gone' },
+          { kind: 'person', id: 'gong-nan', path: 'mood', op: 'set', value: '惶恐' },
           { kind: 'person', id: 'gong-nan', op: 'introduce', fields: { name: '宫男', type: 'person' } },
         ],
       }],
     ]);
     await orch.runTurn({ sessionId: sid2, playerText: '我推门进去。', generateBranches: false });
 
-    const dropped = store.listPatches(sid2, { branchId: 'main', kind: 'dropped_delta' });
-    eq(dropped.length, 1, '同拍构造：被白名单挡掉的写入留痕（1 条，不静默消失）');
-    eq(dropped[0]?.payload.entity_type, 'concept',
-      '留痕记下实体真实类型 concept（两者不同 = 类型判错了）');
-    eq(dropped[0]?.payload.entity_kind, 'person', '留痕同时记下模型声明的类型');
-    eq(dropped[0]?.payload.path, 'life_state', '留痕记下被挡的路径');
-    eq(dropped[0]?.turn_no, 1, '留痕挂在写入的那一拍');
-    // 两类留痕必须分得开：同一次投影里既可能升级（进门成功）也可能被丢（进门后挡掉），
-    // 报告要能分别数，混成一个 kind 就无法归因。
     eq(store.countPatches(sid2, { branchId: 'main', kind: 'entity_promoted' }), 1,
-      '同一拍里升级照常留痕，与丢弃是两条不同的 kind');
+      '同拍：升级照常留痕（升级与丢弃仍是两条不同 kind）');
+    eq(store.countPatches(sid2, { branchId: 'main', kind: 'dropped_delta' }), 0,
+      '同拍：introduce 之前的运行态不再被概念白名单丢掉');
+    const w2 = effective.buildEffectiveWorld(
+      schema.normalizeCard(sess2.card_snapshot),
+      store.getWorldState(sid2, { branchId: 'main', atTurn: 1 }),
+    );
+    const gong2 = w2.entities.find((e) => e.id === 'gong-nan');
+    eq(gong2?.type, 'person', '同拍：投影后是人物');
+    eq(gong2?.life_state, 'gone', '同拍：introduce 之前写的 life_state 落地');
+    eq(gong2?.mood, '惶恐', '同拍：introduce 之前写的 mood 落地');
   } finally {
     // 必须无条件恢复：后续套件在同一进程里跑，抢走 fetch 会让真实调用失败。
     globalThis.fetch = realFetch;

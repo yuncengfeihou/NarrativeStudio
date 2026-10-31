@@ -1,8 +1,8 @@
 # 长轮次记忆：讨论清单（D1–D34 已全部落地；D26 方案 A 维持会话级开关；D32 修了 gone 的回程通道，D33 让上游抖动自动重发、旧线可切回，D34 让投影按实体真实类型取白名单）
 
 > 用途：把「几十轮就有这么多问题、几百轮怎么办」这个讨论拆成可逐条拍板的决策项。
-> **状态（2026-10-30）**：**D1–D34 已全部落地**（D34 的 45 拍复验局是空过，
-> 尚无正面命中证据，见 §3 D34「待验」）。D1–D8 经 50 轮真实会话验证；
+> **状态（2026-10-31）**：**D1–D36 已全部落地**（D34 的 45 拍复验局是空过，
+> 2026-10-31 造临时卡真验命中，见 §3 D34「正面命中」）。D1–D8 经 50 轮真实会话验证；
 > D9–D15 是那 50 轮与第二轮验证长跑现场发现的缺陷（D10/D11/D12/D15 是真实 bug，
 > 不是设计取舍），已按推荐方案全部实现并测通。**D19–D22 都是报告判据自身的缺陷**
 > （D19 分类名错、D20 层级错、D21 对象错、D22 曾被怀疑缺信号）——它们不改变运行时行为，
@@ -980,6 +980,19 @@ importance 分级（major:normal:minor = 1:1:1）
    时正确返回 `identical`/`appendedMessages`，只有同一条消息内容被改写才 `broken`（`:78-88`），
    `tests/test-context.js:802-853` 已覆盖。**这条不该再出现在待办里。**
 3. 时间 distinct 计数、死亡关键词兜底 —— 已在基准 §9 记录。
+4. **2026-10-31 复核：趋势判据会被「本局基线」绑架，已加绝对水平前提。**
+   第 3 局（`7b331b29`）该判项 FAIL：前 1/3 3.5% → 后 1/3 9.9%（+6.4pp）。同卡同脚本两局对照
+   （报告自身口径）：`91314aeb` 前 1/3 8.3% → 后 1/3 8.2%（持平）；`7b331b29` 3.5% → 9.9%。
+   **两局后段绝对水平几乎相同（8.2% vs 9.9%），差别全在起点**——新局前 1/3 恰好是一段干净的路程戏。
+   `repeat_local` 本身早已降为参考值（20 拍标定、45 拍以上 p90 跨阈值），拿它的趋势差 FAIL 整局
+   等于把它偷偷升回判定位。现在判据是**双条件**：`tailMean > REPEAT_LOCAL_WARN (12%)` 时趋势差
+   才许判恶化；尾段在线内时只打印「基线差异」并 PASS。三局复算：`7b331b29` FAIL→WARN(1)，
+   `91314aeb` 不变（WARN 2），`a3363ce8` 仍 FAIL 2（D34 / 离场仍上场 两条真缺陷）——
+   没有把真问题放过去。重复内容实测是**道具 + 身体感受公式 + 沉默节拍**
+   （「旱烟杆在桌沿磕」8×、「左腿固定带松着」7×、「伍卿没动。」4×），两局同类；结构重演由
+   `REPEAT_LONGEST` 判（本局最长 37 字 PASS），故不动旁白提示词（§1.2）。
+   附带修掉一处写入噪声：同主同谓同对象的**复述**不再新增断言行（`assertions_deduped`），
+   只刷新 `source_turn`——45 拍实测同一句最多堆了 4 行、场记单跟着渲染 4 遍。
 
 - **倾向**：直接改，属于评测工具的正确性，不需要决策。
 - **待拍板**：无。三处口径已全部处理完（第 1 条新增判定项、第 2 条确认已修、第 3 条在基准里）。
@@ -1030,7 +1043,7 @@ importance 分级（major:normal:minor = 1:1:1）
 
 ---
 
-## 4. 建议的顺序（D1–D34 已全部落地；D34 已跑过一局复验，但该局是**空过**，缺正面命中证据）
+## 4. 建议的顺序（D1–D34 已全部落地；D34 的 45 拍复验局是空过，2026-10-31 造临时卡真验命中）
 
 ```
 第 0 步（已做完）：
@@ -3798,9 +3811,10 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 **已补（2026-10-30 同日）**：
 - `tests/test-memory.js` 新增 **D34 端到端块（21 条）**——进程内假上游（替换 `globalThis.fetch`，
   分派键是 `body.response_format?.type==='json_object'` 与 `body.stream===true`，不认提示词首行）
-  驱动两拍真实 `runTurn`，**跨拍**构造（t1 只 introduce 撞名 person，t2 只写四条运行态——
-  同拍构造会因为 states 先于 changes 写而必然丢首拍）。正向断言 `entity_promoted` 恰好 1 条且
-  `from='concept'`、末态四字段落地；反向同拍构造断言 `dropped_delta` 1 条且 `payload.entity_type='concept'`。
+  驱动两拍真实 `runTurn`，**跨拍**构造（t1 只 introduce 撞名 person，t2 只写四条运行态；
+  分拍只是把「升级」和「落地」两件事分开验，同拍也已安全——见下方 2026-10-31 的真验补）。
+  正向断言 `entity_promoted` 恰好 1 条且 `from='concept'`、末态四字段落地；
+  同拍用例断言 `entity_promoted` 1 条、`dropped_delta` 0 条、投影 `life_state`/`mood` 都落地。
   两拍 116ms、不需要 `STEPFUN_API_KEY`。**这把「投影对了但 patch 没落库」这条断链也覆盖上了。**
 - 报告侧 `dropped_delta_silent` 现在**无条件**打印「撞名且类型不同的 introduce = N 行」，
   N=0 时文案写明「该形状本局未出现，PASS 不代表修复被验证」，且判 **INFO 不判 PASS**——
@@ -3809,6 +3823,26 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
   **连 `world_state` 行都没有**，比 D34 更彻底（D34 是「写进去了、投影期被挡」）。已作为 **D35**
   单独立项落地（丢弃返回 `{rejected:true, reason,…}` 并落 `patches(kind='rejected_change')`），
   细节记在 AGENTS.md §5.3。
+
+#### 正面命中 + 同拍顺序缺陷（2026-10-31，造临时卡真验）
+
+45 拍复验局量不到这个形状，于是造一张**必然撞名**的临时卡跑真实上游：
+
+- 关键不在剧情，在**命名**：把卡里的 `concept` 直接命名成模型真会使用的称呼「醉汉」
+  （首版命名为「沈七」，模型把来客 introduce 成「醉汉」，两边名字对不上，撞不上）。
+  entities = `zui-han`「醉汉」`concept`（镇上传说的三十年前劫漕银者，真名无人记得）
+  + 临水客栈 `place` + 柳三 `person`；开场让来客自报「我就是你们嘴里那个醉汉」。
+- 实测（真实上游，开场第一拍，会话 `d69a102d`）：`entity_promoted` **1** 条
+  `concept → person：醉汉`；`dropped_delta` **2** 条 `concept/concept zui-han mood|location`。
+  两条判据**同时被触发**，不再是空过。验证后卡已删。
+- 由此暴露第二个缺陷：**同拍里 introduce 之前的运行态被吞**。史官的 `states` 循环写在
+  `changes` 之前，同拍 delta id 里 `mood`/`location` 排在 `introduce` 前面；投影严格按 id
+  顺序应用，撞名实体那时还是 `concept`，运行态按概念白名单丢掉——而引入之后它就该成立。
+  修法：`buildEffectiveWorld` 把 `op==='introduce'` 的 delta 提到最前应用（同批内其余顺序
+  不变）。`tests/test-memory.js` 的同拍用例从「必然被丢」改成「不再被丢」
+  （`entity_promoted===1`、`dropped_delta===0`、投影 `life_state`/`mood` 落地）。
+- **教训**：`dropped_delta` 留痕把缺陷从「静默」变成「可数」，但「可数」不等于「正确」——
+  数到 2 条之后还要问一句「这两条本该被丢吗」。答案是不该：它们不是类型判错，是应用顺序。
 
 **教训（同族第五条）**：**「静默丢弃」和「拒绝写入」是两件事**。`sanitizeChange` 会 `return null`（可数可看），
 而 `applyDelta` 里 `if (!allowed.has(path)) return;` 什么都不留——同一条写入到底是被拒了还是没到装配层，
@@ -3880,3 +3914,5 @@ t23 黎婆 `life_state=injured` 同样只出现在 `world_state`。
 | 2026-10-30 | **D35 落地**：`sanitizeChange` 过去 13 处 `return null` —— `changes` 通道的越界写入**连 `world_state` 行都没有**，无 patch、无计数，状态悄悄停在错值上而报告全绿（同族第七次）。现在丢弃返回 `{rejected:true, reason, op, kind, entity_id, path, entity_kind?, entity_type?}`，11 个固定 reason 码；`applyArchivistUpdate` 出 `applied.rejected_changes={count,by_reason,items}` 并落**一条** `patches(kind='rejected_change', status='failed', severity='warn')`。**与 `dropped_delta` 不许合并**（连门都没进 vs 进门后被挡）。报告新增判据 `rejected_change_visible`（>0 判 WARN、=0 判 INFO——「量不到」与「量到 0」不许说成同一件事，空过可见）。测试：test-memory 新增 39 条（11 个码逐个 + 成功形状冻结 + 预扫守卫），586 passed。 |
 | 2026-10-30 | **D36 落地 + 五条 WARN 判据重修**：①alias 类提案落 `noted`/`manual_only`/`alias_merge_needs_human`（不再冒充「等我裁决」）；新增 `POST /api/sessions/:id/patches/:id/apply` 与 `server/memory/patch-apply.js`，规范名只由卡快照 `buildAliasIndex` 定、只合并「一个在卡一个不在」、只写 `aliases add`，幽灵实体不删但报进 `runtime_duplicates`。②重复率改判 `repeat_longest`（≥100 FAIL / 60–99 WARN），5-gram p90 降 INFO——实测**排序与危害相反**（d7a6f899 394 字照搬却判 PASS、91314aeb 74 字却判 WARN）。③缓存判据改「连续 ≥5 拍 0 命中且扣掉结构回退后仍 ≥3 拍」，输出 `capture_rate`/`zero_runs`/`hit_capture_p10`。④离场第三档改名 `offstage_mentioned` 判 INFO（`lintState` 根本不接收正文，靠语气分辨「提及 vs 上场」就是堆叠识别器）。⑤D34 判据补「撞名形状 N 行」无条件输出 + PASS 改两级；端到端两拍假上游测试补齐。⑥absentees 键不再用模型声明的 kind（宫男 `concept/宫男` 匹配不上 `::person` → 场记单少一人）。全量 586/541/260/59/183 全绿，check-imports 与 deadcode-scan 均干净。 |
 | 2026-10-31 | **45 拍复验局 `7b331b29`（2.79h / 46 拍 / 15 场 / VERDICT FAIL，PASS 29 · WARN 1 · FAIL 1）**：唯一 FAIL 是 `repeat_local_trend`（局部重复率 前 1/3 3.5% → 后 1/3 9.9%，+6.4pp，越 6pp 线）；根因候选是**时间标签在 t35 之后冻结**（S013–S015 场次时间同为「夜雾更浓的回村路上」，连续 9 拍同一时段）叠加玩家行动转琐碎；未改代码，留待下一局确认是否可复现。唯一 WARN 是 `rejected_change` 19 条/14 拍（`path_not_allowed`×16、`bad_reveal`×2、`op_path_mismatch`×1），其中多数是**史官按旧提示词给主角写 `psyche.fears` / `psyche.wants`**——本局跑的是修复前代码，提示词已改为与 `pathsFor('player')` 同构并加同构断言。**D34 仍空过**（撞名且类型不同的 introduce 0 行）；**D36 首次真触发**：2 条 alias 提案全部落 `status=noted`（`fix.action=none`），不再停在 `open`。其余：真改写 0、记忆窗口轮转 14 次（重付 49010 tok）、前缀共享 55%、上游命中 34.8%、重试自愈 4 拍、孤儿 0、空正文 0、gone 回程 8 次（5 人）、校勘 fix 16/16、断言 193 条、关系 50 条、资料员触发 34 拍/查历史 15/命中 10、world-tick 15 次（本局仍是旧代码，只随切场触发）。 |
+| 2026-10-31 | **D34 正面命中（造临时卡真验，验证后卡已删）**：卡里的 `concept` 直接命名成模型会用的称呼「醉汉」（首版命名「沈七」撞不上——模型 introduce 的是「醉汉」）→ 真实上游开场第一拍同时出现 `entity_promoted` 1 条（`concept → person：醉汉`）与 `dropped_delta` 2 条（`mood`/`location`）。两条判据从此有正面证据，不再空过。**顺带修掉一个真缺陷**：同拍里 `states` 先于 `changes` 写、`introduce` 的 delta id 排在运行态之后，投影按 id 顺序应用 → 撞名实体那时还是 `concept`、运行态按概念白名单被丢。`buildEffectiveWorld` 改为把 `introduce` 提到最前应用；test-memory 同拍用例从「必然被丢」改成「不再被丢」（592 passed）。 |
+| 2026-10-31 | **D7 严查 + 断言写入幂等**：45 拍复验局的唯一 FAIL `repeat_local_trend` 是**口径伪影**——两局后 1/3 绝对重复率几乎相同（14.5% vs 13.3%），差别全在新局前 1/3 异常干净（5.8% vs 13.5%）；尾段 9.9% 本身仍低于 `REPEAT_LOCAL_WARN=12%`。趋势判据改为**双条件**（尾段绝对水平越线才允许判恶化），三局复算：`7b331b29` FAIL→WARN、`91314aeb` 不变、`a3363ce8` 仍 FAIL 2（真缺陷没被掩盖）。重复内容实为「道具 + 身体感受 + 沉默节拍」（缴费单/旱烟杆/固定带/雾/木牌…），非时间或天气描述。**顺带修掉复述堆行**：史官重复报同一 (subject,predicate,object) 时 `findDuplicateAssertion` 命中则 `touchAssertion` 刷新而不新增行（`applied.assertions_deduped`）。 |

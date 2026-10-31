@@ -16,8 +16,9 @@ import {
   ENTITY_KINDS, FACT_CANON_PATHS, LIST_PATH_SET, isNumberPath, pathsFor,
 } from '../world/state-paths.js';
 import {
-  addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, getState, getThreads,
-  getWorldState, invalidateAssertion, setCharState, setState, upsertRelation, upsertThread,
+  addAssertion, addPatch, addVoice, addWorldState, findConflictingAssertions, findDuplicateAssertion,
+  getState, getThreads, getWorldState, invalidateAssertion, setCharState, setState, touchAssertion,
+  upsertRelation, upsertThread,
 } from '../memory/store.js';
 import {
   LIFE_STATES, PREDICATES, STATE_FIELDS, VISIBILITIES, archivistSystemPrompt, archivistUserPrompt,
@@ -703,7 +704,7 @@ export async function runArchivist({
       });
       return {
         applied: {
-          assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
+          assertions: 0, assertions_invalidated: 0, assertions_deduped: 0, states: 0, changes: 0,
           relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
         },
         scene_change: { ...EMPTY_UPDATE.scene_change },
@@ -725,7 +726,7 @@ export async function runArchivist({
     });
     return {
       applied: {
-        assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
+        assertions: 0, assertions_invalidated: 0, assertions_deduped: 0, states: 0, changes: 0,
         relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
       },
       scene_change: update.scene_change, uncertain: update.uncertain,
@@ -820,7 +821,7 @@ export function applyArchivistUpdate({
   narrative = '',
 }) {
   const applied = {
-    assertions: 0, assertions_invalidated: 0, states: 0, changes: 0,
+    assertions: 0, assertions_invalidated: 0, assertions_deduped: 0, states: 0, changes: 0,
     relations: 0, threads: 0, voices: 0, ledger: false, skipped: 0,
     // 这一拍真实写进去的「谁在场」证据（含 life_state 本身），供回程通道判断
     // 「他是不是自己回到镜头里了」。只做事后审计/回程用，不进任何提示词。
@@ -856,6 +857,16 @@ export function applyArchivistUpdate({
     const a = sanitizeAssertion(raw, aliasIndex);
     if (!a) continue;
     if (!isDeclaredTarget(a.subject, declaredSet, aliasIndex)) { skipTarget('assertion', a.subject); continue; }
+    // 复述不新增行（2026-10-31，D7 复核）：同一句事实反复报时只刷新「最近一次被告知」的证据。
+    // 不是去重优化，是止损：重复行会让场记单把同一道具/位置渲染多遍，正文跟着复读。
+    const dup = findDuplicateAssertion(sessionId, {
+      branchId, subject: a.subject, predicate: a.predicate, object: a.object,
+    });
+    if (dup) {
+      touchAssertion(sessionId, dup.id, { sourceTurn: turnNo, confidence: a.confidence, evidence: a.evidence });
+      applied.assertions_deduped++;
+      continue;
+    }
     const conflicts = findConflictingAssertions(sessionId, {
       branchId, subject: a.subject, predicate: a.predicate, object: a.object, validFrom: turnNo,
     });

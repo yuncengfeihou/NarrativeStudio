@@ -3496,18 +3496,39 @@ try {
   // 门槛 GRAM3_TREND_DELTA = WARN 线的一半：12% → 6 个百分点。
   const trendDelta = (headMean !== null && tailMean !== null) ? tailMean - headMean : null;
   const trendGate = TH.REPEAT_LOCAL_WARN * 0.5;
+  /* 2026-10-31（D7 复核）：只比「前 1/3 vs 后 1/3」会被**本局基线**绑架。
+   *
+   * 同卡同脚本两局实测（本文件 5-gram 口径）：
+   *   91314aeb  前 1/3 8.3% → 后 1/3 8.2%（持平）
+   *   7b331b29  前 1/3 3.5% → 后 1/3 9.9%（+6.4pp → 旧判据 FAIL）
+   * 但两局后段的绝对水平几乎一样（8.2% vs 9.9%），差别全在「起点」：
+   * 7b331b29 前段恰好是一段干净的路程戏，前 1/3 异常低。
+   * 也就是说旧判据把「前段特别干净」读成了「后段在恶化」。
+   *
+   * 而且 `repeat_local` 本身早已降为参考值（:79-80，20 拍标定、45 拍以上 p90 跨阈值）；
+   * 用一个不作判定的量去算趋势，再拿它 FAIL 整局，等于把它偷偷升回判定位。
+   *
+   * 所以改成双条件：**尾段绝对水平先越过 WARN 线**，趋势差才许判恶化。
+   * 尾段还在线内时，差只记 INFO 并写明「基线差异」——真正要防的是
+   * 「已经不合格且还在往上走」，不是「从很好涨到还行」。
+   */
+  const tailOverWarn = tailMean !== null && tailMean > TH.REPEAT_LOCAL_WARN;
   add(
     'repeat_local_trend',
-    `后 1/3 的局部重复率不得比前 1/3 高出 ${(trendGate * 100).toFixed(0)} 个百分点（D7：看是否在恶化）`,
+    `尾段绝对水平越过 ${(TH.REPEAT_LOCAL_WARN * 100).toFixed(0)}% 之后，后 1/3 不得再比前 1/3 高出 ${(trendGate * 100).toFixed(0)} 个百分点（D7：看是否在恶化）`,
     trendDelta === null
       ? 'WARN'
-      : trendDelta > trendGate ? 'FAIL' : trendDelta > trendGate * 0.5 ? 'WARN' : 'PASS',
+      : !tailOverWarn
+        ? 'PASS'
+        : trendDelta > trendGate ? 'FAIL' : trendDelta > trendGate * 0.5 ? 'WARN' : 'PASS',
     trendDelta === null
       ? '样本不足'
       : `前 1/3 ${(headMean * 100).toFixed(1)}%（t${headThird[0].turn_no}–t${headThird[headThird.length - 1].turn_no}）` +
         ` → 后 1/3 ${(tailMean * 100).toFixed(1)}%（t${tailThird[0].turn_no}–t${tailThird[tailThird.length - 1].turn_no}）` +
         `｜差 ${(trendDelta * 100).toFixed(1)} 个百分点` +
-        (trendDelta > trendGate ? '｜**在恶化**' : trendDelta < -trendGate * 0.5 ? '｜在后段改善' : '｜持平')
+        (tailOverWarn
+          ? (trendDelta > trendGate ? '｜**在恶化**' : trendDelta < -trendGate * 0.5 ? '｜在后段改善' : '｜持平')
+          : `｜尾段 ${(tailMean * 100).toFixed(1)}% 仍在 WARN 线内，趋势差只反映本局前段基线低（${(headMean * 100).toFixed(1)}%），不判恶化`)
   )
   report.quality.repeat_trend = {
     thirds: trendN,
@@ -3515,8 +3536,10 @@ try {
     tail: { mean: tailMean, rows: tailThird },
     delta: trendDelta,
     gate: trendGate,
+    tail_over_warn: tailOverWarn,
     note: 'D7 第 1 条。p90 看「最差有多差」，本项看「是否在恶化」——长跑真正要防的是后者。'
-      + '用绝对差而不是比值，避免小基数（前段 2% → 后段 4%）把恶化放大成 100%。',
+      + '用绝对差而不是比值，避免小基数（前段 2% → 后段 4%）把恶化放大成 100%。'
+      + '2026-10-31 起加绝对条件：尾段没越过 WARN 线时，前/后段差只记基线差异（对照两局实测见代码注释）。',
   };
 
   // 7.6 死亡表述 vs life_state 写入

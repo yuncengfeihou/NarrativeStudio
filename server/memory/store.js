@@ -1582,6 +1582,37 @@ export function findConflictingAssertions(sessionId, { branchId, subject, predic
   return rows.filter((r) => r.valid_to == null || r.valid_to >= (validFrom || 0));
 }
 
+/**
+ * 同主同谓同对象的「复述」查询（幂等写入用，2026-10-31 D7 复核）。
+ *
+ * `findConflictingAssertions` 只查 `object<>?` 且只对单值谓词生效——它回答「有没有矛盾」，
+ * 不回答「这条事实是不是已经写过」。于是同一句话反复报会堆成多行：45 拍实测
+ * 「黎婆|位于|竹屋帘子后」4 行、「伍卿|拥有|缺角木牌」3 行，场记单把同一句渲染多次。
+ * 复述不是矛盾，不该新增行；也不能丢（丢＝静默失忆），只刷新 source_turn。
+ */
+export function findDuplicateAssertion(sessionId, { branchId, subject, predicate, object }) {
+  if (!subject || !predicate || !object) return null;
+  return getDb().prepare(`
+    SELECT * FROM assertions
+    WHERE session_id=? AND branch_id=? AND subject=? AND predicate=? AND object=? AND status='active'
+    ORDER BY id DESC LIMIT 1
+  `).get(sessionId, branchId || 'main', subject, predicate, object) || null;
+}
+
+/** 复述刷新：有效起始与 id 不动，只更新「最近一次被复述」的证据。 */
+export function touchAssertion(sessionId, id, { sourceTurn, confidence, evidence }) {
+  getDb().prepare(`
+    UPDATE assertions SET source_turn=COALESCE(?, source_turn),
+      confidence=COALESCE(?, confidence), evidence=COALESCE(?, evidence)
+    WHERE session_id=? AND id=?
+  `).run(
+    Number.isFinite(Number(sourceTurn)) ? Number(sourceTurn) : null,
+    Number.isFinite(Number(confidence)) ? Number(confidence) : null,
+    evidence ? String(evidence) : null,
+    sessionId, id,
+  );
+}
+
 /* ══════════════════════════════════════════════════════════════════════ */
 /* v4：人物状态（按字段可寻址）                                            */
 /* ══════════════════════════════════════════════════════════════════════ */
