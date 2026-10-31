@@ -94,7 +94,7 @@ export const config = {
   // ---- Agent defaults (reasoning_effort: low | medium | high | xhigh | max) ----
   // 注意：上游模型的推理过程计入 max_tokens。旁路 Agent 的 JSON 在推理之后才输出，
   // 预算必须给推理留足空间；否则会得到「completion_tokens 用满、content 为空」的假成功
-  // （`llm.js` 会以低推理 + 双倍预算重试一次，日志是「空内容且预算耗尽」）。
+  // （`llm.js` 会以**同等级推理** + 双倍预算重试一次，日志是「空内容且预算耗尽」）。
   // 分工：narrator 只管正文，永远不输出 JSON；记账全部交给史官与校勘。
   // 调大 narrator 的 maxTokens 要算两笔账：① 它是 context-plan 的生成预留，直接从
   // 提示词预算里扣（200K 窗口下每 +1K 就少 1K 可用上下文）；② 上限受模型 maxOutput 约束。
