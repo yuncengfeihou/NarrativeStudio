@@ -542,6 +542,9 @@ async function runTurnInner({
         completion_tokens: narratorUsage?.completion_tokens,
         // 装配清单随回合持久化：刷新后仍能回答「这一轮为什么是这些内容」。
         assembly: buildAssemblyMeta(context, narrator),
+        // 演绎读数（模式 / 轮次 / 工具 / 技法）随回合落库：不落库时「这一拍用了哪些工具、
+        // 查了几条技法」只在实时 SSE 里有，跑完就查不到（报告与复盘都要能数）。
+        ...(narrator.narration ? { narration: narrator.narration } : {}),
         // 回放校验的读数也随回合落库：不记录的话「这一拍被重写过」只有 console 里有。
         ...(replayInfo ? {
           replay: {

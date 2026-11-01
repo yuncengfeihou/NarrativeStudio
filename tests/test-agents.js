@@ -56,14 +56,8 @@ function eq(a, b, label) {
 /* ══════════════════════════════════════════════════════════════════════ */
 
 const encoder = new TextEncoder();
-function streamReply(reasoning, content) {
-  const frames = [];
-  if (reasoning) frames.push({ choices: [{ index: 0, delta: { reasoning_content: reasoning }, finish_reason: null }] });
-  if (content) frames.push({ choices: [{ index: 0, delta: { content }, finish_reason: null }] });
-  frames.push({
-    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
-    usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
-  });
+/** 把 SSE 帧数组包成一个假的 fetch 响应（流式）。 */
+function sseReply(frames) {
   return {
     ok: true,
     status: 200,
@@ -77,6 +71,40 @@ function streamReply(reasoning, content) {
     }),
     text: async () => '',
   };
+}
+
+function streamReply(reasoning, content) {
+  const frames = [];
+  if (reasoning) frames.push({ choices: [{ index: 0, delta: { reasoning_content: reasoning }, finish_reason: null }] });
+  if (content) frames.push({ choices: [{ index: 0, delta: { content }, finish_reason: null }] });
+  frames.push({
+    choices: [{ index: 0, delta: {}, finish_reason: 'stop' }],
+    usage: { prompt_tokens: 20, completion_tokens: 8, total_tokens: 28 },
+  });
+  return sseReply(frames);
+}
+
+/** 分段演绎的一轮「只调一个工具」：上游按 index 分片发 tool_calls，这里一次发完。 */
+function streamToolCall(name, argsJson, reasoning = '') {
+  return sseReply([
+    { choices: [{ index: 0, delta: reasoning ? { reasoning_content: reasoning } : {}, finish_reason: null }] },
+    {
+      choices: [{
+        index: 0,
+        delta: {
+          tool_calls: [{
+            index: 0, id: `call_${name}`, type: 'function',
+            function: { name, arguments: argsJson },
+          }],
+        },
+        finish_reason: null,
+      }],
+    },
+    {
+      choices: [{ index: 0, delta: {}, finish_reason: 'tool_calls' }],
+      usage: { prompt_tokens: 30, completion_tokens: 12, total_tokens: 42 },
+    },
+  ]);
 }
 
 function jsonReply(content) {
@@ -118,6 +146,9 @@ function install(handlers) {
     const h = handlers[model];
     const out = typeof h === 'function' ? h(body, nth) : h;
     if (out == null) return jsonReply('');
+    // 已经是完整的假响应（streamToolCall / streamReply 这类）时原样返回，
+    // 否则下面会把它当成 {content} 再包一层。
+    if (typeof out === 'object' && typeof out.ok === 'boolean') return out;
     if (typeof out === 'object' && out.error) return errorReply(out.error, out.message || 'boom');
     const content = typeof out === 'string' ? out : String(out.content ?? '');
     const reasoning = typeof out === 'string' ? '' : String(out.reasoning ?? '');
@@ -154,11 +185,11 @@ const BASE_CARD = {
 };
 
 let seq = 0;
-function newSession(label) {
+function newSession(label, settings = null) {
   const card = schema.normalizeCard({ ...BASE_CARD, title: label });
   const worldId = `w-ag-${++seq}-${Date.now()}`;
   store.saveWorld({ id: worldId, title: label, card });
-  const created = orch.createSessionWithSettings({ title: label, worldId });
+  const created = orch.createSessionWithSettings({ title: label, worldId, settings });
   const session = store.getSession(created.id);
   return { card, world: { card }, session };
 }
@@ -1029,6 +1060,69 @@ console.log('\n=== 11. 定点改稿的片段模式：模型只写片段，拼接
     config.context.worldTickEvery = prevWorldTick;
     config.context.sceneEvery = prevSceneEvery;
   }
+}
+
+/* ══════════════════════════════════════════════════════════════════════ */
+console.log('\n=== 12. 分段演绎：工具往返 + 演绎读数随回合落库 ===');
+/* ══════════════════════════════════════════════════════════════════════ */
+{
+  // 分段模式此前只有纯函数与假循环的覆盖，没有一条「runTurn → 落库」的端到端断言。
+  // 这一块同时钉两件事：
+  //   ① 工具往返跑得通（第 1 轮调 technique_lookup，第 2 轮流式写正文定稿）；
+  //   ② 演绎读数（mode / rounds / tools / techniques）必须随回合落库——
+  //      不落库的话「这一拍查没查技法、调了几次工具」跑完就查不到，报告也无从统计。
+  const NARRATIVE = '他张了张嘴，终究只说了一句「路上小心」。灯捻暗下去，屋里只剩雨声。';
+  const handlers = {
+    'fake-narrator': (body, nth) => (nth === 1
+      ? streamToolCall('technique_lookup', JSON.stringify({ query: '对白太直白', limit: 1 }), '先想一下怎么写')
+      : streamReply('想好了', NARRATIVE)),
+    'fake-archivist': () => '{"scene_change":{"changed":false}}',
+    'fake-scene-keeper': () => JSON.stringify({
+      question: '他来做什么', outcome: '他说明了来意', key_detail: '玉佩摆在桌上',
+      threads: [], hooks: [], life_changes: [],
+    }),
+    'fake-world-tick': () => '{"events":[]}',
+    'fake-continuity': () => '{"issues":[],"healthy":[]}',
+    'fake-retrieval': () => '{"codex":[],"history":[]}',
+  };
+  const ctx = newSession('分段工具', { narration_mode: 'segmented' });
+  const events = [];
+  await using(handlers, async (fake) => {
+    await orch.runTurn({
+      sessionId: ctx.session.id,
+      playerText: '我把信纸折好收进怀里。',
+      generateBranches: false,
+      onEvent: (e) => events.push(e),
+    });
+    eq(fake.count('fake-narrator'), 2, '① 第 1 轮调工具、第 2 轮写正文 = 两次模型调用');
+    eq(fake.count('fake-retrieval'), 0, '① 分段模式跳过分段独立的检索预检（循环里已有取证通道）');
+  });
+
+  ok(events.some((e) => e.type === 'draft_start'), '① SSE 上有 draft_start');
+  ok(events.some((e) => e.type === 'draft_delta'), '① SSE 上有 draft_delta');
+  const toolEvent = events.find((e) => e.type === 'tool_call');
+  eq(toolEvent?.name, 'technique_lookup', '① 工具事件带工具名');
+  eq(toolEvent?.ok, true, '① 工具调用成功');
+  ok(!events.some((e) => e.type === 'narration_fallback'), '① 没有回退单发');
+
+  const turns = store.getTurnsForBranch(ctx.session.id, 'main', null, { from: 1, to: 9 });
+  const narr = turns.find((t) => t.kind === 'narrator');
+  eq(narr?.content, NARRATIVE, '② 落库正文是第 2 轮流式写下的定稿');
+  const narration = narr?.meta?.narration;
+  eq(narration?.mode, 'segmented', '② meta.narration.mode 落库（否则跑完就查不到用了什么模式）');
+  eq(narration?.rounds, 2, '② 记下轮次');
+  eq(narration?.tools, 1, '② 记下工具调用次数');
+  eq(narration?.techniques, ['dialogue-subtext'], '② 记下学到的技法 id（报告要能数「模型有没有在用技法库」）');
+  ok(!String(narr?.content || '').includes('【技法检索'), '② 技法文本没有漏进正文（工具结果只进当拍临时消息）');
+
+  // 单发模式不该凭空多出这一块（meta 只记真实发生过的读数）。
+  const plain = newSession('单发无读数');
+  await using({ ...handlers, 'fake-narrator': () => ({ content: '他把玉佩搁在桌上。' }) }, async () => {
+    await orch.runTurn({ sessionId: plain.session.id, playerText: '我推门进去。', generateBranches: false });
+  });
+  const plainTurn = store.getTurnsForBranch(plain.session.id, 'main', null, { from: 1, to: 9 })
+    .find((t) => t.kind === 'narrator');
+  eq(plainTurn?.meta?.narration, undefined, '③ 单发正常拍不写 narration（meta 不塞空对象）');
 }
 
 console.log(`\n${'═'.repeat(50)}`);

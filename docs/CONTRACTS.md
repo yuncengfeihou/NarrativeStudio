@@ -733,6 +733,8 @@ runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal
 // techniques 是技法检索命中的条目 id（只作 meta 留痕；不进提示词、不进下一拍）。
 // 工具结果只进当拍临时消息；总预算 config.narration.toolHistoryTokens（默认 1200）。
 // 上游不支持 tools 时由 orchestrator 回退 runNarrator（narration.fallback='segmented'）。
+// 演绎读数随回合落库：turns.meta_json.narration = 上面那对象（单发正常拍没有这个键）。
+// 「这一拍查了哪几条技法、调了几次工具」因此可离线统计，报告不必依赖实时 SSE。
 
 // 纯函数（便于单测）
 resolveNarrationMode(settings, defaultMode?) -> 'single'|'segmented'
