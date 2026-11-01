@@ -41,7 +41,6 @@
 > 数字全部是本仓库实测，不给估计值；标「估」的是外推。
 >
 > 基线数据来源：`_work/longrun-eval-8cfb7f62.md`（45 拍真实上游）、
-> `_work/longrun-interim-findings.md`（过程发现 O1–O47）、
 > 本文件 §1 的容量实测（`node -e` 直接跑函数，未调模型）。
 > 第二轮验证长跑的**评测报告**（剧情质量 / 记忆一致性分项打分）在 `_work/longrun-eval-5fdb2eab.md`。
 > **关于文中 `_work/tmp-*.mjs` 的引用**：那些都是一次性探针，收尾时已清理（`_work/tmp-*` 不入库）。

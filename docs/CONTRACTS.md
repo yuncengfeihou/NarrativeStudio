@@ -219,6 +219,35 @@ worlds(id, title, subtitle, cover_hue, tags_json, card_json, source_json, versio
 > **`summaries` 表已删除**（2026-10-24）。「一份滚动摘要」要求 1056:1 的压缩比，
 > 结构上不可能承载千轮；且它以上一份摘要为输入（摘要的摘要），违反「原文是唯一真相」。
 
+### patch 类型（`patches.kind`）
+
+`patches` 是「Agent 只提案、代码才落库」的审计表：**写不进去的、被改写的、需要人裁决的都必须留痕**，
+否则报告全绿而状态悄悄停在错值上。patch 不进提示词、不占任何层预算，只供报告/面板/排查读。
+
+**新增一种 `kind` 必须同时改这张表**——`_work/check-contracts.mjs` 会抓「代码里有、文档里没有」的类型。
+
+| kind | 写入者 agent | status | severity | payload 摘要 |
+|---|---|---|---|---|
+| `assertion` | `archivist` | `applied` | — | 落库的断言行本身 |
+| `world_change` | `archivist` | `applied` | — | 归一后的 change（`entity_kind/entity_id/path/op/value`） |
+| `skipped_targets` | `archivist` | `skipped` | `warn` | `{total, items[{kind,target}]}`：目标声明越界，合并成一条 |
+| `thread_rejected` | `archivist` | `rejected` | `info` | `{total, wip_limit, items[]}`：线索 WIP 到顶/权重低 |
+| `rejected_change` | `archivist` | `failed` | `warn` | `{count, by_reason, items[]}`：被 `sanitizeChange` 拒的变更 |
+| `path_aliased` | `archivist` | `applied` | `info` | `{count, items[{entity_id,path,path_from,op,op_from,turn_no}]}`：主角路径归一 |
+| `target_aliased` | `archivist` | `applied` | `info` | `{count, items[{target_from,entity_id,kind,path,op,turn_no}]}`：目标名前后缀归一 |
+| `archivist_parse_failed` | `archivist` | `failed` | `warn` | `{error, retried, preview}`：回灌重问后仍解析失败 |
+| `stale` | `archivist` | `stale` | `info` | `{reason}`：调用期间分支被换，整批丢弃 |
+| `rejected_delta` | `archivist`（orchestrator 写） | `failed` | `warn` | 被拒增量：现在只剩 `not_a_number` 一种 reason |
+| `overdrawn` | `archivist`（orchestrator 写） | `applied` | `info` | `{path, op, delta_id, turn, value, prev, next}`：余额为负照常写入 |
+| `entity_promoted` | `archivist`（orchestrator 写） | `applied` | `info` | `{id, name, from, to, turn, delta_id}`：同名概念被升级成人物 |
+| `dropped_delta` | `archivist`（orchestrator 写） | `failed` | `warn` | `{entity_kind, entity_type, entity_id, path, op, turn, delta_id}`：被真实类型白名单挡掉 |
+| `life_state_inferred` | `scene-keeper` | `applied` | `info` | `{scene_id, who, life_state, from}`：封场时补史官没写的死亡/离场 |
+| `life_state_revived` | `archivist` | `applied` | `info` | `{who, from:'gone', to:'alive', reason}`：点名或回镜头唤回 |
+| `scene` | `scene-keeper` | `applied` | — | `{scene_id, importance, ...场次记录}`：一场一行的归档 |
+| `offstage_event` | `world-tick` | `applied`（`hidden`）/ `open` | `info` / `minor` | 事件 `{who, what, visibility, affects, pressure}` |
+| `narrator_replay` | `narrator` | `applied`（重写成功）/ `open` | `warn` | `{longest, prev_turn, ratio, retried, resolved}`：与最近 2 拍照搬 ≥100 字 |
+| `rewrite_out_of_range` | `rewrite` | `open` | `info` | `{target, changed, outside}`：定点改稿改到了圈定范围之外 |
+
 `scenes` 是**长程记忆的载体**：每场一行、只追加、永不互相改写，输入是本场完整原文。
 `question / outcome / key_detail / causal / hooks` 共同承担「这一场发生了什么、为什么走到这里、
 还悬着什么」；`importance`（major/normal/minor）决定渲染粒度，由确定性规则判定。

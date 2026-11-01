@@ -7,7 +7,7 @@
 > 机械判定：`node _work/longrun-report.mjs <sid>` → **FAIL（PASS 11 / WARN 3 / FAIL 1）**
 > 本文件是**第一轮长跑的最终报告**（2026-10-27，D1–D8 时代的现场记录，数字冻结不改）。
 > 它报告的是**当时**的缺陷与幅度；之后 D9–D30 的机制结论与修复记录在 `_work/longrun-scale-discussion.md`（D 编号唯一真源），两者冲突时以那份为准。
-> 过程发现按 O1–O47 编号，明细留在 `_work/longrun-interim-findings.md`（历史归档，全部已收敛成 D 项）。
+> 过程发现按 O1–O47 编号，逐条已收敛成 D 项（明细见 `_work/longrun-scale-discussion.md`）。
 >
 > ⚠️ **2026-10-27 续跑说明**：本报告主体是**第一次 45 拍**的数字。之后同一会话又续跑了 20 拍（t47–t66），
 > 现库内共 **66 回合 / 65 拍 / 29 场**。续跑**没有推翻任何一条结论**，但改了三处**幅度**、纠了一处**结论**，
@@ -16,7 +16,7 @@
 > ②场次过碎 53% → **44.6%**（29/65），且主因是**地点**不是时间；
 > ③`offstage_event` 从「零消费」**更正为「有消费方但被同一人脉死」**（真正零消费的只有 `uncertain`）；
 > 新发现：`place_id` 错指（t59/t60 把「老旅馆二楼房间」指到别墅）、运行期 `introduce` 重复登记 10 个 id。
-> 逐条解法见 [`_work/longrun-remediation.md`](longrun-remediation.md)。
+> 逐条解法见 [`_work/longrun-scale-discussion.md`](longrun-scale-discussion.md) 的 D 编号条目。
 
 ---
 
@@ -463,7 +463,7 @@ VERDICT: FAIL   (PASS 11 / WARN 3 / FAIL 1)
 > ①P0「拥有 33 条」是 phase1（t45）的数字，t66 是 **48 条**；
 > ②P1「场次过碎 53%」phase1 是 45 拍里 24 拍，全量 65 拍是 **29 拍 = 44.6%**，且主因是**地点**不是时间；
 > ③P2「offstage_event 无任何 agent 读取」**是错的**，它有消费方，问题是被同一人反复重推脉死。
-> 逐条解法见 `_work/longrun-remediation.md`。
+> 逐条解法见 `_work/longrun-scale-discussion.md` 的 D 编号条目。
 
 | P | 缺口 | 机制位置 | 证据 | 建议方向 |
 |---|---|---|---|---|

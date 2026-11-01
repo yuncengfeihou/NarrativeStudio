@@ -31,7 +31,7 @@ body {
 h1, h2, h3, h4, h5, p, figure { margin: 0; }
 
 /* 展示层级：只给世界名与页面主标题，其余一律无衬线。 */
-.page-title, .wk-title, .world-name, .empty-title, .about-name,
+.wk-title, .world-name, .empty-title, .about-name,
 .mem-hero-title, .editor-title-input, .dialog-title {
   font-family: var(--font-display);
   font-weight: 600;
@@ -41,7 +41,7 @@ h1, h2, h3, h4, h5, p, figure { margin: 0; }
 .topbar-title, .subbar-title, .sheet-title, .group-title,
 .sect-title, .fgroup-label, .cast-name, .side-card-head, .branch-title,
 .pane-title, .settings-sec-title, .font-preview-title,
-.world-fact-v, .side-stat-v, .mem-card-value, .session-usage-value {
+.world-fact-v, .side-stat-v, .mem-card-value {
   font-family: var(--font-ui);
 }
 
@@ -127,7 +127,6 @@ code, kbd, pre { font-family: var(--font-mono); }
   border-radius: 2px;
   background: var(--accent);
 }
-.page-head .eyebrow { margin-bottom: 8px; }
 
 /* =========================================================================
  * 按钮 — 朱砂主钮保留釉面渐变；按压统一微缩放
