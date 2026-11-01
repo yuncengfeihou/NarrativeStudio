@@ -1068,13 +1068,13 @@ console.log('\n=== 12. 分段演绎：工具往返 + 演绎读数随回合落库
 {
   // 分段模式此前只有纯函数与假循环的覆盖，没有一条「runTurn → 落库」的端到端断言。
   // 这一块同时钉两件事：
-  //   ① 工具往返跑得通（第 1 轮调 technique_lookup，第 2 轮流式写正文定稿）；
-  //   ② 演绎读数（mode / rounds / tools / techniques）必须随回合落库——
-  //      不落库的话「这一拍查没查技法、调了几次工具」跑完就查不到，报告也无从统计。
+  //   ① 工具往返跑得通（第 1 轮调 codex_lookup，第 2 轮流式写正文定稿）；
+  //   ② 演绎读数（mode / rounds / tools）必须随回合落库——
+  //      不落库的话「这一拍调了几次工具、走了几轮」跑完就查不到，报告也无从统计。
   const NARRATIVE = '他张了张嘴，终究只说了一句「路上小心」。灯捻暗下去，屋里只剩雨声。';
   const handlers = {
     'fake-narrator': (body, nth) => (nth === 1
-      ? streamToolCall('technique_lookup', JSON.stringify({ query: '对白太直白', limit: 1 }), '先想一下怎么写')
+      ? streamToolCall('codex_lookup', JSON.stringify({ query: '无纹玉佩', limit: 1 }), '先查一下辞书')
       : streamReply('想好了', NARRATIVE)),
     'fake-archivist': () => '{"scene_change":{"changed":false}}',
     'fake-scene-keeper': () => JSON.stringify({
@@ -1101,7 +1101,7 @@ console.log('\n=== 12. 分段演绎：工具往返 + 演绎读数随回合落库
   ok(events.some((e) => e.type === 'draft_start'), '① SSE 上有 draft_start');
   ok(events.some((e) => e.type === 'draft_delta'), '① SSE 上有 draft_delta');
   const toolEvent = events.find((e) => e.type === 'tool_call');
-  eq(toolEvent?.name, 'technique_lookup', '① 工具事件带工具名');
+  eq(toolEvent?.name, 'codex_lookup', '① 工具事件带工具名');
   eq(toolEvent?.ok, true, '① 工具调用成功');
   ok(!events.some((e) => e.type === 'narration_fallback'), '① 没有回退单发');
 
@@ -1112,8 +1112,6 @@ console.log('\n=== 12. 分段演绎：工具往返 + 演绎读数随回合落库
   eq(narration?.mode, 'segmented', '② meta.narration.mode 落库（否则跑完就查不到用了什么模式）');
   eq(narration?.rounds, 2, '② 记下轮次');
   eq(narration?.tools, 1, '② 记下工具调用次数');
-  eq(narration?.techniques, ['dialogue-subtext'], '② 记下学到的技法 id（报告要能数「模型有没有在用技法库」）');
-  ok(!String(narr?.content || '').includes('【技法检索'), '② 技法文本没有漏进正文（工具结果只进当拍临时消息）');
 
   // 单发模式不该凭空多出这一块（meta 只记真实发生过的读数）。
   const plain = newSession('单发无读数');

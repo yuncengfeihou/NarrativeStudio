@@ -728,41 +728,21 @@ detectReplay({content, recent:[{turn_no,content}], min=REPLAY_MIN_CJK, window=RE
 // 旁白（分段演绎，P1-1 第一阶段；会话 settings.narration_mode='segmented' 才走）
 runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal })
 // -> {content, reasoning, usage, model, finishReason,
-//     narration:{mode:'segmented', rounds, tools, sealed, techniques?:string[]}}
-// 工具：draft_append / draft_edit / draft_seal / codex_lookup / recall_history / technique_lookup
-// techniques 是技法检索命中的条目 id（只作 meta 留痕；不进提示词、不进下一拍）。
+//     narration:{mode:'segmented', rounds, tools, sealed}}
+// 工具：draft_append / draft_edit / draft_seal / codex_lookup / recall_history
 // 工具结果只进当拍临时消息；总预算 config.narration.toolHistoryTokens（默认 1200）。
 // 上游不支持 tools 时由 orchestrator 回退 runNarrator（narration.fallback='segmented'）。
 // 演绎读数随回合落库：turns.meta_json.narration = 上面那对象（单发正常拍没有这个键）。
-// 「这一拍查了哪几条技法、调了几次工具」因此可离线统计，报告不必依赖实时 SSE。
+// 「这一拍调了几次工具、走了几轮」因此可离线统计，报告不必依赖实时 SSE。
+//
+// 2026-11-01 移除 `technique_lookup`（写作技法库）：实测 12 拍分段局自发调用 0 次，
+// 六工具 schema 每轮多付 591 tok；结论见 AGENTS §4.4。
 
 // 纯函数（便于单测）
 resolveNarrationMode(settings, defaultMode?) -> 'single'|'segmented'
 applyDraftEdit(draft, find, replace, {all?}) -> {text, changed, count}
 mergeToolCallDeltas(map, deltas) / parseToolArgs(raw) / mergeUsage(acc, next)
 trimToolHistory(messages, baseLen, budgetTokens) -> removed
-
-// 技法检索（server/world/techniques.js；P1，2026-11-01）
-// 「怎么写」的按需学习：模型判断要不要查，代码只做确定性检索。库是内置只读通用写法，
-// 不含任何世界卡内容；一次只取 1–2 条，结果只进当拍工具消息、当拍蒸发。
-// 与 craft.js（server/world/craft.js）分工：craft 是作者选的风格，进 system、会话内恒定。
-TECHNIQUES: {id, label, tags:string[], when, text}[]   // 15 条内置；techniques.test 校验 id 唯一、text ≤ TECHNIQUE_TEXT_MAX
-TECHNIQUE_TEXT_MAX = 120     // 单条正文字符上限（写长该拆两条）
-TECHNIQUE_MATCH_MAX = 3      // 一次最多返回几条
-techniqueTokens(query) -> string[]
-//   小写化后，CJK 连续段取二字组、拉丁词取 [a-z][a-z0-9_-]{1,}；
-//   高频虚词二字组（不知/知道/怎么/什么/时候…）不进匹配，否则「时间不知道怎么跳」会误命中「半揭示」。
-rankTechniques(query, {limit?}) -> [{...Technique, score}]
-//   按 label(3) / tags(2) / when(2) / id(2) 累加权重，text 不参与打分；score < 2 不进结果；
-//   同分按 id 排序（同输入必同样输出）；无命中返回 []（不是「最接近的一条」）。
-renderTechniques(entries, query) -> string
-//   无命中：`未匹配到与「q」相关的技法。按你现在的判断写，不要为了套技法改变这一拍的内容。`
-//   有命中：`【技法检索：q】` + `- 标签（何时用）：正文` + 「技法只约束写法，不改变这一拍发生什么」。
-//   调用方据此**不注入任何内容**：无命中时这段文本只是工具结果，不当指令用。
-techniqueChars(entry) -> number   // 预算侧核对用
-// 工具契约：technique_lookup({query, limit?:1-3}) —— query 必填，空则报错；结果带 techniques: string[]（id）
-//   只进当拍 tool 消息（受 config.narration.toolResultMaxTokens 截断），不写库、不进 turns/recent，
-//   不新增预算层（不占 §6.3 的任何一层配额）。
 
 // 史官（每轮后）
 runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, declaredTargets, signal, guard })
