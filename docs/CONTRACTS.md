@@ -150,8 +150,9 @@ branches { session_id, branch_id, parent_branch, fork_turn, status, note }
 narrator 行），却作为一条没有回应的 user 消息留在库里，只能靠 `_work/longrun-drive.mjs --repair`
 删行收拾。正文没产出的那一拍在账本上不该发生。`addTurn` 仍保留（测试与工具用），单行写入。
 
-**分支隔离**：`states / relations / threads / character_states / assertions / voices /
-scenes / world_state` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork：把分叉点仍有效的
+**分支隔离**：`states / relations / threads / relation_events / thread_events /
+character_states / assertions / voices / scenes / world_state / patches / effect_receipts`
+都带 `branch_id`（`notes` 是例外：按会话存、跨分支可见）。`forkSession()` 采用 copy-on-fork：把分叉点仍有效的
 状态复制到新分支，新分支不会读到旧线在分叉点之后写下的任何内容。
 
 **记录都是可回滚的（D33）**：`forkSession()` 从任意一轮开新线，`checkoutBranch()` 切回任意
@@ -180,7 +181,10 @@ scenes / world_state` 都带 `branch_id`。`forkSession()` 采用 copy-on-fork�
 **异步写入守卫**：旁路 Agent 在落库前用 `branchSnapshot()/isBranchCurrent()` 核对
 `branch_id + 回合水位`。`forkSessionSafe()` 在会话锁内 fork，`/rollback`、`/rewrite` 必须走它。
 
-### 记忆六表
+### 记忆与账本表
+
+前七张是「记忆六表 + 幂等回执」，其余是状态/笔记/关系线索/运行期配置/世界卡。
+带 `branch_id` 的按分支隔离（`notes` 例外）；`created_at` 各表都有，下面只在需要区分时列。
 
 ```sql
 scenes(session_id, branch_id, scene_id, level, turn_from, turn_to, when_label,
@@ -193,6 +197,23 @@ world_state(session_id, branch_id, entity_kind, entity_id, path, op, value_json,
             valid_from, valid_to, source, evidence)
 voices(session_id, branch_id, who, text, turn_no, kind, pinned)
 patches(session_id, branch_id, agent, kind, payload_json, evidence, status, severity, turn_no, applied_at)
+effect_receipts(session_id, branch_id, turn_no, agent, effect_id, fingerprint, status, attempt,
+                created_at, applied_at)   -- 幂等回执：status ∈ pending|applied|failed|stale，
+                                          -- UNIQUE(session_id,branch_id,effect_id)；fork 只复制
+                                          -- status='applied' 且 turn_no<=fork_turn 的回执
+states(session_id, branch_id, turn_no, state_json, created_at,
+       PRIMARY KEY (session_id, branch_id, turn_no))
+notes(id, session_id, content, kind DEFAULT 'note', turn_no, active, created_at)
+       -- 无 branch_id：按会话存、跨分支可见
+relations(id, session_id, branch_id, from_name, to_name, kind, sentiment, note,
+          turn_no, updated_at)                    -- 当前值（每对一行）
+relation_events(...同 relations + created_at)      -- 追加式历史
+threads(id, session_id, branch_id, title, status open|resolved|abandoned, weight,
+        planted_turn, resolved_turn, note, updated_at)
+thread_events(...同 threads + turn_no, created_at)
+meta(key PRIMARY KEY, value)                -- runtime_config_v1 / craft_config_v1 等运行期配置
+worlds(id, title, subtitle, cover_hue, tags_json, card_json, source_json, version,
+       created_at, updated_at)
 ```
 
 > **`summaries` 表已删除**（2026-10-24）。「一份滚动摘要」要求 1056:1 的压缩比，
@@ -217,7 +238,9 @@ ORDER BY pinned DESC, turn_no DESC, id DESC)` 在 SQL 里按人分区取前 N �
 
 **world_state 是运行期世界变化的唯一写入口**：`entity_kind` 为实体类型（`person` / `place` / `institution` / `item` / `faction` / `concept` / `custom`）或 `player | world`，
 `op` 为 `set | add | remove | introduce | delta`，路径白名单在 `server/world/state-paths.js`。
-身份根（id / name / identity / voice）不可写。`buildEffectiveWorld(cardSnapshot, deltas, fates)` 把
+身份根不可写：person 的 `id` / `name` / `identity` / `voice` 都不在白名单里；
+`player.identity` 是例外（在 `PLAYER_SCALARS` 里，作主角展示名，有消费方）。
+`buildEffectiveWorld(cardSnapshot, deltas, fates)` 把
 模板、增量与已解锁的成长阶段投影成当轮有效的世界（优先级：`world_state` > `fates` > 卡初始值）；
 上下文引擎只读投影结果，永远不把运行期状态写回 `card_json`。
 
@@ -237,8 +260,9 @@ ORDER BY pinned DESC, turn_no DESC, id DESC)` 在 SQL 里按人分区取前 N �
 
 **实体定义与运行态分离**：`summary / detail / facets.history` 是作者公理，已有事实实体运行期不可写
 （`FACT_CANON_PATHS`）；运行期只写 `status / condition / access / open_to / owner_id / location_id /
-reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summary / role / mood / goal / location / life_state`
-与 `voice / psyche / knowledge / agenda / relations` 的列表路径；`life_state` 只接受
+reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summary / role / mood / goal / location / status / condition / life_state`
+与列表路径（`knowledge.knows` / `knowledge.does_not_know` / `knowledge.believes_falsely` /
+`psyche.wants` / `psyche.fears` / `psyche.hides` / `psyche.values` / `aliases`）；`life_state` 只接受
 `LIFE_STATES` 里的四个值，代码据此判定死亡/离场（自由文本只作 `status` 展示）。
 新条目第一次 `introduce` 时可以一次写清定义。
 
@@ -288,14 +312,15 @@ reveal / facets.sensory` 与列表路径。人物（person）另外可写 `summa
 **玩家（kind=`player`）没有 `life_state`**（D14）：主角不会「这一场不在镜头里」，
 他离场整场戏就结束了；这条路径没有任何消费方（`absentees` 只挑 `type==='person'`），
 放行只会让 `card.player.life_state` 永久停在某个值。史官对玩家写它会因白名单拒绝
-并记 `patches(kind='skipped_targets')`。人物（person）的 `life_state` 不受影响。
+并记 `patches(kind='rejected_change', status='failed')`。人物（person）的 `life_state` 不受影响。
 
 **断言语义**：只有**单值谓词**（位于 / 是 / 曾经是）在「同主同谓、对象不同、有效期重叠」时
 把旧断言 `status='invalidated'` 并记 `valid_to`，**不删除**；多值谓词（知道 / 拥有 / 想要…）
 的多个对象可以并存。基数表在 `server/memory/predicates.js`。
 `getAssertions(atTurn)` 按时间点回溯，不过滤 status（只排除 retracted）。
 
-**受控词表**（`server/memory/predicates.js`，提示词 re-export）：
+**受控词表**：`PREDICATES` 在 `server/memory/predicates.js`；`STATE_FIELDS` / `LIFE_STATES` /
+`VISIBILITIES` 在 `server/prompts/archivist.js`（史官提示词直接从这里取，别处不要再抄一份）：
 
 ```js
 PREDICATES = ['知道','不知道','相信','想要','害怕','拥有','位于','属于',
@@ -484,8 +509,9 @@ import { assembleContext, buildSystemLayer, buildContract, selectFacts, renderKn
 // 原文窗口起点（装配层与检索层共读一个函数，不许各写一份规则）：
 //   overlapWindowFrom(sceneCoveredTo, turnNo, overlapTurns) -> recent_from
 //   recallVisibleFrom(...) 同签名同实现，语义是「检索不该搜上下文已经看得见的那几拍」。
-//   起点 = max(1, min(scene_to + 1, turnNo − overlap))：晚于 scene_to+1 是洞（违律），
-//   早于它是有意的重叠。写成 max 会随场长把当前场原文从中间切掉。
+//   起点只由场次边界决定：max(1, scene_to + 1 − overlap)（`covered + 1 - n`）。
+//   晚于 scene_to+1 是洞（违律），早于它是有意的重叠。
+//   写成 min(scene_to + 1, turnNo − overlap) 是 D16 缺陷：窗口每拍往后滑一条、缓存前缀作废。
 //
 // 走向版场记单的裁剪档位（D26，会话级开关，默认不变）：
 //   resolveBranchSheetTrim(settings) -> 'default' | 'core_only'
@@ -519,6 +545,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 // -> { messages,
 //      budget:{system,archive,summary,recent,scene,retrieval,current,total},   // 本轮**实际渲染**体积；summary 恒为 0（层已移除）
 //      state, ledger, anchor, recentTurns, branchSheet,
+//      card,   // 投影后的 EffectiveWorld；下游 Agent（史官/世界呼吸/走向）用它，不重新 normalizeCard
 //      craft,   // 本轮工艺配置（resolveCraft 的结果；走向 Agent 与正文共读 pacing，保证同尺度）
 //      meta:{present, mentioned, theme_tags, codex, codex_candidates,
 //            codex_rendered, codex_dropped, codex_brief_candidates,
@@ -530,20 +557,25 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //                   // 51 拍实测可见率 100% → 16.8%（216 条候选 → 渲染 27 条），
 //                   // 而场景层配额只用了 26%。两道闸互相遮蔽，只改一道看不出变化。
 //                   // 现在只剩「预算」一道：renderSceneSheet 不再 slice，facts 是可选段，
-//                   // 装不下按整条退让（meta.scene_sheet 记 kept/dropped_sections）。
+//                   // 装不下按整条退让（被整条丢掉的段名记在 meta 顶层的 dropped_sections）。
 //                   // 判据：facts_many_rendered 应随 scene 配额走；若它恒等于 10 或 24，就是回退了。
 //            relations_limit, relations_rendered,
 //                   // 关系段的渲染上限 = max(8, floor(scene 配额 × 15% ÷ 34.5))（D17）。
 //                   // 关系段只占场景层配额的 ~5%，所以上限远大于 8（200K 窗口下是 97）。
 //                   // 判据：relations_limit 若恒等于 8，就是回退成「写死条数」；旧会话没有这个字段。
 //            state_fixes, state_warnings,
+//            codex_total,           // 辞书条目总数（不含 person）
+//            world_state_changes,   // 本拍投影读到的 world_state 增量行数
 //            fates:{total, unlocked, omens},
 //            timeline_past, timeline_future_held,
 //            system_blocks:{timeline_past:{count, rendered, tokens, dropped, cap},
 //                           index:{total, rendered, muted, dropped, dropped_names[<=20],
 //                                  tokens, cap, mode:'tree'|'flat'},   // 世界索引覆盖率（事后统计，不参与注入）
-//                           craft:{preset, style, dialogue, tokens, dropped[], capped}},  // 工艺块落位与降级
-//            scene_sheet:{cast_mode:'full'|'compact'|'minimal', absentees:[{name,state}], rumors,
+//                           craft:{preset, style, dialogue, tokens, dropped[], capped,
+//                                  over_floor}},  // capped = 有丢弃或触底线；over_floor = 连底线都放不下
+//            scene_sheet:{cast_mode:'full'|'compact'|'minimal'|'*_trunc'|null,   // *_trunc = 三档都放不下后截断
+//                         absentees:[{name,state}], rumors,
+//                         voice_speakers, voice_lines, voice_present_covered,   // 原声段取数（D23）
 //                         branch_sheet:{trim, dropped_sections, tokens, full_tokens}},  // 走向版裁剪（D26）
 //            dropped_sections, branch,
 //            coverage:{summary_to /* = 场次覆盖边界，保留旧名 */, recent_from, recent_to, turns,
@@ -552,7 +584,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 //                      scene_index_dropped, scene_index_degraded},
 //            cache:{prefix_shared_tokens, prefix_shared_rate, first_divergence, system_hash,
 //                   drift:{verdict,index,char_offset,left_excerpt,right_excerpt,shared_messages,
-//                          prev_count,next_count}},
+//                          role_prev,role_next,prev_count,next_count}},
 //            summary: null, degraded, soft_max, hard_max,
 //            retrieval:{   // 资料员这一拍做了什么；**没出文本也留痕**（否则「没触发 / 触发了没查 /
 //                          // 查了没命中」三种状态全被抹成 null，比例失去分母）
@@ -586,7 +618,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 1. system   契约（含工艺块：通用底线 + 时间流速 [+ 预设文风/对白形态]）+ 命题 + 宪章 + 世界索引
             + 前史（canon=past）+ 主角 + 作者笔记（**只读模板快照，绝不读运行态**）
 2. user     【本局场次索引】一行一场，只追加
-3. …        当前场次逐字原文 = 上一场 turn_to + 1 起，到本轮之前（player/assistant 交替）
+3. …        当前场次逐字原文 = 上一场 turn_to + 1 − overlap 起，到本轮之前（player/assistant 交替）
 4. user     【刚才这一场怎么收的】最近 1–2 场细节
 5. user     场记单（T0 全量设定 + T1 一句邻域 + 在场者 voice + 断言 + 知识矩阵；每场变一次）
 6. user     【检索结果】（模型主动查阅的辞书全文，当拍蒸发）
@@ -602,7 +634,8 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 - `preset` / `dialogue` 只影响 system，必须**整会话恒定**（每拍可变会破坏 system 的缓存前缀）。
 - `pacing` 只进尾注与走向 Agent，可按拍不同语义使用；它同时决定 `branch` 选项的风险水位——
   narrator 推多少、branch 给多险的选项必须同尺度，否则「选项温和、正文翻盘」。
-- 工艺块受 system 预算约束，超了按 `floor → time → style → dialogue` 的**优先级**整条丢
+- 工艺块按固定 `capTokens = 1800`（craft.js）裁剪，不是吃 system 剩余预算；超了按
+  `floor → time → style → dialogue` 的**优先级**整条丢
   （阅读顺序仍是 底线→文风→对白→时间流速），绝不留半句；结果记 `meta.system_blocks.craft`。
   之所以允许丢：世界索引是 canon，工艺是可选的表达层——挤掉索引换文风是错的。
 
@@ -623,7 +656,8 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 落进某一层配额的可核对证据。
 
 `meta.plan` 是**本轮预算规划**（`server/memory/context-plan.js` 纯函数 `planContext()` 推导）：
-`window` 生效 narrator 模型窗口、`output_reserve` 生成预留（narrator.maxTokens，上限 window/4）、
+`window` 生效 narrator 模型窗口、`output_reserve` 生成预留（narrator.maxTokens；缺省
+`DEFAULT_OUTPUT_RESERVE=12000`，实际取 min(maxTokens, max(1000, window/4))）、
 `safety` 安全余量、`hard_max` 提示词硬上限 = window − output_reserve − safety、
 `soft_max` 软目标（`CONTEXT_SOFT_TOKENS=0` 时自动取 hard_max × 55%）、`auto_soft` 是否自动、
 `layers` 各层配额、`shares` 职责份额。换模型即换预算，**没有独立的 BUDGET_* env 常量**。
@@ -660,7 +694,7 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   （没有更早回合时 `recent_from` 为 null）。`overlap_turns <= coverage.overlap_limit`
   （= `RECENT_OVERLAP_TURNS`，默认 2）。封场那一刻不再把上一两拍原文清零——这是
   D1 封场尾巴，代价是原文与场次索引最多重叠 2 拍（约 soft 的 2%），换来
-  「切场后仍看得见上一拍怎么说话」。起点取 `min(scene_to + 1, turnNo − overlap)`：
+  「切场后仍看得见上一拍怎么说话」。起点取 `scene_to + 1 − overlap`（下限 1）：
   **晚于 `scene_to + 1` 才是洞**，早于它只是有意的重叠。原文窗口不做字符串裁剪。
 - **场次只追加、不互相改写**：每场只从自己的完整原文生成（`closeScene()`）。
 - **强制封场**：`SCENE_EVERY` 轮或 `SCENE_MAX_TOKENS` token 触发。只靠「地点变化」会让
@@ -677,7 +711,8 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
 - 辞书自动进场仍只有三条路（实体连接 / 主题标签 / 钉选）；`retrieval` 是模型发起的取证，
   不是第四条自动注入路径，代码不因文本匹配自动塞设定。
 - codex 条目按预估成本决定条数（`scene * 0.45 / 90`），高分优先，低分整条放弃。
-- 超预算降级：软目标内裁场次细节 → 裁场记单（原文窗口与场次索引不参与软目标裁剪）。
+- 超预算降级：软目标内裁场次细节 → 裁场记单（原文窗口与场次索引不参与软目标裁剪），
+  档位名 `degraded:['scene_detail'|'scene_sheet']`（软目标档没有 `_dropped` 后缀）。
   超硬上限（`meta.plan.hard_max`）先**整层**收窄：删场景细节 → 删场记单 → 删检索，
   记 `degraded:['scene_detail_dropped'|'scene_sheet_dropped'|'retrieval_dropped']`；
   仍超则默认 **fail-closed**：`assembleContext()` 抛 `CONTEXT_OVER_HARD_CAP`
@@ -688,10 +723,12 @@ const ctx = await assembleContext({ session, world, turnNo, playerText, images,
   （见 `meta.plan`）；会话 `settings.context_max_tokens` 只能**收紧**该上限
   （`hardMax = min(sessionMax, window − 生成预留 − 安全余量)`），不能突破生成预留；
   新建会话与 `settingsFromWorld()` 写入的 `context_max_tokens` 同样按该推导上限 clamped。
-- 各层配额 = 软目标 × 职责份额（system 32% / archive 30% / archiveDetail 6% / scene 22% /
-  retrieval 4% / current 6%）；`recent`（40%）只是强制封场的规划上限，**不裁原文**。
+- 各层配额 = clamp(软目标 × 职责份额, 层下限 LAYER_FLOORS[key], 硬上限)（system 32% / archive 30% /
+  archiveDetail 6% / scene 22% / retrieval 4% / current 6%）；`recent`（40%）只是强制封场的
+  规划上限，**不裁原文**。
 - system 层先为契约/宪章/主角/常驻作者笔记预留预算；世界索引与前史只吃剩余空间，
-  超了先砍索引、再丢最旧的前史行，绝不从尾部截断主角或作者笔记。
+  超了只截索引；前史另按 `pastCap = max(240, system 配额 × 10%)` 从最新往前取、塞不下的
+  旧行整条丢。绝不从尾部截断主角或作者笔记。
 - 场记单的可选段落按整条取舍（辞书/事实/关系少一条，不切半句）；`directive` 排在可选设定之前，
   并且逐轮 directive 同时进入尾注，避免被场记单预算丢掉。
 - 在场以账本 `present`（史官声明的镜头内人物）为准；旧会话没有 `present` 时退回 `characters`。
@@ -726,9 +763,10 @@ detectReplay({content, recent:[{turn_no,content}], min=REPLAY_MIN_CJK, window=RE
 //   分段模式（草稿已边写边上屏）只记录不重写。
 
 // 旁白（分段演绎，P1-1 第一阶段；会话 settings.narration_mode='segmented' 才走）
-runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal })
+runNarratorSegmented({ session, world, context, turnNo, options, onEvent, signal, recall, stream })
 // -> {content, reasoning, usage, model, finishReason,
-//     narration:{mode:'segmented', rounds, tools, sealed}}
+//     narration:{mode:'segmented', rounds, tools, sealed, empty?}}   // empty:true 只出现在空正文那一拍
+// recall = ({query, limit}) => 历史检索回调（recall_history 工具用）；stream = 流式调用注入点（测试用）。
 // 工具：draft_append / draft_edit / draft_seal / codex_lookup / recall_history
 // 工具结果只进当拍临时消息；总预算 config.narration.toolHistoryTokens（默认 1200）。
 // 上游不支持 tools 时由 orchestrator 回退 runNarrator（narration.fallback='segmented'）。
@@ -744,11 +782,16 @@ applyDraftEdit(draft, find, replace, {all?}) -> {text, changed, count}
 mergeToolCallDeltas(map, deltas) / parseToolArgs(raw) / mergeUsage(acc, next)
 trimToolHistory(messages, baseLen, budgetTokens) -> removed
 
+// 走向（每轮后，generateBranches 为真时）
+runBranchAgent({ world, state, recentNarrative, present, sceneSheet, craft = null, options = {}, signal })
+// -> {branches, scene_summary, usage}；3–4 条走向，只读投影卡与场记单，不写库。
+
 // 史官（每轮后）
 runArchivist({ session, world, turnNo, playerText, narrative, branchChoice, options, declaredTargets, signal, guard })
-// -> { applied:{assertions, assertions_invalidated, states, changes, relations, threads,
-//              threads_rejected, rejected_changes, voices, ledger, skipped},
-//      scene_change:{changed, when, place, place_id, weather, tension, present[]},
+// -> { applied:{assertions, assertions_invalidated, assertions_deduped, states, changes,
+//              relations, threads, threads_rejected, rejected_changes, voices, ledger,
+//              skipped, path_aliased, target_aliased},
+//      scene_change:{changed, reason, when, place, place_id, weather, tension, present[]},
 //      uncertain, usage, stale?, parse_failed?, retried? }
 // uncertain 只解析、不落库也不外发（D6）：它是史官的减压阀（允许「正文没明说，我不猜」），
 //   没有消费方。不要再把它写进 patches，也不要经 SSE memory 事件推给前端。
@@ -786,6 +829,9 @@ applyArchivistUpdate({ sessionId, branchId, turnNo, update, aliasIndex, playerNa
 //   混成一个 kind 报告就无法归因（AGENTS §5.3 D35）。
 //   与 `skipped_targets` 的分工：那条是「提案合法但目标没被 declaredTargets 声明」，
 //   这条是「提案本身不合法（op/kind/path/值）」，所以 status 是 `failed` 而不是 `skipped`。
+// 每条落库成功的 change 另写一条 `patches(agent='archivist', kind='world_change', status='applied',
+//   payload=change, evidence=<模型给的 evidence，截 120 字>)`：账本每一行都能追到是哪一拍、
+//   哪条提案写的（断言/状态/关系另有各自计入 `applied.*` 计数，不重复落 patch）。
 parseArchivistUpdate(content)     // 容错：整体 JSON → 正则提取 → 空形状降级
 // applyArchivistUpdate 的返回值除各计数外，还有 `applied.onstage: [{who, field, life_state}]`：
 //   本拍**真实写进去**的「谁在镜头里」证据（states / changes / 账本 present）。
@@ -880,8 +926,15 @@ reviveOnstageGone({ sessionId, branchId, turnNo, aliasIndex, entries })
 // -> [{who, from:'gone', to:'alive', via}]；落 setCharState + addWorldState +
 //    patches(kind='life_state_revived', payload.reason='onstage_state', payload.via=<字段>)
 // entries 由 applyArchivistUpdate 返回的 applied.onstage 提供（本拍真实写入的 who/field/life_state）。
-detectSceneChange(session, update, turnNo)                // 地点/时间/在场者变了就切
-runContinuity({ session, world, turnNo, signal, guard })  // -> {issues, healthy, applied, stale?}
+detectSceneChange(session, update, turnNo)
+// -> boolean。判据不是「地点/时间/在场者变了」这种概括，而是四条之一：
+//   ① 地点实质位移 isSubstantivePlaceShift(prevPlace, nextPlace)；
+//   ② when / when_label 变了；
+//   ③ 强制封场：turnNo - prev.turn_from + 1 >= SCENE_EVERY；
+//   ④ 本场原文 token > min(SCENE_MAX_TOKENS, plan.recent)。
+//   另有 minSceneTurns 闸门：拍数不够时不因 ① ② 切场。第二个参数 update 只作兼容位、未被使用。
+runContinuity({ session, world, turnNo, signal, guard })
+// -> {issues, healthy, applied, usage?, stale?, error?}   // 上游失败时给 error，不抛给回合
 // 单次 chat + responseFormat json_object，不调工具（工具是资料员 runLibrarian 的）。
 // 修法提案的落地逻辑抽成纯函数（D12）：
 applyContinuityFixes(sessionId, { branchId, turnNo, issues, threads, aliasIndex, playerName })
@@ -920,14 +973,22 @@ applyContinuityFixes(sessionId, { branchId, turnNo, issues, threads, aliasIndex,
 runLibrarian({ session, question, signal })               // -> {found, answer, citations, calls}
 // 工具：search_events / search_assertions / get_character_state / get_threads / get_scene /
 //       get_relations(who) / search_claims(subject,predicate)
-runWorldTick({ session, world, turnNo, signal, guard })   // -> {events, usage, stale?}
+runWorldTick({ session, world, turnNo, signal, guard })
+// -> {events, usage, stale?, error?}   // 上游失败给 error 且不抛：世界呼吸失败不该拦住回合
 // 候选 = pickOffstagePersons(entities, {presentIds, playerName, ledger, limit, recentCounts})。
 // recentCounts 来自最近 6 次推演已点名的 who → 每人被点过几次（runWorldTick 内部读 patches）。
 // 排序 = score − 0.12×次数（软轮转）：分数排序是静态的，不轮转时 8 次推演只会用到 7/55 人、
 // 同一批人的同一件旧事被反复渲染；但硬轮转（用过的排到队尾）会在第二次推演就把主角级人物
 // 整批挤出候选，世界呼吸不是发牌。软轮转的语义是「用多了才让位」。
 // 不做去重不删人：次数全相等时回到纯分数序，谁都不会被饿死。
-// 候选 ≤ limit 时不重排（小卡不该被打乱权重顺序）。
+// 候选一律 map → sort（score − 0.12×次数）→ slice(0, limit)，没有「小卡不重排」的特例。
+// 纯分数序与软轮转都不改候选集合，只改顺序。
+// 只写提案、不写账本：每条事件落一条 `patches(agent='world-tick', kind='offstage_event',
+//   status = visibility==='hidden' ? 'applied' : 'open', severity 同理 info|minor,
+//   payload = {who[], what, visibility, affects[], pressure}, evidence='第 N 轮幕后推演')`。
+//   `hidden` 事件当场算「已生效但不可见」，其余等后文引用（报告用 open/applied 区分）。
+//   它**不写 world_state、不进提示词**——世界呼吸的影响只能通过叙事被读到；无幕外候选时
+//   直接返回 `{events: []}` 且不发模型调用。
 
 // 成长曲线（server/world/fates.js，纯函数，不调模型）
 evaluateFates(card, { turnNo, ledger, assertions, relations, charStates })
@@ -948,7 +1009,7 @@ renderRecentScenes(scenes, capTokens)
 // -> {text, meta:{rendered}}  最近 1–2 场的 outcome / 细节 / 因果 / 钩子
 
 // 渲染前体检（server/memory/lint-state.js，纯函数）
-lintState({ ledger, present, assertions, scenes, turnNo })
+lintState({ ledger, present, assertions, scenes, turnNo, playerName, playerId })
 // -> {fixes, warnings, ledger, present}
 // 能确定性修的（死亡角色仍在场）就地修；修不了的作为 warnings 带到台面上。
 // 在副本上操作，不改调用方对象。
@@ -1034,9 +1095,10 @@ isBranchCurrent(snapshot) -> boolean
 guardOf(snapshot) -> () => boolean
 makeEffectId(agent, ...parts) -> string
 hashFingerprint(...parts) -> string（sha1；输入拼接后哈希，用于幂等指纹）
-runEffectOnce(snapshot, fn, { isStale? }) -> Promise<
-  { status: 'applied'|'stale'|'failed', result? } |
-  { skipped: 'applied'|'stale'|'conflict'|'pending', effect_id, fingerprint }>
+runEffectOnce(meta, fn, { isStale? }) -> Promise<
+  { skipped: boolean, status: 'applied'|'stale'|'failed'|'conflict'|'pending',
+    conflict?, result? }>
+// meta = { sessionId, branchId, turnNo, agent, effectId, fingerprint }（makeEffectId/hashFingerprint 造）
 // fn 正常返回 -> settleEffect('applied')；guard 失效/快照过时 -> 'stale'；抛错 -> settleEffect('failed') 后重新抛
 // 幂等回执（store.js）：claimEffect({sessionId,branchId,turnNo,agent,effectId,fingerprint})
 //   settleEffect(sessionId, effectId, {branchId,status,turnNo,agent})
@@ -1045,10 +1107,12 @@ runEffectOnce(snapshot, fn, { isStale? }) -> Promise<
 
 // 提案的人工确定性动作（server/memory/patch-apply.js，D36）
 applyPatchAction(sessionId, patchId, { branchId? })
-// -> { found:false, ok:false }                                  提案不存在（路由回 404）
+// -> { found:false, ok:false, status:'', reason:'patch_not_found' }   提案不存在（路由回 404）
 // -> { found:true, ok:true, status:'applied', already:true, fix_result }   幂等重复执行
 // -> { found:true, ok:true, status:'applied', fix_result:{action:'merge_alias', target,
 //      state:'applied', canonical:{id,name,type}, aliases:[…], runtime_duplicates:[…]} }
+// -> { found:true, ok:true, status:'applied', fix_result:{action:'merge_alias', target, state:'applied',
+//      canonical:{id,name}, aliases:[], note} }   两名同属一个实体：只补 note，不写别名
 // -> { found:true, ok:false, status:'failed', reason, fix_result:{…, reason} }
 //      reason ∈ kind_not_supported / need_two_names / both_in_card / neither_in_card
 // 只做确定性动作，目前只有 kind='alias'（合并别名）。判据写死在代码里：
@@ -1076,7 +1140,7 @@ smithCard({ dir, title, premise, concurrency, maxChapters, startAt, openingSeed,
 
 // 运行期模型配置（server/model-registry.js）
 AGENT_KEYS   // ['narrator','archivist','sceneKeeper','retrieval','continuity','librarian','worldTick','branch','cardSmith']
-EFFORTS      // ['low','medium','high']
+EFFORTS      // ['low','medium','high','xhigh','max']
 PROTOCOLS    // ['openai']（OpenAI 兼容的 /chat/completions）
 getEffectiveConfig() -> {source:'db'|'env', providers(masked), models, agents, context, env, options}
 // 视图永不含明文 apiKey：provider 只有 {apiKey:'', hasKey, keyHint}（末 4 位）；source='db' 表示有运行期配置
@@ -1087,7 +1151,8 @@ resolveAgent(agentKey) -> {key, source, modelId, model, providerId, baseUrl, api
                            effort, temperature, maxTokens, contextWindow, supportsReasoning, supportsTemperature}
 // 解析顺序：DB Agent 绑定 > .env（config.agents / config.upstream）> 内置默认；停用的模型/服务商回落 .env
 resolveContextWindow(agentKey = 'narrator') -> number    // 生效模型的上下文窗口
-resolveModelTarget({agent, model}) -> {baseUrl, apiKey, protocol, model, timeoutMs, maxRetries}
+resolveModelTarget({agent, model}) -> {baseUrl, apiKey, protocol, model, timeoutMs, maxRetries,
+                                       maxTokens, temperature, effort}
 // llm.js / /v1 透传用：显式 model 覆盖名字但保留 agent 绑定的传输目标；未绑定则回落 .env
 ```
 
@@ -1140,8 +1205,13 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 {type:'draft_done', turn_no, content, rounds, tools, sealed}
 {type:'tool_call', turn_no, round, name, ok, label}
 {type:'narration_fallback', mode:'segmented', reason}
-{type:'narrative_done', content, token_count, finish_reason, usage}
-{type:'narrative_reset', reason}
+{type:'narrative_done', turn_no, content, token_count, finish_reason, usage}
+{type:'narrative_reset', reason, message?}   // message 给阅读区展示（如「正在重写这一拍」）
+{type:'fork', branch, fork_turn}
+// 只在 /rewrite、/turns/:turnNo/rewrite-fragment、/turns/:turnNo/rebuild-memory 出现
+// （/rollback 返回 JSON，不开 SSE），
+// 在 turn_start 之前：先按 fork_turn 开新分支再演。branch 是新分支 id，fork_turn 是分叉水位
+// （新线可见回合到此为止，之后都是新写的）。旧线标 abandoned 但不删任何行（§数据模型·会话与回合）。
 {type:'memory', stats} / {type:'state', state, turn_no, player_view}
 // state 是完整账本，仅供导出/排查；player_view 是 player-view.js 的白名单投影
 // （{time, place, weather, present[]}，present 已归一为显示名）。场景信息条只读 player_view，
@@ -1172,11 +1242,12 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 // attempt/max 是「第几次 / 最多几次」（NARRATION_RETRY_MAX，默认 3）；reason 是归一后的原因。
 // 重发期间这一拍**一行都没落库**，前端只更新进度行文案，不要弹 toast、不要清空输入框。
 // 重试用尽或成功都会继续正常事件流；失败时走 {type:'error', …retryable:true}。
-{type:'error', message, aborted?, not_persisted?, retryable?, empty_narration?, transient_retries?}
+{type:'error', turn_no?, message, aborted?, not_persisted?, retryable?, empty_narration?, transient_retries?}
 // not_persisted：这一拍**一行都没落库**（上游连接断了 / 正文为空），前端可以把玩家那句话
 //   原样放回输入框重发。D31 起一回合的 player + narrator 两行是原子写入（addTurnPair），
 //   正文没产出就整拍回滚——不再有「player 行在、narrator 缺」的孤儿回合。
-// empty_narration：content 为空且关推理重试一次仍为空。同样整拍回滚，不落库空串。
+// empty_narration：content 为空、且同等级加倍预算重试一次仍为空（`llm.js` 只加预算、
+//   不动 `reasoningEffort`：降推理会直接压低正文质量）。同样整拍回滚，不落库空串。
 //   空串落库的后果是三重的：字数统计被拉低、重复率分母虚高、一条空 assistant 消息
 //   进下一拍 recent 层；下游账本（world_state/状态/断言/关系/原声）全 0 行，
 //   等于玩家说了句话没人应答。
@@ -1192,7 +1263,8 @@ recallSession({ sessionId, question }) / auditSession({ sessionId })
 ```
 GET    /api/config
        // -> {models:{default, reasoning_efforts}, defaults, limits, budget, budget_shares, narration,  ← 旧字段，按生效配置计算
-       //     runtime:{source:'db'|'env', providers(masked), models, agents, context, env, options}}
+       //     runtime:{source:'db'|'env', providers(masked), models, agents, context, env, options},
+       //     craft: craftCatalog()}   // 工艺三轴取值表（设置页与卡编辑器共读这一个接口）
        // budget / budget_shares：由 context-plan.js 从模型窗口推导的各层配额与职责份额（不是 env 常量）
        // limits：{context_max_tokens(=plan.hardMax), context_soft_tokens(=plan.softMax),
        //          context_window_tokens, context_output_reserve_tokens, narrator_max_tokens}
@@ -1206,19 +1278,20 @@ PUT    /api/config                        body:{providers, models, agents}（或
 DELETE /api/config                        -> {ok:true, runtime}   // 删除运行期配置，回到 .env 种子
 GET    /api/fonts                         -> {fonts, source}（服务端本机字体）
 GET    /api/worlds                        -> 摘要列表（顶层 persons[] / entity_count / fact_count）
-GET    /api/worlds/:id                    -> {world, card, entities, sessions}
+GET    /api/worlds/:id                    -> {...world, card, entities, sessions}   // 平铺，没有 world 键
                                           // entities[] 为全部实体（含 person 与 pinned/muted）
 GET    /api/worlds/:id/export             -> 纯文本
 GET    /api/worlds/:id/lint               -> {issues, counts}（结构检查 + 内容充分性 +
                                              blocker：parent_cycle / duplicate_id / future_leak；
                                              counts 含 bySeverity）
 POST   /api/worlds                        body:{id?, title?, card, source?}
+                                             // 缺 card 或 card.title -> 400 card.title is required
                                              // 保存前跑 lintCard；有 blocker -> 422
                                              // {error:{message, issues:[...]}}
 PATCH  /api/worlds/:id                     // 同上，blocker 拒绝保存（422）
 DELETE /api/worlds/:id
 POST   /api/worlds/:id/entities/:entityId/pin body:{pinned}   // -> {entities}；muted 随整卡保存
-POST   /api/worlds/:id/sessions           body:{anchor_id?, settings?}
+POST   /api/worlds/:id/sessions           body:{anchor_id?, title?, settings?}   // 未知 anchor -> 400
                                           // 工艺三轴（craft_preset / craft_dialogue / pacing）取值的
                                           // 优先级：本请求 settings > 这张卡最近一局的继承值 >
                                           // 卡级默认（card.craft，作者在编辑器「默认演绎工艺」里选）
@@ -1226,10 +1299,10 @@ POST   /api/worlds/:id/sessions           body:{anchor_id?, settings?}
                                           // 其余会话参数（context_max_tokens 等）不跨局继承。
 
 GET    /api/sessions?world_id=
-POST   /api/sessions                      body:{world_id?, anchor_id?, settings?}
+POST   /api/sessions                      body:{world_id?, anchor_id?, title?, settings?}   // 未知 world_id -> 404 world not found
                                           // settings 原样并入会话设置（工艺三轴会被归一）。
                                           // D26 实验开关：branch_sheet_trim:'default'|'core_only'
-GET    /api/sessions/:id                  -> {session, card, world, turns, state, playerView, usage, memoryStats}
+GET    /api/sessions/:id                  -> {session, world_version, card, world, turns, state, playerView, usage, memoryStats}
 PATCH  /api/sessions/:id                  body:{scene_directive?, title?, settings?}
                                           // settings 合并写入；narration_mode:'single'|'segmented'；
                                           // status_bar:'on'|'off'（场景信息条，默认 on）
@@ -1237,10 +1310,13 @@ PATCH  /api/sessions/:id                  body:{scene_directive?, title?, settin
                                           // 工艺三轴只校验已给的键，不把未涉及的轴写死。
 DELETE /api/sessions/:id
 GET    /api/sessions/:id/turns            ?from=&to=&limit=
+       // -> {turns, total, from, to, branch}；limit 默认 400、上限 2000
 GET    /api/sessions/:id/search           ?q=
-POST   /api/sessions/:id/turn             -> SSE  body:{playerText, images, branchChoice, directive, isOpening}
+       // -> {hits, query}；内部 LIMIT 120；**不按分支过滤**（全局检索，别拿它当「本线可见」口径）
+POST   /api/sessions/:id/turn             -> SSE  body:{playerText, images, branchChoice, directive, isOpening,
+                                                   generateBranches?}   // 默认 true；false 不发走向事件
 POST   /api/sessions/:id/opening          -> SSE
-POST   /api/sessions/:id/branches         -> {branches, scene_summary}
+POST   /api/sessions/:id/branches         -> {branches, scene_summary, usage}
 POST   /api/sessions/:id/rewrite          -> SSE（自动开新分支）
        body:{turn_no, guidance?, generateBranches?, target?}
        // target 缺省 = 整拍重演（旧行为）。带 target 是**定点改稿**：{start, end, expect}
@@ -1263,8 +1339,9 @@ POST   /api/sessions/:id/turns/:turnNo/rewrite-fragment  -> SSE（片段模式�
 POST   /api/sessions/:id/turns/:turnNo/rebuild-memory  -> SSE（正文不动，只重跑记忆）
        // 不调 narrator：把这一拍现有 narrator 正文当定稿，开新分支后跑史官 + 场记判据。
        // 补的是「PATCH /turns 改字不重跑记忆」那一半；结束时发 {type:'rebuild_memory', turn_no, source_turn}。
-POST   /api/sessions/:id/rollback         body:{turn_no}   -> 新分支
-GET    /api/sessions/:id/branches         -> {branches, current, turn_count}
+POST   /api/sessions/:id/rollback         body:{turn_no} -> {branch_id, fork_turn, turn_no, memoryStats}
+       // 返回 JSON，不开 SSE；turn_no 可为 0（回到开局前）；缺/非法 400
+GET    /api/sessions/:id/branches         -> {branches, current, turn_count, error?, degraded?}
        // 每条线带自己的 turn_count（按祖先链算的可见回合数）与 is_current。
        // 不能拿 sessions.turn_count 顶：那是缓存，换线后停在旧线的数字上。
 POST   /api/sessions/:id/checkout         body:{branch_id} -> {branch_id, switched, from, turn_count, memoryStats}
@@ -1275,17 +1352,18 @@ POST   /api/sessions/:id/checkout         body:{branch_id} -> {branch_id, switch
 PATCH  /api/sessions/:id/branches/:branchId body:{note} -> {branch_id, note, fork_turn, status}
        // 命名存档点：只改 branches.note（给人看的索引），不新建分支、不动回合、不改可见回合数。
        // note 必填（空字符串 = 清除名字），最多 60 字；未知会话/未知线 404，缺 note 或超长 400。
-POST   /api/sessions/:id/canonize         body:{title?, anchor_label?, opening_seed?} -> 新世界卡
+POST   /api/sessions/:id/canonize         body:{id?, title?, anchor_label?, opening_seed?}
+       // -> 201 新世界卡；id 已存在 -> 409 {code:'world id already exists'}
 
-GET    /api/sessions/:id/memory           -> 完整统计
-GET    /api/sessions/:id/assertions       ?subject=
+GET    /api/sessions/:id/memory           -> 完整统计；记忆整理失败时 {error, degraded:true}（字段不全，面板要容错）
+GET    /api/sessions/:id/assertions       ?subject=&all=1   // all=1 连 invalidated 一起返回（默认只 active）
 POST   /api/sessions/:id/assertions       body:{subject, predicate, object, visibility?}
 DELETE /api/sessions/:id/assertions/:id
 GET    /api/sessions/:id/states
 PUT    /api/sessions/:id/state            body:{state, turn_no?}
 GET    /api/sessions/:id/scenes
 GET    /api/sessions/:id/threads
-GET    /api/sessions/:id/world-state      ?at_turn= -> 本局世界线增量
+GET    /api/sessions/:id/world-state      ?at_turn= -> {branch, world_version, changes}   // 本局世界线增量
 GET    /api/sessions/:id/voices           ?limit= -> { voices, total }
 // limit 默认 100（夹在 1..500）；total 是全量行数，不受 limit 影响。
 // 面板的「台词样本 N」必须用 total：用列表长度会在 234 条样本上显示 100 而看不出被截断。
@@ -1301,6 +1379,7 @@ GET    /api/sessions/:id/patches          ?status=&kind=&limit=
 // 这类流水、校勘每 10 拍才写几次矛盾），混在一起时列表被高频类占满，
 // 面板无法区分「没有矛盾」和「矛盾被截断在 100 条之外」。
 POST   /api/sessions/:id/patches/:id/resolve  body:{status:'applied'|'dismissed'}
+       // 非法或缺 status -> 静默按 dismissed 处理（不写 applied，避免被当成「已执行」）
 // 只改状态，**不执行任何修复**。语义是「作者认可/忽略这条提案」。
 // 「认可」与「执行」是两件事：对 alias 这类「同一实体两个名字」的提案，
 // 点了 accepted 之后账本里两个名字依然各写各的（曾长期如此，界面显示已处理、世界没变）。
@@ -1310,7 +1389,7 @@ POST   /api/sessions/:id/patches/:id/apply   body:{} -> { ok, status, already?, 
 // -> 200 { ok:true, status:'applied', fix_result:{ canonical:{id,name,type}, aliases[], runtime_duplicates[] } }
 // -> 200 { ok:true, status:'applied', already:true }  幂等：重复执行不重复写别名
 // -> 404 patch 不存在
-// -> 400 { error:{ message, code } }  code ∈
+// -> 400 { error:{ message, code, patch } }  code ∈
 //      'kind_not_supported'（该类提案没有确定性动作）
 //      'need_two_names'（subject 拆不出两个名字）
 //      'both_in_card'（两个名字在卡里分属不同实体——真·两名冲突，猜错不可逆）
@@ -1324,7 +1403,7 @@ POST   /api/sessions/:id/notes            body:{content, kind}
 PATCH  /api/sessions/:id/notes/:id
 DELETE /api/sessions/:id/notes/:id
 POST   /api/sessions/:id/audit            -> 校勘报告
-POST   /api/sessions/:id/recall           body:{question} -> {found, answer, citations}
+POST   /api/sessions/:id/recall           body:{question} -> {found, answer, citations, calls}
 POST   /api/sessions/:id/recall-history   body:{query, limit?, kinds?, at_turn?} -> {query, hits, text, meta}
 PATCH  /api/sessions/:id/turns/:turnNo    body:{kind?:'player'|'narrator', content}
                                           // 手工改正文（红线 4 的唯一例外）。缺省 kind='narrator'；
@@ -1335,10 +1414,15 @@ PATCH  /api/sessions/:id/turns/:turnNo    body:{kind?:'player'|'narrator', conte
 
 GET    /api/presets / GET /api/presets/:id
 POST   /api/presets                       body:{id, card}（只接受 v5 卡）
+       // 缺 id/card -> 400；卡里有 blocker -> 422
 POST   /api/presets/:id/import
 GET    /api/smith/materials
-POST   /api/smith/preview                 -> SSE  body:{dir, title, premise, max_chapters}
-POST   /api/smith/save                    body:{id?, card}
+POST   /api/smith/preview                 -> SSE  body:{dir, title, premise, max_chapters,
+                                                   concurrency?, start_at?, opening_seed?, player?}
+// 事件：{type:'progress', done, total, chapter, cached?}（每章抽取完一次，cached=true 表示命中
+// 进程内缓存）；结束 {type:'done', card, stats}；失败 {type:'error', message}；心跳 {type:'ping'}。
+// 只读素材、不落库，写入走 /api/smith/save。
+POST   /api/smith/save                    body:{id?, card}   // 缺 card 400；id 已存在且未覆盖 409
 ```
 
 ### OpenAI 兼容层（`/v1`，`server/routes/openai.js`）
@@ -1347,8 +1431,8 @@ POST   /api/smith/save                    body:{id?, card}
 
 ```
 GET  /v1/models            -> {object:'list', data:[…]}
-                            // 运行期配置里 enabled 的模型 + 两个 roleplay 虚拟模型
-                            // ('roleplay-narrator' / 'roleplay-branch')，按 id 去重
+                            // 运行期配置里 enabled 的模型 + 三个虚拟模型
+                            // ('roleplay-narrator' / 'roleplay-branch' / 'step-router-v1')，按 id 去重
 POST /v1/chat/completions
   无 session_id  -> 透传上游（流式直接 pipe SSE，不经过 chatStream）
                     // sanitizeBody() 负责剥掉本项目自定义字段：
